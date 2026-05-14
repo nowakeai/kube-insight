@@ -1,0 +1,90 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "api",
+        "namespace": "default",
+        "uid": "sa-api-core"
+      }
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "name": "api-reader",
+        "namespace": "default",
+        "uid": "role-api-reader"
+      },
+      "rules": [
+        {
+          "apiGroups": [""],
+          "resources": ["pods", "secrets"],
+          "verbs": ["get", "list", "watch"]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "name": "api-reader-binding",
+        "namespace": "default",
+        "uid": "rolebinding-api-reader"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "api-reader"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "api",
+          "namespace": "default"
+        },
+        {
+          "kind": "Group",
+          "name": "developers"
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "name": "view-secrets",
+        "uid": "clusterrole-view-secrets"
+      },
+      "rules": [
+        {
+          "apiGroups": [""],
+          "resources": ["secrets"],
+          "verbs": ["get", "list"]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "name": "view-secrets-binding",
+        "uid": "clusterrolebinding-view-secrets"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "view-secrets"
+      },
+      "subjects": [
+        {
+          "kind": "User",
+          "name": "ops@example.invalid"
+        }
+      ]
+    }
+  ]
+}

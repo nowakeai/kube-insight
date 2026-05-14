@@ -1,0 +1,8 @@
+/kube-insight
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+coverage.out
+testdata/generated/

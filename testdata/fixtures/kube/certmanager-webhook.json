@@ -1,0 +1,210 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "cert-manager.io/v1",
+      "kind": "Issuer",
+      "metadata": {
+        "name": "app-issuer",
+        "namespace": "payments",
+        "uid": "uid-issuer-app"
+      },
+      "spec": {
+        "ca": {
+          "secretName": "app-ca"
+        }
+      }
+    },
+    {
+      "apiVersion": "cert-manager.io/v1",
+      "kind": "Certificate",
+      "metadata": {
+        "name": "api-cert",
+        "namespace": "payments",
+        "uid": "uid-cert-api"
+      },
+      "spec": {
+        "dnsNames": [
+          "api.example.invalid"
+        ],
+        "issuerRef": {
+          "group": "cert-manager.io",
+          "kind": "Issuer",
+          "name": "app-issuer"
+        },
+        "privateKeySecretRef": {
+          "name": "api-tls-private-key"
+        },
+        "secretName": "api-tls"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "DoesNotExist"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "cert-manager.io/v1",
+      "kind": "CertificateRequest",
+      "metadata": {
+        "name": "api-cert-req",
+        "namespace": "payments",
+        "uid": "uid-certreq-api",
+        "ownerReferences": [
+          {
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "Certificate",
+            "name": "api-cert",
+            "uid": "uid-cert-api"
+          }
+        ]
+      },
+      "spec": {
+        "certificateRef": {
+          "name": "api-cert"
+        },
+        "issuerRef": {
+          "group": "cert-manager.io",
+          "kind": "Issuer",
+          "name": "app-issuer"
+        }
+      }
+    },
+    {
+      "apiVersion": "acme.cert-manager.io/v1",
+      "kind": "Order",
+      "metadata": {
+        "name": "api-cert-order",
+        "namespace": "payments",
+        "uid": "uid-order-api",
+        "ownerReferences": [
+          {
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "CertificateRequest",
+            "name": "api-cert-req",
+            "uid": "uid-certreq-api"
+          }
+        ]
+      },
+      "spec": {
+        "requestRef": {
+          "name": "api-cert-req"
+        }
+      }
+    },
+    {
+      "apiVersion": "acme.cert-manager.io/v1",
+      "kind": "Challenge",
+      "metadata": {
+        "name": "api-cert-http-01",
+        "namespace": "payments",
+        "uid": "uid-challenge-api",
+        "ownerReferences": [
+          {
+            "apiVersion": "acme.cert-manager.io/v1",
+            "kind": "Order",
+            "name": "api-cert-order",
+            "uid": "uid-order-api"
+          }
+        ]
+      },
+      "spec": {
+        "orderRef": {
+          "name": "api-cert-order"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "cert-manager-webhook",
+        "namespace": "cert-manager",
+        "uid": "uid-svc-cert-manager-webhook"
+      },
+      "spec": {
+        "ports": [
+          {
+            "port": 443,
+            "targetPort": 10250
+          }
+        ],
+        "selector": {
+          "app.kubernetes.io/name": "webhook"
+        }
+      }
+    },
+    {
+      "apiVersion": "admissionregistration.k8s.io/v1",
+      "kind": "ValidatingWebhookConfiguration",
+      "metadata": {
+        "name": "cert-manager-webhook",
+        "uid": "uid-vwc-cert-manager"
+      },
+      "webhooks": [
+        {
+          "name": "webhook.cert-manager.io",
+          "clientConfig": {
+            "service": {
+              "name": "cert-manager-webhook",
+              "namespace": "cert-manager",
+              "path": "/validate"
+            },
+            "caBundle": "REDACTED_FIXTURE_CA_BUNDLE"
+          }
+        }
+      ]
+    },
+    {
+      "apiVersion": "admissionregistration.k8s.io/v1",
+      "kind": "MutatingWebhookConfiguration",
+      "metadata": {
+        "name": "cert-manager-webhook",
+        "uid": "uid-mwc-cert-manager"
+      },
+      "webhooks": [
+        {
+          "name": "webhook.cert-manager.io",
+          "clientConfig": {
+            "service": {
+              "name": "cert-manager-webhook",
+              "namespace": "cert-manager",
+              "path": "/mutate"
+            },
+            "caBundle": "REDACTED_FIXTURE_CA_BUNDLE"
+          }
+        }
+      ]
+    },
+    {
+      "apiVersion": "events.k8s.io/v1",
+      "kind": "Event",
+      "metadata": {
+        "name": "api-cert-issued",
+        "namespace": "payments",
+        "uid": "uid-event-cert-issued"
+      },
+      "reason": "Issuing",
+      "type": "Normal",
+      "note": "Issuing certificate as Secret does not exist",
+      "regarding": {
+        "apiVersion": "cert-manager.io/v1",
+        "kind": "Certificate",
+        "namespace": "payments",
+        "name": "api-cert",
+        "uid": "uid-cert-api"
+      },
+      "related": {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "namespace": "payments",
+        "name": "api-tls"
+      }
+    }
+  ]
+}

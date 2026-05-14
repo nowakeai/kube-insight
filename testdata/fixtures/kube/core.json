@@ -1,0 +1,136 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {"name": "node-a", "uid": "node-a-uid", "resourceVersion": "10"},
+      "status": {
+        "conditions": [
+          {"type": "Ready", "status": "True"},
+          {"type": "MemoryPressure", "status": "False"},
+          {"type": "DiskPressure", "status": "False"},
+          {"type": "PIDPressure", "status": "False"}
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {"name": "api", "namespace": "default", "uid": "sa-api-core"},
+      "imagePullSecrets": [{"name": "api-registry"}],
+      "secrets": [{"name": "api-token"}]
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Pod",
+      "metadata": {
+        "name": "api-0",
+        "namespace": "default",
+        "uid": "pod-api-0",
+        "resourceVersion": "20",
+        "labels": {"app.kubernetes.io/name": "api"}
+      },
+      "spec": {
+        "nodeName": "node-a",
+        "serviceAccountName": "api",
+        "imagePullSecrets": [{"name": "api-registry"}],
+        "volumes": [
+          {"name": "config", "configMap": {"name": "api-config"}},
+          {"name": "credentials", "secret": {"secretName": "api-secret"}},
+          {"name": "data", "persistentVolumeClaim": {"claimName": "api-data"}}
+        ],
+        "containers": [
+          {
+            "name": "app",
+            "image": "registry.example.invalid/api:v1.2.3",
+            "envFrom": [{"configMapRef": {"name": "api-config"}}],
+            "env": [
+              {"name": "TOKEN", "valueFrom": {"secretKeyRef": {"name": "api-secret", "key": "token"}}}
+            ]
+          }
+        ]
+      },
+      "status": {"phase": "Running", "podIP": "10.0.0.10"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {"name": "api", "namespace": "default", "uid": "svc-api", "resourceVersion": "30"},
+      "spec": {"selector": {"app.kubernetes.io/name": "api"}, "ports": [{"port": 80, "targetPort": 8080}]}
+    },
+    {
+      "apiVersion": "discovery.k8s.io/v1",
+      "kind": "EndpointSlice",
+      "metadata": {
+        "name": "api-abc",
+        "namespace": "default",
+        "uid": "eps-api",
+        "resourceVersion": "40",
+        "labels": {"kubernetes.io/service-name": "api"}
+      },
+      "endpoints": [
+        {
+          "conditions": {"ready": true, "serving": true, "terminating": false},
+          "targetRef": {"kind": "Pod", "namespace": "default", "name": "api-0", "uid": "pod-api-0"}
+        }
+      ]
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Secret",
+      "metadata": {"name": "api-secret", "namespace": "default", "uid": "secret-api"},
+      "data": {"password": "real-password", "token": "real-token"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Secret",
+      "metadata": {"name": "api-registry", "namespace": "default", "uid": "secret-api-registry"},
+      "data": {".dockerconfigjson": "real-registry-config"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Secret",
+      "metadata": {"name": "api-token", "namespace": "default", "uid": "secret-api-token"},
+      "data": {"token": "real-service-account-token"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ConfigMap",
+      "metadata": {"name": "api-config", "namespace": "default", "uid": "cm-api"},
+      "data": {"config.yaml": "sensitive-ish fixture data"}
+    },
+    {
+      "apiVersion": "storage.k8s.io/v1",
+      "kind": "StorageClass",
+      "metadata": {"name": "fast", "uid": "sc-fast"},
+      "provisioner": "example.invalid/provisioner"
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "PersistentVolume",
+      "metadata": {"name": "pv-api-data", "uid": "pv-api-data"},
+      "spec": {
+        "storageClassName": "fast",
+        "claimRef": {"kind": "PersistentVolumeClaim", "namespace": "default", "name": "api-data", "uid": "pvc-api-data"}
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "PersistentVolumeClaim",
+      "metadata": {"name": "api-data", "namespace": "default", "uid": "pvc-api-data"},
+      "spec": {"storageClassName": "fast", "volumeName": "pv-api-data"}
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Event",
+      "metadata": {"name": "api-event", "namespace": "default", "uid": "event-api"},
+      "type": "Warning",
+      "reason": "BackOff",
+      "message": "Back-off restarting failed container app",
+      "count": 3,
+      "involvedObject": {"kind": "Pod", "namespace": "default", "name": "api-0", "uid": "pod-api-0"}
+    }
+  ]
+}

@@ -264,10 +264,12 @@ where (? = '' or c.name = ?)
 
 func (s *Store) searchLatestHits(ctx context.Context, opts EvidenceSearchOptions, terms []string) ([]evidenceSearchHit, error) {
 	query := `
-select li.object_id, li.doc
+select li.object_id, cast(b.data as text)
 from latest_index li
 join clusters c on c.id = li.cluster_id
 join object_kinds ok on ok.id = li.kind_id
+join versions v on v.id = li.latest_version_id
+join blobs b on b.digest = v.blob_ref
 where (? = '' or c.name = ?)
   and (? = '' or ok.kind = ?)
   and (? = '' or coalesce(li.namespace, '') = ?)

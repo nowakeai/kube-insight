@@ -5,6 +5,9 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"time"
+
+	charmlog "charm.land/log/v2"
 )
 
 type Config struct {
@@ -24,28 +27,44 @@ func New(w io.Writer, cfg Config) (*slog.Logger, error) {
 	if err != nil {
 		return nil, err
 	}
-	opts := &slog.HandlerOptions{Level: level}
-	switch strings.ToLower(strings.TrimSpace(cfg.Format)) {
+	formatter, err := parseFormatter(cfg.Format)
+	if err != nil {
+		return nil, err
+	}
+	handler := charmlog.NewWithOptions(w, charmlog.Options{
+		Level:           level,
+		Formatter:       formatter,
+		ReportTimestamp: true,
+		TimeFormat:      time.RFC3339,
+		TimeFunction:    charmlog.NowUTC,
+	})
+	return slog.New(handler), nil
+}
+
+func parseFormatter(value string) (charmlog.Formatter, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "text":
-		return slog.New(slog.NewTextHandler(w, opts)), nil
+		return charmlog.TextFormatter, nil
 	case "json":
-		return slog.New(slog.NewJSONHandler(w, opts)), nil
+		return charmlog.JSONFormatter, nil
+	case "logfmt":
+		return charmlog.LogfmtFormatter, nil
 	default:
-		return nil, fmt.Errorf("unsupported log format %q", cfg.Format)
+		return charmlog.TextFormatter, fmt.Errorf("unsupported log format %q", value)
 	}
 }
 
-func parseLevel(value string) (slog.Level, error) {
+func parseLevel(value string) (charmlog.Level, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "info":
-		return slog.LevelInfo, nil
+		return charmlog.InfoLevel, nil
 	case "debug":
-		return slog.LevelDebug, nil
+		return charmlog.DebugLevel, nil
 	case "warn", "warning":
-		return slog.LevelWarn, nil
+		return charmlog.WarnLevel, nil
 	case "error":
-		return slog.LevelError, nil
+		return charmlog.ErrorLevel, nil
 	default:
-		return slog.LevelInfo, fmt.Errorf("unsupported log level %q", value)
+		return charmlog.InfoLevel, fmt.Errorf("unsupported log level %q", value)
 	}
 }

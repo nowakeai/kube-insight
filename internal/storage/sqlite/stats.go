@@ -14,6 +14,8 @@ type Stats struct {
 	APIResources                   int64            `json:"api_resources"`
 	Objects                        int64            `json:"objects"`
 	DeletedObjects                 int64            `json:"deleted_objects"`
+	Observations                   int64            `json:"observations"`
+	UnchangedObservations          int64            `json:"unchanged_observations"`
 	Versions                       int64            `json:"versions"`
 	Blobs                          int64            `json:"blobs"`
 	Facts                          int64            `json:"facts"`
@@ -63,6 +65,8 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		{&out.APIResources, `select count(*) from api_resources`},
 		{&out.Objects, `select count(*) from objects`},
 		{&out.DeletedObjects, `select count(*) from objects where deleted_at is not null`},
+		{&out.Observations, `select count(*) from object_observations`},
+		{&out.UnchangedObservations, `select count(*) from object_observations where not content_changed`},
 		{&out.Versions, `select count(*) from versions`},
 		{&out.Blobs, `select count(*) from blobs`},
 		{&out.Facts, `select count(*) from object_facts`},
@@ -180,8 +184,10 @@ func (s *Store) addFilterDecisionStats(ctx context.Context, out *Stats) error {
 	return s.db.QueryRowContext(ctx, `
 select count(*)
 from latest_index li
+join versions v on v.id = li.latest_version_id
+join blobs b on b.digest = v.blob_ref
 join object_kinds ok on ok.id = li.kind_id
-where ok.kind = 'Secret' and (li.doc like '%"data":%' or li.doc like '%"stringData":%')`).Scan(&out.SecretPayloadViolations)
+where ok.kind = 'Secret' and (cast(b.data as text) like '%"data":%' or cast(b.data as text) like '%"stringData":%')`).Scan(&out.SecretPayloadViolations)
 }
 
 func (s *Store) addOffsetLag(ctx context.Context, out *Stats) error {

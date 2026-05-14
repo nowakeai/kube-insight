@@ -31,6 +31,7 @@ func queryCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra
 	cmd.AddCommand(sqlSchemaCommand(ctx, stdout, state))
 	cmd.AddCommand(sqlQueryCommand(ctx, stdout, state))
 	cmd.AddCommand(object)
+	cmd.AddCommand(historyCommand(ctx, stdout, state))
 	cmd.AddCommand(investigateServiceCommand(ctx, stdout, state))
 	cmd.AddCommand(searchEvidenceCommand(ctx, stdout, state))
 	cmd.AddCommand(topologyCommand(ctx, stdout, state))
@@ -89,6 +90,69 @@ func objectQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) 
 	cmd.Flags().StringVar(&from, "from", "", "Start time, RFC3339 or YYYY-MM-DD")
 	cmd.Flags().StringVar(&to, "to", "", "End time, RFC3339 or YYYY-MM-DD")
 	cmd.Flags().IntVar(&opts.MaxVersionsPerObject, "max-versions-per-object", 0, "Maximum proof versions")
+	return cmd
+}
+
+func historyCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
+	var target sqlite.ObjectTarget
+	var from, to string
+	var opts sqlite.ObjectHistoryOptions
+	cmd := &cobra.Command{
+		Use:     "history",
+		Aliases: []string{"observations"},
+		Short:   "Query object content versions and observation history.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := loadRuntimeConfig(cmd, state, "", false)
+			if err != nil {
+				return err
+			}
+			runCtx, _, err := runtimeContext(ctx, cmd.ErrOrStderr(), rt)
+			if err != nil {
+				return err
+			}
+			target.Namespace = namespaceForCommand(cmd, state, rt, target.Namespace)
+			if from != "" {
+				opts.From, err = parseInvestigationTime(from)
+				if err != nil {
+					return fmt.Errorf("--from: %w", err)
+				}
+			}
+			if to != "" {
+				opts.To, err = parseInvestigationTime(to)
+				if err != nil {
+					return fmt.Errorf("--to: %w", err)
+				}
+			}
+			if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
+				return fmt.Errorf("--from must be before --to")
+			}
+			dbPath, err := requiredDBPath(cmd, state, rt, "query history")
+			if err != nil {
+				return err
+			}
+			store, err := sqlite.OpenReadOnly(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			history, err := store.ObjectHistory(runCtx, target, opts)
+			if err != nil {
+				return err
+			}
+			return writeJSON(stdout, history)
+		},
+	}
+	opts.IncludeDiffs = true
+	cmd.Flags().StringVar(&target.ClusterID, "cluster", "", "Cluster ID")
+	cmd.Flags().StringVar(&target.UID, "uid", "", "Object UID")
+	cmd.Flags().StringVar(&target.Kind, "kind", "", "Object kind")
+	cmd.Flags().StringVar(&target.Name, "name", "", "Object name")
+	cmd.Flags().StringVar(&from, "from", "", "Start time, RFC3339 or YYYY-MM-DD")
+	cmd.Flags().StringVar(&to, "to", "", "End time, RFC3339 or YYYY-MM-DD")
+	cmd.Flags().IntVar(&opts.MaxVersions, "max-versions", 50, "Maximum retained content versions")
+	cmd.Flags().IntVar(&opts.MaxObservations, "max-observations", 100, "Maximum observation rows")
+	cmd.Flags().BoolVar(&opts.IncludeDocs, "include-docs", false, "Include full retained JSON documents")
+	cmd.Flags().BoolVar(&opts.IncludeDiffs, "diffs", true, "Include diffs between returned versions")
 	return cmd
 }
 

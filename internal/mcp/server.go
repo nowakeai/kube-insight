@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"time"
 
 	"kube-insight/internal/storage/sqlite"
@@ -61,6 +62,20 @@ type healthArguments struct {
 	Limit      int    `json:"limit,omitempty"`
 }
 
+type historyArguments struct {
+	ClusterID       string `json:"cluster,omitempty"`
+	UID             string `json:"uid,omitempty"`
+	Kind            string `json:"kind,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	Name            string `json:"name,omitempty"`
+	From            string `json:"from,omitempty"`
+	To              string `json:"to,omitempty"`
+	MaxVersions     int    `json:"maxVersions,omitempty"`
+	MaxObservations int    `json:"maxObservations,omitempty"`
+	IncludeDocs     bool   `json:"includeDocs,omitempty"`
+	Diffs           *bool  `json:"diffs,omitempty"`
+}
+
 type toolContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
@@ -85,10 +100,70 @@ func ServeStdio(ctx context.Context, in io.Reader, out io.Writer, opts ServerOpt
 	return server.ServeStdio(ctx, in, out)
 }
 
+func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) error {
+	if listen == "" {
+		listen = "127.0.0.1:8090"
+	}
+	server, err := NewServer(opts)
+	if err != nil {
+		return err
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "http"})
+	})
+	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeHTTPJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		response, ok, err := server.HandleJSONRPC(r.Context(), body)
+		if err != nil {
+			writeHTTPJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+		if !ok {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(response)
+	})
+	httpServer := &http.Server{
+		Addr:              listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- httpServer.ListenAndServe()
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			return err
+		}
+		err := <-done
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case err := <-done:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
+
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	encoder := json.NewEncoder(out)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -99,11 +174,17 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		if len(line) == 0 {
 			continue
 		}
-		response := s.handleLine(ctx, line)
-		if response == nil {
+		response, ok, err := s.HandleJSONRPC(ctx, line)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			continue
 		}
-		if err := encoder.Encode(response); err != nil {
+		if _, err := out.Write(response); err != nil {
+			return err
+		}
+		if _, err := out.Write([]byte("\n")); err != nil {
 			return err
 		}
 	}
@@ -111,6 +192,18 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 		return err
 	}
 	return nil
+}
+
+func (s *Server) HandleJSONRPC(ctx context.Context, payload []byte) ([]byte, bool, error) {
+	response := s.handleLine(ctx, payload)
+	if response == nil {
+		return nil, false, nil
+	}
+	data, err := json.Marshal(response)
+	if err != nil {
+		return nil, false, err
+	}
+	return data, true, nil
 }
 
 func (s *Server) handleLine(ctx context.Context, line []byte) *rpcResponse {
@@ -173,6 +266,13 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (map[stri
 		}
 		value, err := s.queryHealth(ctx, args)
 		return toolResult(value, err)
+	case "kube_insight_history":
+		var args historyArguments
+		if err := json.Unmarshal(input.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("invalid history arguments: %w", err)
+		}
+		value, err := s.queryHistory(ctx, args)
+		return toolResult(value, err)
 	default:
 		return nil, fmt.Errorf("unknown tool %q", input.Name)
 	}
@@ -219,6 +319,47 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 	}
 	defer store.Close()
 	return store.ResourceHealth(ctx, opts)
+}
+
+func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, error) {
+	target := sqlite.ObjectTarget{
+		ClusterID: args.ClusterID,
+		UID:       args.UID,
+		Kind:      args.Kind,
+		Namespace: args.Namespace,
+		Name:      args.Name,
+	}
+	opts := sqlite.ObjectHistoryOptions{
+		MaxVersions:     args.MaxVersions,
+		MaxObservations: args.MaxObservations,
+		IncludeDocs:     args.IncludeDocs,
+		IncludeDiffs:    true,
+	}
+	var err error
+	if args.From != "" {
+		opts.From, err = parseHistoryTime(args.From)
+		if err != nil {
+			return nil, fmt.Errorf("from: %w", err)
+		}
+	}
+	if args.To != "" {
+		opts.To, err = parseHistoryTime(args.To)
+		if err != nil {
+			return nil, fmt.Errorf("to: %w", err)
+		}
+	}
+	if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
+		return nil, fmt.Errorf("from must be before to")
+	}
+	if args.Diffs != nil {
+		opts.IncludeDiffs = *args.Diffs
+	}
+	store, err := sqlite.OpenReadOnly(s.dbPath)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+	return store.ObjectHistory(ctx, target, opts)
 }
 
 func toolResult(value any, err error) (map[string]any, error) {
@@ -291,7 +432,34 @@ func tools() []map[string]any {
 				},
 			},
 		},
+		{
+			"name":        "kube_insight_history",
+			"description": "Return one object's retained content versions, observation trail, and optional version diffs.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"cluster":         map[string]any{"type": "string"},
+					"uid":             map[string]any{"type": "string"},
+					"kind":            map[string]any{"type": "string"},
+					"namespace":       map[string]any{"type": "string"},
+					"name":            map[string]any{"type": "string"},
+					"from":            map[string]any{"type": "string", "description": "RFC3339 or YYYY-MM-DD."},
+					"to":              map[string]any{"type": "string", "description": "RFC3339 or YYYY-MM-DD."},
+					"maxVersions":     map[string]any{"type": "integer"},
+					"maxObservations": map[string]any{"type": "integer"},
+					"includeDocs":     map[string]any{"type": "boolean"},
+					"diffs":           map[string]any{"type": "boolean"},
+				},
+			},
+		},
 	}
+}
+
+func parseHistoryTime(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", value)
 }
 
 func resultResponse(id any, result any) *rpcResponse {
@@ -304,6 +472,12 @@ func errorResponse(id any, code int, message string) *rpcResponse {
 		ID:      id,
 		Error:   &rpcError{Code: code, Message: message},
 	}
+}
+
+func writeHTTPJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
 }
 
 func rawID(raw json.RawMessage) any {

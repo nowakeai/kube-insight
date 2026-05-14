@@ -552,6 +552,90 @@ func TestStoreLatestResourceRefsExcludesDeletedAndAllowsReappearance(t *testing.
 	}
 }
 
+func TestStoreSkipsUnchangedContentVersions(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ref := core.ResourceRef{ClusterID: "c1", Version: "v1", Resource: "configmaps", Kind: "ConfigMap", Namespace: "default", Name: "settings", UID: "cm-uid"}
+	obj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata": map[string]any{
+			"name":      "settings",
+			"namespace": "default",
+			"uid":       "cm-uid",
+		},
+		"data": map[string]any{"mode": "prod"},
+	}
+	evidence := extractor.Evidence{
+		Facts: []core.Fact{{
+			Time:     time.Unix(10, 0),
+			ObjectID: "c1/cm-uid",
+			Key:      "config.mode",
+			Value:    "prod",
+		}},
+		Changes: []core.Change{{
+			Time:     time.Unix(10, 0),
+			ObjectID: "c1/cm-uid",
+			Family:   "config",
+			Path:     "data.mode",
+			Op:       "replace",
+			New:      "prod",
+		}},
+	}
+	if err := store.PutObservation(context.Background(), core.Observation{Type: core.ObservationModified, ObservedAt: time.Unix(10, 0), ResourceVersion: "10", Ref: ref, Object: obj}, evidence); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutObservation(context.Background(), core.Observation{Type: core.ObservationModified, ObservedAt: time.Unix(20, 0), ResourceVersion: "11", Ref: ref, Object: obj}, evidence); err != nil {
+		t.Fatal(err)
+	}
+
+	var versions, observations, unchangedObservations, observationVersions, facts, changes int
+	err = store.db.QueryRow(`select count(*) from versions`).Scan(&versions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`select count(*) from object_observations`).Scan(&observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`select count(*) from object_observations where not content_changed`).Scan(&unchangedObservations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`select count(distinct version_id) from object_observations`).Scan(&observationVersions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`select count(*) from object_facts`).Scan(&facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.db.QueryRow(`select count(*) from object_changes`).Scan(&changes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if versions != 1 || facts != 1 || changes != 1 {
+		t.Fatalf("versions/facts/changes = %d/%d/%d, want 1/1/1", versions, facts, changes)
+	}
+	if observations != 2 || unchangedObservations != 1 || observationVersions != 1 {
+		t.Fatalf("observations/unchanged/version_refs = %d/%d/%d, want 2/1/1", observations, unchangedObservations, observationVersions)
+	}
+	var lastSeen, latestObserved int64
+	if err := store.db.QueryRow(`select last_seen_at from objects where uid = 'cm-uid'`).Scan(&lastSeen); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRow(`select observed_at from latest_index`).Scan(&latestObserved); err != nil {
+		t.Fatal(err)
+	}
+	if lastSeen != time.Unix(20, 0).UnixMilli() || latestObserved != time.Unix(20, 0).UnixMilli() {
+		t.Fatalf("lastSeen/latestObserved = %d/%d", lastSeen, latestObserved)
+	}
+}
+
 func TestStoreStatsCountsFilterRedactionMetrics(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
 	if err != nil {
@@ -603,6 +687,44 @@ func TestStoreStatsCountsFilterRedactionMetrics(t *testing.T) {
 	}
 	if stats.RedactedFields != 2 || stats.RemovedFields != 2 || stats.SecretPayloadRemovals != 1 || stats.SecretPayloadViolations != 0 {
 		t.Fatalf("stats = %#v", stats)
+	}
+}
+
+func TestStorePersistsOnlyUsefulFilterDecisions(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	obs := core.Observation{
+		Type:       core.ObservationModified,
+		ObservedAt: time.Unix(10, 0),
+		Ref: core.ResourceRef{
+			ClusterID: "c1",
+			Version:   "v1",
+			Resource:  "configmaps",
+			Kind:      "ConfigMap",
+			Namespace: "default",
+			Name:      "settings",
+			UID:       "cm-uid",
+		},
+	}
+	decisions := []filter.Decision{
+		{Outcome: filter.Keep, Reason: "not_secret", Meta: map[string]any{"filter": "secret_redaction_filter"}},
+		{Outcome: filter.KeepModified, Reason: "managed_fields_removed", Meta: map[string]any{"filter": "metadata_normalization_filter"}},
+		{Outcome: filter.KeepModified, Reason: "secret_payload_removed", Meta: map[string]any{"filter": "secret_redaction_filter", "redactedFields": 1}},
+		{Outcome: filter.DiscardResource, Reason: "lease_resource", Meta: map[string]any{"filter": "lease_skip_filter"}},
+	}
+	if err := store.PutFilterDecisions(context.Background(), obs, decisions); err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	if err := store.db.QueryRow(`select count(*) from filter_decisions`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 {
+		t.Fatalf("filter decision rows = %d, want 2", rows)
 	}
 }
 

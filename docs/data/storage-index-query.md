@@ -84,8 +84,10 @@ Latest:
 create index latest_kind_ns_name_idx
 on latest_index(cluster_id, kind_id, namespace, name);
 
-create index latest_doc_gin_idx
-on latest_index using gin (doc jsonb_path_ops);
+-- Full latest JSON is exposed through latest_documents by joining the latest
+-- content version to blobs. Do not duplicate it in latest_index. If a backend
+-- needs fast arbitrary latest JSON predicates, use a materialized hot
+-- latest-documents table/view with a GIN index.
 ```
 
 Versions:
@@ -96,6 +98,16 @@ on versions(object_id, seq desc);
 
 create index versions_object_time_idx
 on versions(object_id, observed_at desc);
+```
+
+Observations:
+
+```sql
+create index object_observations_object_time_idx
+on object_observations(object_id, observed_at desc);
+
+create index object_observations_cluster_time_idx
+on object_observations(cluster_id, observed_at desc);
 ```
 
 Topology:
@@ -169,7 +181,8 @@ Do not compress all SQLite historical blobs by default while SQLite is still the
 primary query-shape PoC. Compressed blobs preserve proof, but they remove direct
 SQL access to body JSON unless every query pays a decompression scan. Prefer:
 
-- `latest_index.doc` as plain queryable JSON,
+- `latest_index` as a compact navigation/projection table,
+- `latest_documents` view for full latest JSON when proof is needed,
 - `object_facts`, `object_edges`, and `object_changes` for investigation,
 - selected JSON-path indexes for configured historical fields,
 - FTS5 only for selected text such as Events, status messages, webhook errors,
@@ -208,6 +221,10 @@ Maintenance rules:
 - Use WAL mode during ingestion.
 - Run `wal_checkpoint` after large ingestion batches or before exporting the
   SQLite file.
+- Use `kube-insight db compact --prune-unchanged` after backfilling
+  observations or after large retention deletes. This preserves observation
+  history while removing duplicate retained content versions and their repeated
+  derived facts/edges/changes.
 - Use incremental vacuum for long-lived local stores when retention purges are
   enabled.
 - Run `ANALYZE` after bulk ingest, purge, or index rebuild.
@@ -228,7 +245,7 @@ PostgreSQL maintenance rules:
 
 ```sql
 select doc
-from latest_index
+from latest_documents
 where cluster_id = $1
   and kind_id = $2
   and namespace = $3

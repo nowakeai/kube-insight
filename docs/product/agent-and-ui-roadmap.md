@@ -59,6 +59,7 @@ GET /healthz
 GET /api/v1/schema
 POST /api/v1/sql
 GET /api/v1/health?cluster=&status=&errorsOnly=&staleAfter=&limit=
+GET /api/v1/history?cluster=&uid=&kind=&namespace=&name=&from=&to=&maxVersions=&maxObservations=&includeDocs=&diffs=
 GET /api/v1/search?q=&kind=&namespace=&from=&to=
 GET /api/v1/services/{namespace}/{name}/investigation?from=&to=
 GET /api/v1/objects/{logical_id}/versions
@@ -72,6 +73,8 @@ The first agent-facing API surface should stay deliberately small:
 - `schema`: expose table, column, index, and join hints.
 - `sql`: execute read-only SQL with row limits.
 - `health`: expose collector coverage and staleness before agents make claims.
+- `history`: expose one object's retained content versions, observation trail,
+  and diffs without requiring agents to hand-write the joins.
 
 The CLI command is:
 
@@ -101,10 +104,12 @@ Initial tools:
 - `kube_insight_schema`: returns SQL schema, indexes, and join hints.
 - `kube_insight_sql`: runs read-only SQL with `maxRows`.
 - `kube_insight_health`: returns collector coverage and staleness.
+- `kube_insight_history`: returns one object's content versions, observations,
+  and optional diffs.
 
-This keeps MCP thin. Higher-level tools such as search, investigation,
-topology, versions, and diffs can be added after the SQL/RBAC contract is
-stable.
+This keeps MCP thin while giving agents one safe structured path for historical
+proof. Higher-level tools such as search, investigation, and topology can be
+added after the SQL/RBAC contract is stable.
 
 ## Skill
 

@@ -82,6 +82,17 @@ create table if not exists versions (
   unique(object_id, seq)
 );
 
+create table if not exists object_observations (
+  id integer primary key,
+  cluster_id integer not null references clusters(id),
+  object_id integer not null references objects(id),
+  observed_at integer not null,
+  observation_type text not null,
+  resource_version text,
+  version_id integer references versions(id),
+  content_changed boolean not null
+);
+
 create table if not exists latest_index (
   object_id integer primary key references objects(id),
   cluster_id integer not null references clusters(id),
@@ -90,9 +101,24 @@ create table if not exists latest_index (
   name text not null,
   uid text,
   latest_version_id integer not null,
-  observed_at integer not null,
-  doc text not null
+  observed_at integer not null
 );
+
+create view if not exists latest_documents as
+select
+  li.object_id,
+  li.cluster_id,
+  li.kind_id,
+  li.namespace,
+  li.name,
+  li.uid,
+  li.latest_version_id,
+  li.observed_at,
+  cast(b.data as text) as doc
+from latest_index li
+join versions v on v.id = li.latest_version_id
+join blobs b on b.digest = v.blob_ref
+where b.codec = 'identity';
 
 create table if not exists object_edges (
   id integer primary key,
@@ -198,6 +224,12 @@ on versions(object_id, seq desc);
 
 create index if not exists versions_object_time_idx
 on versions(object_id, observed_at desc);
+
+create index if not exists object_observations_object_time_idx
+on object_observations(object_id, observed_at desc);
+
+create index if not exists object_observations_cluster_time_idx
+on object_observations(cluster_id, observed_at desc);
 
 create index if not exists object_edges_src_time_idx
 on object_edges(cluster_id, edge_type, src_id, valid_from, valid_to);

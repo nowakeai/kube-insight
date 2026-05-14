@@ -17,6 +17,7 @@ central service.
 | CLI | Go with Cobra | Single binary for local PoC, collection, ingestion, investigation, and benchmark commands. |
 | Local storage | SQLite | Simple local PoC, single-file archives, deterministic tests, and easy support bundle workflows. |
 | SQLite driver | `modernc.org/sqlite` | Pure Go driver keeps local PoC builds independent from CGO and system SQLite libraries. |
+| Logging | `charm.land/log/v2` behind `slog` | More readable terminal logs now, while preserving structured logging calls for future Bubble Tea agent UI integration. |
 | Compression | Zstd in the application layer | Keeps version storage portable across SQLite and PostgreSQL. |
 | Central storage | PostgreSQL | Strong concurrency, transactions, JSONB hot queries, range indexes, and operational maturity. |
 | Optional time-series storage | TimescaleDB | Candidate for high-volume facts, retention, and cold compression after the core model is proven. |

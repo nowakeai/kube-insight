@@ -120,3 +120,11 @@ func TestValidateRejectsBadFilterAction(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestValidateAcceptsLogfmtLogging(t *testing.T) {
+	cfg := Default()
+	cfg.Logging.Format = "logfmt"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -19,7 +19,9 @@ Reasons:
 
 Keep three query surfaces separate:
 
-- `latest_index.doc`: plain JSON for current-state inspection.
+- `latest_index`: compact current-state navigation/projection rows.
+- `latest_documents`: view that joins latest content to blobs for full JSON
+  inspection without duplicating payloads.
 - `versions` and `blobs`: plain proof payloads during PoC.
 - `object_facts`, `object_edges`, `object_changes`: primary investigation
   indexes.

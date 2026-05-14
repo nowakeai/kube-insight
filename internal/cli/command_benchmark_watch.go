@@ -419,8 +419,34 @@ func newWatchLogf(logger *slog.Logger) collector.WatchLogFunc {
 	}
 	logger = logger.With("component", "watch")
 	return func(message string, args ...any) {
-		logger.Info(message, args...)
+		switch watchLogLevel(message) {
+		case slog.LevelWarn:
+			logger.Warn(message, args...)
+		case slog.LevelDebug:
+			logger.Debug(message, args...)
+		default:
+			logger.Info(message, args...)
+		}
 	}
+}
+
+func watchLogLevel(message string) slog.Level {
+	text := strings.ToLower(message)
+	if strings.Contains(text, "error") ||
+		strings.Contains(text, "retry") ||
+		strings.Contains(text, "expired") {
+		return slog.LevelWarn
+	}
+	if strings.Contains(text, "event") ||
+		strings.Contains(text, "bookmark") ||
+		strings.Contains(text, "listed resource") ||
+		strings.Contains(text, "list resource") ||
+		strings.Contains(text, "resolved resource") ||
+		strings.Contains(text, "worker start") ||
+		strings.Contains(text, "worker done") {
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
 }
 
 func watchDBPath(ctx context.Context, cmd *cobra.Command, state *cliState, rt runtimeSettings, selection collectionSettings) (string, error) {

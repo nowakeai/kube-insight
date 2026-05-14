@@ -61,6 +61,64 @@ Add full evidence only when needed:
   --max-versions-per-object 2
 ```
 
+Inspect one object's retained content versions and observation trail:
+
+```bash
+./bin/kube-insight query history --db kubeinsight.db \
+  --kind ClusterRepo \
+  --name rancher-charts \
+  --max-versions 5 \
+  --max-observations 20
+```
+
+`versions` are retained content changes. `observations` are list/watch sightings;
+unchanged observations keep the time/resourceVersion without duplicating JSON,
+facts, edges, or changes.
+
+## Compact Storage
+
+After stopping a watcher, compact the local SQLite store:
+
+```bash
+./bin/kube-insight db compact --db kubeinsight.db
+```
+
+If the database has `object_observations` backfilled, prune duplicate unchanged
+content versions while keeping every observation timestamp:
+
+```bash
+./bin/kube-insight db compact --db kubeinsight.db --prune-unchanged
+```
+
+## Service Mode
+
+For a local all-in-one service process, run watcher plus read surfaces together:
+
+```bash
+./bin/kube-insight serve --watch --api --mcp --db kubeinsight.db
+```
+
+The combined command supports these components:
+
+- `--watch`: discovery, list/watch, extraction, and writes.
+- `--api`: read-only HTTP API.
+- `--mcp`: HTTP MCP endpoint at `/mcp`.
+- `--webui`: web UI listener. The PoC exposes only a placeholder until the UI
+  is implemented.
+
+Example with all current and planned service surfaces:
+
+```bash
+./bin/kube-insight serve --watch --api --mcp --webui \
+  --db kubeinsight.db \
+  --api-listen 127.0.0.1:8080 \
+  --mcp-listen 127.0.0.1:8090 \
+  --webui-listen 127.0.0.1:8081
+```
+
+`serve --mcp` is HTTP for service deployments. Use `serve mcp` when an agent
+expects stdio MCP.
+
 ## Serve API
 
 ```bash
@@ -76,6 +134,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 5","maxRows":5}'
 curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&limit=20'
+curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&maxVersions=5&maxObservations=20'
 ```
 
 ## Serve MCP
@@ -89,6 +148,7 @@ MCP stdio currently exposes:
 - `kube_insight_schema`
 - `kube_insight_sql`
 - `kube_insight_health`
+- `kube_insight_history`
 
 ## Validate PoC
 

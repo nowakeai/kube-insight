@@ -94,6 +94,9 @@ func (s *Store) DeleteCluster(ctx context.Context, name string) (storage.Cluster
 	if _, err := tx.ExecContext(ctx, `delete from maintenance_runs where cluster_id = ?`, dbID); err != nil {
 		return cluster, err
 	}
+	if _, err := tx.ExecContext(ctx, `delete from object_observations where cluster_id = ?`, dbID); err != nil {
+		return cluster, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from versions
 where object_id in (select id from objects where cluster_id = ?)`, dbID); err != nil {

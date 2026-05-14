@@ -254,7 +254,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("unsupported logging.level %q", c.Logging.Level)
 	}
 	switch strings.ToLower(c.Logging.Format) {
-	case "", "text", "json":
+	case "", "text", "json", "logfmt":
 	default:
 		return fmt.Errorf("unsupported logging.format %q", c.Logging.Format)
 	}

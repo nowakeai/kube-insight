@@ -48,6 +48,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
 	s.mux.HandleFunc("POST /api/v1/sql", s.handleSQL)
 	s.mux.HandleFunc("GET /api/v1/health", s.handleResourceHealth)
+	s.mux.HandleFunc("GET /api/v1/history", s.handleHistory)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +111,26 @@ func (s *Server) handleResourceHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, report)
+}
+
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	target, opts, err := parseHistoryRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	store, err := sqlite.OpenReadOnly(s.dbPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	defer store.Close()
+	history, err := store.ObjectHistory(r.Context(), target, opts)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, history)
 }
 
 func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) error {
@@ -177,6 +198,66 @@ func parseResourceHealthOptions(r *http.Request) (sqlite.ResourceHealthOptions, 
 		opts.StaleAfter = value
 	}
 	return opts, nil
+}
+
+func parseHistoryRequest(r *http.Request) (sqlite.ObjectTarget, sqlite.ObjectHistoryOptions, error) {
+	query := r.URL.Query()
+	target := sqlite.ObjectTarget{
+		ClusterID: query.Get("cluster"),
+		UID:       query.Get("uid"),
+		Kind:      query.Get("kind"),
+		Namespace: query.Get("namespace"),
+		Name:      query.Get("name"),
+	}
+	opts := sqlite.ObjectHistoryOptions{IncludeDiffs: true}
+	var err error
+	if query.Get("from") != "" {
+		opts.From, err = parseHistoryTime(query.Get("from"))
+		if err != nil {
+			return target, opts, fmt.Errorf("from: %w", err)
+		}
+	}
+	if query.Get("to") != "" {
+		opts.To, err = parseHistoryTime(query.Get("to"))
+		if err != nil {
+			return target, opts, fmt.Errorf("to: %w", err)
+		}
+	}
+	if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
+		return target, opts, fmt.Errorf("from must be before to")
+	}
+	if query.Get("maxVersions") != "" {
+		opts.MaxVersions, err = strconv.Atoi(query.Get("maxVersions"))
+		if err != nil {
+			return target, opts, fmt.Errorf("maxVersions: %w", err)
+		}
+	}
+	if query.Get("maxObservations") != "" {
+		opts.MaxObservations, err = strconv.Atoi(query.Get("maxObservations"))
+		if err != nil {
+			return target, opts, fmt.Errorf("maxObservations: %w", err)
+		}
+	}
+	if query.Get("includeDocs") != "" {
+		opts.IncludeDocs, err = strconv.ParseBool(query.Get("includeDocs"))
+		if err != nil {
+			return target, opts, fmt.Errorf("includeDocs: %w", err)
+		}
+	}
+	if query.Get("diffs") != "" {
+		opts.IncludeDiffs, err = strconv.ParseBool(query.Get("diffs"))
+		if err != nil {
+			return target, opts, fmt.Errorf("diffs: %w", err)
+		}
+	}
+	return target, opts, nil
+}
+
+func parseHistoryTime(value string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t, nil
+	}
+	return time.Parse("2006-01-02", value)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

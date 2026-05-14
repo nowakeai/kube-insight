@@ -237,7 +237,12 @@ limit 1`, preferredKind, preferredKind)
 
 func (s *Store) LatestDocument(ctx context.Context, dbObjectID int64) (map[string]any, error) {
 	var doc string
-	err := s.db.QueryRowContext(ctx, `select doc from latest_index where object_id = ?`, dbObjectID).Scan(&doc)
+	err := s.db.QueryRowContext(ctx, `
+select cast(b.data as text)
+from latest_index li
+join versions v on v.id = li.latest_version_id
+join blobs b on b.digest = v.blob_ref
+where li.object_id = ?`, dbObjectID).Scan(&doc)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("latest document not found")

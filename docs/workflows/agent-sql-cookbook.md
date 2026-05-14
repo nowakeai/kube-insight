@@ -18,12 +18,14 @@ curl -X POST http://127.0.0.1:8080/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 10","maxRows":10}'
 curl http://127.0.0.1:8080/api/v1/health
+curl 'http://127.0.0.1:8080/api/v1/history?kind=Pod&namespace=default&name=api-1&maxVersions=5&maxObservations=20'
 ```
 
 All timestamps are Unix milliseconds. The examples below intentionally use
 tables that are stable across SQLite, Postgres, and Cockroach-oriented designs:
 `clusters`, `api_resources`, `object_kinds`, `objects`, `latest_index`,
-`object_facts`, `object_changes`, `object_edges`, `versions`, and `blobs`.
+`object_facts`, `object_changes`, `object_edges`, `versions`,
+`object_observations`, and `blobs`.
 
 ## Coverage First
 

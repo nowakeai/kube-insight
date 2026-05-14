@@ -13,6 +13,10 @@ func (s *Store) PutFilterDecisions(ctx context.Context, obs core.Observation, de
 	if len(decisions) == 0 {
 		return nil
 	}
+	decisions = persistedFilterDecisions(decisions)
+	if len(decisions) == 0 {
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -54,4 +58,26 @@ insert into filter_decisions(
 		}
 	}
 	return tx.Commit()
+}
+
+func persistedFilterDecisions(decisions []filter.Decision) []filter.Decision {
+	out := make([]filter.Decision, 0, len(decisions))
+	for _, decision := range decisions {
+		filterName, _ := decision.Meta["filter"].(string)
+		if shouldPersistFilterDecision(filterName, decision) {
+			out = append(out, decision)
+		}
+	}
+	return out
+}
+
+func shouldPersistFilterDecision(filterName string, decision filter.Decision) bool {
+	switch decision.Outcome {
+	case filter.DiscardChange, filter.DiscardResource:
+		return true
+	case filter.KeepModified:
+		return filterName != "metadata_normalization_filter"
+	default:
+		return false
+	}
 }

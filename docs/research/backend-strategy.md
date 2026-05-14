@@ -42,7 +42,8 @@ Limitations:
 Rules:
 
 - Keep generic JSON indexes narrow.
-- Keep `latest_index.doc` queryable as JSON.
+- Keep `latest_index` compact; expose full latest JSON through a
+  `latest_documents` join/view.
 - Do not compress all historical blobs until ad-hoc query needs are covered by
   facts, path indexes, FTS, or a hot-window shadow table.
 - Use max integer for open-ended topology intervals.

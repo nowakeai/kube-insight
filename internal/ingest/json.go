@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 	if err != nil {
 		return Summary{}, err
 	}
-	logger.Info("decoded observations", "observations", len(inputs), "bytes", len(data))
+	logger.Debug("decoded observations", "observations", len(inputs), "bytes", len(data))
 	resolver := p.Resolver
 	if resolver == nil {
 		resolver = kubeapi.NewResolver()
@@ -134,8 +135,26 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 		summary.Changes += len(evidence.Changes)
 	}
 
-	logger.Info("ingest completed", "observations", summary.Observations, "stored", summary.StoredObservations, "modified", summary.ModifiedObservations, "discardedChanges", summary.DiscardedChanges, "discardedResources", summary.DiscardedResources, "facts", summary.Facts, "edges", summary.Edges, "changes", summary.Changes)
+	logIngestSummary(logger, summary)
 	return summary, nil
+}
+
+func logIngestSummary(logger *slog.Logger, summary Summary) {
+	args := []any{
+		"observations", summary.Observations,
+		"stored", summary.StoredObservations,
+		"modified", summary.ModifiedObservations,
+		"discardedChanges", summary.DiscardedChanges,
+		"discardedResources", summary.DiscardedResources,
+		"facts", summary.Facts,
+		"edges", summary.Edges,
+		"changes", summary.Changes,
+	}
+	if summary.Observations > 1 {
+		logger.Info("ingest completed", args...)
+		return
+	}
+	logger.Debug("ingest completed", args...)
 }
 
 type observationInput struct {

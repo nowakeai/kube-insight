@@ -24,7 +24,7 @@ upper snake case:
 ```bash
 KUBE_INSIGHT_INSTANCE_ROLE=writer
 KUBE_INSIGHT_LOGGING_LEVEL=info
-KUBE_INSIGHT_LOGGING_FORMAT=json
+KUBE_INSIGHT_LOGGING_FORMAT=text
 KUBE_INSIGHT_STORAGE_SQLITE_PATH=./kubeinsight.db
 KUBE_INSIGHT_COLLECTION_KUBECONFIG=$HOME/.kube/config
 KUBE_INSIGHT_COLLECTION_CONTEXTS=staging,prod
@@ -56,8 +56,9 @@ kube-insight --config kube-insight.yaml \
 ## Logging
 
 Logs are written to stderr so stdout can stay machine-readable for JSON command
-results. The CLI uses structured `slog` logging and supports text and JSON
-formats:
+results. The CLI keeps the standard `slog` call surface, but uses
+`charm.land/log/v2` underneath for more readable terminal output. Supported
+formats are `text`, `json`, and `logfmt`:
 
 ```yaml
 logging:
@@ -69,7 +70,13 @@ Equivalent overrides:
 
 ```bash
 kube-insight --log-level debug --log-format json watch pods
+kube-insight --log-format logfmt serve --watch --api --mcp
 ```
+
+Default `info` logs are tuned for long-running service mode: lifecycle,
+batch ingest summaries, watch start/finish, and warnings stay visible; high
+volume per-object watch events, bookmarks, individual resource list details,
+and single-object ingest summaries move to `debug`.
 
 ## Instance Roles
 
@@ -112,6 +119,45 @@ Supported roles:
 - `all`: local single-process mode; may collect/watch and serve APIs.
 - `writer`: discovery/watch/ingest only; API/Web/MCP listeners disabled.
 - `api`: query/API/Web/MCP only; collection/watch disabled.
+
+## Supported Running Modes
+
+Kube-insight supports these operational shapes:
+
+| Mode | Command | Writes | Read surfaces | Intended use |
+| --- | --- | --- | --- | --- |
+| One-shot ingest | `kube-insight ingest --file/--dir ...` | yes | no | Offline samples, CI, fixture import |
+| Watcher only | `kube-insight watch [RESOURCE_PATTERN ...]` | yes | no | Dedicated collector process |
+| API only | `kube-insight serve --api` or `serve api` | no | HTTP API | Read-only query service |
+| MCP stdio | `kube-insight serve mcp` | no | stdio MCP | Local agent process launch |
+| MCP HTTP | `kube-insight serve --mcp` | no | HTTP `/mcp` | Long-running service deployment |
+| Web UI | `kube-insight serve --webui` | no | HTTP Web UI | Future human UI surface |
+| All-in-one local | `kube-insight serve --watch --api --mcp --webui` | yes | HTTP API, HTTP MCP, Web UI | Local PoC or small single-instance deployment |
+| Split production | one `--watch` writer plus N `--api/--mcp/--webui` readers | writer only | readers only | HA/scale-out with one writer owner |
+
+In production, prefer one writer instance and multiple read-only instances
+against the same backend. This avoids duplicate watch streams and duplicate
+history writes while still allowing API/MCP/WebUI scale-out.
+
+Compact service examples:
+
+```bash
+kube-insight serve --watch --api --mcp --db kubeinsight.db
+kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
+kube-insight serve --watch pods events.events.k8s.io --api --db kubeinsight.db
+```
+
+Service listen flags:
+
+```bash
+kube-insight serve --api --mcp --webui \
+  --api-listen 0.0.0.0:8080 \
+  --mcp-listen 0.0.0.0:8090 \
+  --webui-listen 0.0.0.0:8081
+```
+
+With no `serve` component flags, `kube-insight serve --config <file>` uses the
+enabled components in the configuration file.
 
 ## Watch All Resources
 

@@ -76,7 +76,7 @@ func OpenReadOnly(path string) (*Store, error) {
 			return nil, err
 		}
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, path: path}, nil
 }
 
 func (s *Store) QuerySQL(ctx context.Context, opts SQLQueryOptions) (SQLQueryResult, error) {
@@ -177,6 +177,7 @@ order by name`)
 	schema.Notes = []string{
 		"All timestamps are Unix milliseconds.",
 		"Join latest_index.kind_id or objects.kind_id to object_kinds.id, then object_kinds.api_resource_id to api_resources.id.",
+		"object_observations records every observed object event; versions records retained content documents.",
 		"Use object_facts and object_changes for fast investigation candidates; use versions/blob_ref/blobs.data for proof when exact retained JSON is needed.",
 		"object_edges.src_id and object_edges.dst_id reference objects.id.",
 		"SQL access is read-only; use SELECT/WITH/EXPLAIN only.",

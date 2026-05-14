@@ -24,7 +24,8 @@ import (
 )
 
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 func Open(path string) (*Store, error) {
@@ -36,7 +37,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, path: path}
 	if err := s.bootstrap(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -59,7 +60,7 @@ func (s *Store) bootstrap(ctx context.Context) error {
 			return err
 		}
 	}
-	return nil
+	return s.migrate(ctx)
 }
 
 func (s *Store) PutObservation(ctx context.Context, obs core.Observation, evidence extractor.Evidence) error {
@@ -95,9 +96,27 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 	}
 	_ = apiResourceID
 
-	objectID, err := ensureObject(ctx, tx, clusterID, kindID, obs.Ref, observedAt, deletedAt)
+	objectRecord, err := ensureObjectRecord(ctx, tx, clusterID, kindID, obs.Ref, observedAt, deletedAt)
 	if err != nil {
 		return err
+	}
+	objectID := objectRecord.ID
+	latestVersionID, latestDigest, err := latestContentState(ctx, tx, objectID)
+	if err != nil {
+		return err
+	}
+	if shouldSkipUnchangedObservation(obs, objectRecord, latestVersionID, latestDigest, digest) {
+		if err := updateLatestSeen(ctx, tx, objectID, observedAt); err != nil {
+			return err
+		}
+		if err := putObservationTrace(ctx, tx, clusterID, objectID, obs, latestVersionID, false); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		logger.Debug("skipped unchanged observation", "cluster", obs.Ref.ClusterID, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "type", obs.Type, "versionId", latestVersionID, "bytes", len(doc))
+		return nil
 	}
 	if err := putBlob(ctx, tx, digest, doc); err != nil {
 		return err
@@ -111,6 +130,9 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 		return err
 	}
 	if err := updateLatest(ctx, tx, objectID, clusterID, kindID, obs.Ref, versionID, observedAt, string(doc)); err != nil {
+		return err
+	}
+	if err := putObservationTrace(ctx, tx, clusterID, objectID, obs, versionID, true); err != nil {
 		return err
 	}
 	if err := putFacts(ctx, tx, clusterID, kindID, objectID, versionID, obs.Ref, evidence.Facts); err != nil {
@@ -128,6 +150,12 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 	}
 	logger.Debug("stored observation", "cluster", obs.Ref.ClusterID, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "type", obs.Type, "versionId", versionID, "facts", len(evidence.Facts), "edges", len(evidence.Edges), "changes", len(evidence.Changes), "bytes", len(doc))
 	return nil
+}
+
+type objectRecord struct {
+	ID         int64
+	Existed    bool
+	WasDeleted bool
 }
 
 func (s *Store) GetFacts(ctx context.Context, objectID string) ([]core.Fact, error) {
@@ -332,37 +360,43 @@ where api_group = ? and api_version = ? and kind = ?`,
 }
 
 func ensureObject(ctx context.Context, tx *sql.Tx, clusterID, kindID int64, ref core.ResourceRef, now int64, deletedAt sql.NullInt64) (int64, error) {
+	record, err := ensureObjectRecord(ctx, tx, clusterID, kindID, ref, now, deletedAt)
+	return record.ID, err
+}
+
+func ensureObjectRecord(ctx context.Context, tx *sql.Tx, clusterID, kindID int64, ref core.ResourceRef, now int64, deletedAt sql.NullInt64) (objectRecord, error) {
 	var id int64
+	var previousDeletedAt sql.NullInt64
 	var err error
 	if ref.UID != "" {
 		err = tx.QueryRowContext(ctx, `
-select id from objects
+select id, deleted_at from objects
 where cluster_id = ? and kind_id = ? and uid = ?
 order by id
-limit 1`, clusterID, kindID, ref.UID).Scan(&id)
+limit 1`, clusterID, kindID, ref.UID).Scan(&id, &previousDeletedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			err = tx.QueryRowContext(ctx, `
-select id from objects
+select id, deleted_at from objects
 where cluster_id = ? and kind_id = ? and coalesce(namespace, '') = ? and name = ? and coalesce(uid, '') = ''
 order by id
-limit 1`, clusterID, kindID, ref.Namespace, ref.Name).Scan(&id)
+limit 1`, clusterID, kindID, ref.Namespace, ref.Name).Scan(&id, &previousDeletedAt)
 		}
 	} else {
 		err = tx.QueryRowContext(ctx, `
-select id from objects
+select id, deleted_at from objects
 where cluster_id = ? and kind_id = ? and coalesce(namespace, '') = ? and name = ?
 order by case when coalesce(uid, '') <> '' then 0 else 1 end, id
-limit 1`, clusterID, kindID, ref.Namespace, ref.Name).Scan(&id)
+limit 1`, clusterID, kindID, ref.Namespace, ref.Name).Scan(&id, &previousDeletedAt)
 	}
 	if err == nil {
 		_, err = tx.ExecContext(ctx, `
 update objects
 set last_seen_at = ?, uid = coalesce(?, uid), latest_version_id = latest_version_id, deleted_at = ?
 where id = ?`, now, nullable(ref.UID), deletedAt, id)
-		return id, err
+		return objectRecord{ID: id, Existed: true, WasDeleted: previousDeletedAt.Valid}, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, err
+		return objectRecord{}, err
 	}
 
 	res, err := tx.ExecContext(ctx, `
@@ -370,9 +404,10 @@ insert into objects(cluster_id, kind_id, namespace, name, uid, first_seen_at, la
 values(?, ?, ?, ?, ?, ?, ?, ?)`,
 		clusterID, kindID, nullable(ref.Namespace), ref.Name, nullable(ref.UID), now, now, deletedAt)
 	if err != nil {
-		return 0, err
+		return objectRecord{}, err
 	}
-	return res.LastInsertId()
+	id, err = res.LastInsertId()
+	return objectRecord{ID: id}, err
 }
 
 func putBlob(ctx context.Context, tx *sql.Tx, digest string, doc []byte) error {
@@ -380,6 +415,38 @@ func putBlob(ctx context.Context, tx *sql.Tx, digest string, doc []byte) error {
 insert into blobs(digest, codec, raw_size, stored_size, data)
 values(?, 'identity', ?, ?, ?)
 on conflict(digest) do nothing`, digest, len(doc), len(doc), doc)
+	return err
+}
+
+func latestContentState(ctx context.Context, tx *sql.Tx, objectID int64) (int64, string, error) {
+	var versionID int64
+	var docHash string
+	err := tx.QueryRowContext(ctx, `
+select v.id, v.doc_hash
+from objects o
+join versions v on v.id = o.latest_version_id
+where o.id = ?`, objectID).Scan(&versionID, &docHash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", nil
+	}
+	return versionID, docHash, err
+}
+
+func shouldSkipUnchangedObservation(obs core.Observation, object objectRecord, latestVersionID int64, latestDigest, nextDigest string) bool {
+	if obs.Type == core.ObservationDeleted {
+		return false
+	}
+	if !object.Existed || object.WasDeleted || latestVersionID == 0 {
+		return false
+	}
+	return latestDigest == nextDigest
+}
+
+func updateLatestSeen(ctx context.Context, tx *sql.Tx, objectID, observedAt int64) error {
+	_, err := tx.ExecContext(ctx, `
+update latest_index
+set observed_at = ?
+where object_id = ?`, observedAt, objectID)
 	return err
 }
 
@@ -414,7 +481,12 @@ values(?, ?, ?, ?, ?, ?, 'full', 'full_identity', ?, ?, ?, 0, '{}')`,
 }
 
 func updateLatest(ctx context.Context, tx *sql.Tx, objectID, clusterID, kindID int64, ref core.ResourceRef, versionID, observedAt int64, doc string) error {
-	_, err := tx.ExecContext(ctx, `
+	hasDoc, err := latestIndexHasDocColumn(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if hasDoc {
+		_, err = tx.ExecContext(ctx, `
 insert into latest_index(object_id, cluster_id, kind_id, namespace, name, uid, latest_version_id, observed_at, doc)
 values(?, ?, ?, ?, ?, ?, ?, ?, ?)
 on conflict(object_id) do update set
@@ -426,8 +498,45 @@ on conflict(object_id) do update set
   latest_version_id = excluded.latest_version_id,
   observed_at = excluded.observed_at,
   doc = excluded.doc`,
-		objectID, clusterID, kindID, nullable(ref.Namespace), ref.Name, nullable(ref.UID), versionID, observedAt, doc)
+			objectID, clusterID, kindID, nullable(ref.Namespace), ref.Name, nullable(ref.UID), versionID, observedAt, doc)
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+insert into latest_index(object_id, cluster_id, kind_id, namespace, name, uid, latest_version_id, observed_at)
+values(?, ?, ?, ?, ?, ?, ?, ?)
+on conflict(object_id) do update set
+  cluster_id = excluded.cluster_id,
+  kind_id = excluded.kind_id,
+  namespace = excluded.namespace,
+  name = excluded.name,
+  uid = excluded.uid,
+  latest_version_id = excluded.latest_version_id,
+  observed_at = excluded.observed_at`,
+		objectID, clusterID, kindID, nullable(ref.Namespace), ref.Name, nullable(ref.UID), versionID, observedAt)
 	return err
+}
+
+func latestIndexHasDocColumn(ctx context.Context, tx *sql.Tx) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `pragma table_info(latest_index)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var typ string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == "doc" {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func putFacts(ctx context.Context, tx *sql.Tx, clusterID, kindID, objectID, versionID int64, ref core.ResourceRef, facts []core.Fact) error {

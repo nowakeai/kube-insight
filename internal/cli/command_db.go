@@ -19,7 +19,38 @@ func dbCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Co
 		Short: "Manage kube-insight storage.",
 	}
 	cmd.AddCommand(dbClustersCommand(ctx, stdout, state))
+	cmd.AddCommand(dbCompactCommand(ctx, stdout, state))
 	cmd.AddCommand(dbResourcesCommand(ctx, stdout, state))
+	return cmd
+}
+
+func dbCompactCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
+	var pruneUnchanged bool
+	cmd := &cobra.Command{
+		Use:   "compact",
+		Short: "Compact SQLite storage after migrations and deletes.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := loadRuntimeConfig(cmd, state, "", false)
+			if err != nil {
+				return err
+			}
+			runCtx, _, err := runtimeContext(ctx, cmd.ErrOrStderr(), rt)
+			if err != nil {
+				return err
+			}
+			store, err := sqlite.Open(dbCommandPath(cmd, state, rt))
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			report, err := store.Compact(runCtx, sqlite.CompactOptions{PruneUnchanged: pruneUnchanged})
+			if err != nil {
+				return err
+			}
+			return writeJSON(stdout, report)
+		},
+	}
+	cmd.Flags().BoolVar(&pruneUnchanged, "prune-unchanged", false, "Prune duplicate retained versions after object observations are backfilled")
 	return cmd
 }
 

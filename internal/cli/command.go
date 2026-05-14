@@ -80,7 +80,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	flags.BoolVar(&state.collectionEnabled, "collection-enabled", false, "Enable collection/watch in effective config")
 	flags.BoolVar(&state.clientGo, "client-go", false, "Use client-go instead of kubectl where supported")
 	flags.StringVar(&state.logLevel, "log-level", "", "Log level: debug, info, warn, error; env: KUBE_INSIGHT_LOGGING_LEVEL")
-	flags.StringVar(&state.logFormat, "log-format", "", "Log format: text or json; env: KUBE_INSIGHT_LOGGING_FORMAT")
+	flags.StringVar(&state.logFormat, "log-format", "", "Log format: text, json, or logfmt; env: KUBE_INSIGHT_LOGGING_FORMAT")
 
 	root.AddCommand(versionCommand(stdout))
 	root.AddCommand(configCommand(stdout, state))

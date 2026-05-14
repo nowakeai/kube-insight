@@ -2,6 +2,7 @@ package kubeapi
 
 import (
 	"strings"
+	"sync"
 
 	"kube-insight/internal/core"
 )
@@ -16,6 +17,7 @@ type ResourceInfo struct {
 }
 
 type Resolver struct {
+	mu              sync.RWMutex
 	byGVK           map[string]ResourceInfo
 	byGroupKind     map[string]ResourceInfo
 	byKind          map[string]ResourceInfo
@@ -44,6 +46,8 @@ func (r *Resolver) Register(info ResourceInfo) {
 		return
 	}
 	info.Resource = strings.ToLower(info.Resource)
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.byGVK[gvkKey(info.Group, info.Version, info.Kind)] = info
 	r.byGroupKind[groupKindKey(info.Group, info.Kind)] = info
 	if _, exists := r.byKind[info.Kind]; !exists || info.Group == "" {
@@ -136,6 +140,8 @@ func (r *Resolver) ResolveGVK(group, version, kind string) (ResourceInfo, bool) 
 	if r == nil {
 		return fallbackInfo(group, version, "", kind), false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if info, ok := r.byGVK[gvkKey(group, version, kind)]; ok {
 		return info, true
 	}
@@ -161,6 +167,8 @@ func (r *Resolver) ResolveGVR(group, version, resource string) (ResourceInfo, bo
 	if r == nil {
 		return fallbackInfo(group, version, resource, ""), false
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if info, ok := r.byGVR[gvrKey(group, version, resource)]; ok {
 		return info, true
 	}

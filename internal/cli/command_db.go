@@ -102,6 +102,41 @@ func dbResourcesCommand(ctx context.Context, stdout io.Writer, state *cliState) 
 		Short: "Inspect stored Kubernetes API resource metadata.",
 	}
 	cmd.AddCommand(dbResourcesCoverageCommand(ctx, stdout, state))
+	cmd.AddCommand(dbResourcesHealthCommand(ctx, stdout, state))
+	return cmd
+}
+
+func dbResourcesHealthCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
+	var opts sqlite.ResourceHealthOptions
+	cmd := &cobra.Command{
+		Use:   "health",
+		Short: "Inspect per-resource watch and ingestion health.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			rt, err := loadRuntimeConfig(cmd, state, "", false)
+			if err != nil {
+				return err
+			}
+			runCtx, _, err := runtimeContext(ctx, cmd.ErrOrStderr(), rt)
+			if err != nil {
+				return err
+			}
+			store, err := sqlite.Open(dbCommandPath(cmd, state, rt))
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+			report, err := store.ResourceHealth(runCtx, opts)
+			if err != nil {
+				return err
+			}
+			return writeJSON(stdout, report)
+		},
+	}
+	cmd.Flags().StringVar(&opts.ClusterID, "cluster", "", "Cluster ID")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status, such as listed, bookmark, watch_error, list_error, or not_started")
+	cmd.Flags().BoolVar(&opts.ErrorsOnly, "errors-only", false, "Show only resources with watch/list errors")
+	cmd.Flags().DurationVar(&opts.StaleAfter, "stale-after", 0, "Mark rows stale when updated longer ago than this duration")
+	cmd.Flags().IntVar(&opts.Limit, "limit", 100, "Maximum rows to return; 0 means no limit")
 	return cmd
 }
 

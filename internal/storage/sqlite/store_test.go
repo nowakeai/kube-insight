@@ -265,6 +265,54 @@ func TestStorePersistsGroupedEdgeTarget(t *testing.T) {
 	}
 }
 
+func TestStorePersistsRBACGroupSubjectWithSlash(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	obs := core.Observation{
+		Type:       core.ObservationModified,
+		ObservedAt: time.Unix(10, 0),
+		Ref: core.ResourceRef{
+			ClusterID: "c1",
+			Group:     "rbac.authorization.k8s.io",
+			Version:   "v1",
+			Resource:  "clusterrolebindings",
+			Kind:      "ClusterRoleBinding",
+			Name:      "admins",
+			UID:       "binding-uid",
+		},
+		Object: map[string]any{
+			"apiVersion": "rbac.authorization.k8s.io/v1",
+			"kind":       "ClusterRoleBinding",
+			"metadata": map[string]any{
+				"name": "admins",
+				"uid":  "binding-uid",
+			},
+		},
+	}
+	groupName := "keycloakoidc_group://Rancher Admin"
+	evidence := extractor.Evidence{Edges: []core.Edge{{
+		Type:      "rbac_binding_binds_subject",
+		SourceID:  "c1/binding-uid",
+		TargetID:  "c1/rbac.authorization.k8s.io/groups/" + groupName,
+		ValidFrom: obs.ObservedAt,
+	}}}
+
+	if err := store.PutObservation(context.Background(), obs, evidence); err != nil {
+		t.Fatal(err)
+	}
+	topology, err := store.Topology(context.Background(), ObjectTarget{ClusterID: "c1", Kind: "ClusterRoleBinding", Name: "admins"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topology.Edges) != 1 || topology.Edges[0].Target.Kind != "Group" || topology.Edges[0].Target.Name != groupName {
+		t.Fatalf("topology = %#v", topology.Edges)
+	}
+}
+
 func TestStorePersistsAndUsesDiscoveredAPIResources(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
 	if err != nil {
@@ -393,6 +441,64 @@ func TestStoreUpsertsIngestionOffsetWithEmptyNamespace(t *testing.T) {
 	}
 	if stats.IngestionOffsets != 1 {
 		t.Fatalf("offset rows = %d, want 1", stats.IngestionOffsets)
+	}
+}
+
+func TestStoreResourceHealthReportsOffsetsAndNotStartedResources(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	podResource := kubeapi.ResourceInfo{
+		Version:    "v1",
+		Resource:   "pods",
+		Kind:       "Pod",
+		Namespaced: true,
+		Verbs:      []string{"list", "watch"},
+	}
+	if err := store.UpsertIngestionOffset(context.Background(), storage.IngestionOffset{
+		ClusterID:       "c1",
+		Resource:        podResource,
+		ResourceVersion: "10",
+		Event:           storage.OffsetEventWatch,
+		Status:          "watch_error",
+		Error:           "stream reset",
+		At:              time.Unix(10, 0),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAPIResources(context.Background(), []kubeapi.ResourceInfo{{
+		Version:    "v1",
+		Resource:   "services",
+		Kind:       "Service",
+		Namespaced: true,
+		Verbs:      []string{"list", "watch"},
+	}}, time.Unix(10, 0)); err != nil {
+		t.Fatal(err)
+	}
+
+	health, err := store.ResourceHealth(context.Background(), ResourceHealthOptions{ClusterID: "c1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health.Summary.Resources != 2 || health.Summary.Errors != 1 || health.Summary.NotStarted != 1 {
+		t.Fatalf("summary = %#v", health.Summary)
+	}
+	if health.Summary.Complete || len(health.Summary.Warnings) != 2 {
+		t.Fatalf("summary warnings = %#v", health.Summary)
+	}
+	if health.ByStatus["watch_error"] != 1 || health.ByStatus["not_started"] != 1 {
+		t.Fatalf("by status = %#v", health.ByStatus)
+	}
+
+	errorsOnly, err := store.ResourceHealth(context.Background(), ResourceHealthOptions{ClusterID: "c1", ErrorsOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(errorsOnly.Resources) != 1 || errorsOnly.Resources[0].Error != "stream reset" {
+		t.Fatalf("errors only = %#v", errorsOnly.Resources)
 	}
 }
 

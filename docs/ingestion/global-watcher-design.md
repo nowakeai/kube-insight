@@ -184,10 +184,15 @@ Current PoC implementation:
   same database unless `--db` selects another path.
 - Runtime cluster identity is stored as a stable cluster ID derived from
   Kubernetes cluster identity, with the kubeconfig context retained as metadata.
-- Multiple GVR workers run with bounded concurrency and per-worker error
+- Multi-resource watch runs in two phases: bounded-concurrency initial LIST for
+  every selected GVR first, then long-running WATCH streams from each list
+  resourceVersion. This prevents early long-lived watch streams from blocking
+  coverage of later resources.
+- Multiple GVR workers record per-resource health, queue, retry, and error
   summaries.
-- The worker performs an initial LIST, persists the list, then starts WATCH from
-  the list resourceVersion.
+- `kube-insight db resources health` reports each GVR's last list/watch/bookmark
+  time, current status, last error, resourceVersion, latest object count, and
+  stale state.
 - ADDED/MODIFIED/DELETED events are ingested through the same JSON pipeline.
 - BOOKMARK events update `last_bookmark_at` and `resource_version`.
 - Watch failures retry from the latest observed resourceVersion; stale

@@ -165,6 +165,17 @@ The initial implementation stores each retained version as full JSON with an
 identity blob codec. Compression, reverse deltas, and profitable snapshot
 selection remain application-layer work above the storage backend.
 
+Do not compress all SQLite historical blobs by default while SQLite is still the
+primary query-shape PoC. Compressed blobs preserve proof, but they remove direct
+SQL access to body JSON unless every query pays a decompression scan. Prefer:
+
+- `latest_index.doc` as plain queryable JSON,
+- `object_facts`, `object_edges`, and `object_changes` for investigation,
+- selected JSON-path indexes for configured historical fields,
+- FTS5 only for selected text such as Events, status messages, webhook errors,
+  and controller reconciliation messages,
+- later cold-history compression after the indexed query surface is proven.
+
 SQLite does not have range types or GiST. Store time as integer milliseconds and
 use max integer for open-ended intervals.
 
@@ -341,3 +352,27 @@ versions: proof and diff
 latest_index: navigation
 JSONB GIN: optional hot ad-hoc query
 ```
+
+## Agent SQL Access
+
+Agents should be able to inspect the logical schema and compose their own
+read-only queries instead of relying only on prebuilt investigation endpoints.
+The CLI exposes that primitive:
+
+```bash
+kube-insight query schema --db kubeinsight.db
+kube-insight query sql --db kubeinsight.db \
+  --sql "select fact_key, fact_value, severity from object_facts order by ts desc limit 20"
+```
+
+`query sql` is intentionally read-only. It opens the SQLite database with
+`PRAGMA query_only`, accepts only `SELECT`, `WITH`, and `EXPLAIN` statements,
+rejects mutation keywords, and caps returned rows with `--max-rows`.
+
+Future API backends should keep the same product contract:
+
+- expose schema/metadata first,
+- execute only read-only SQL for agents,
+- apply Kubernetes RBAC-derived row and resource filters before returning rows,
+- preserve prebuilt commands as convenience wrappers, not as the only query
+  surface.

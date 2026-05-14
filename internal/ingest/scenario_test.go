@@ -694,3 +694,7 @@ func versionDiffHasPath(diffs []sqlite.VersionDiff, path string) bool {
 	}
 	return false
 }
+
+func bundleHasVersionDiffPath(bundle sqlite.EvidenceBundle, path string) bool {
+	return versionDiffHasPath(bundle.VersionDiffs, path)
+}

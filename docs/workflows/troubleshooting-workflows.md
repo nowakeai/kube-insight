@@ -365,3 +365,49 @@ Example severity:
 
 The API should return structured evidence. The UI can render timelines and
 graphs from the same response.
+
+## Agent Query Pattern
+
+The scenario workflows above are product acceptance cases. Agents should not
+call scenario-specific commands. The preferred primitive is schema-guided
+read-only SQL:
+
+```text
+1. call query schema to understand tables, joins, timestamps, and indexes
+2. use query sql to find candidate facts, changes, edges, versions, and latest docs
+3. fetch exact retained JSON rows only when proof is needed
+4. summarize the answer with object IDs, facts, changes, edges, and version IDs
+5. check db resources health or query search coverage before stating confidence
+```
+
+The wrapper commands remain useful shortcuts:
+
+```text
+1. search evidence by symptom text, object kind, namespace, and time window
+2. inspect the highest scoring object bundle
+3. expand topology from the object that explains the symptom
+4. fetch historical versions and diffs only for proof
+5. summarize the answer with object IDs, facts, changes, edges, and version IDs
+```
+
+Example:
+
+```text
+query schema
+query sql "select fact_key, fact_value, severity from object_facts order by ts desc limit 20"
+query search "failed calling webhook no endpoints" --from 10:00 --to 10:10
+query topology --kind Event --namespace flux-system --name webapp-admission-failed
+query topology --kind ValidatingWebhookConfiguration --name policy-guard
+query object --kind ValidatingWebhookConfiguration --name policy-guard \
+  --max-versions-per-object 3
+```
+
+This is the intended advantage over `kubectl`: the first step can find expired
+or rolled-back evidence from retained history, and later steps use indexed
+relationships and exact versions instead of live cluster state only.
+
+`query search` includes a lightweight `coverage` summary by default. Agents
+should treat `coverage.summary.complete=false` or non-empty
+`coverage.summary.warnings` as a confidence signal: the evidence may still be
+useful, but the answer should mention stale, failed, or not-yet-started resource
+streams before drawing conclusions.

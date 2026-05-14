@@ -10,6 +10,8 @@ import (
 
 	"kube-insight/internal/collector"
 	"kube-insight/internal/kubeapi"
+	"kube-insight/internal/storage"
+	"kube-insight/internal/storage/sqlite"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -195,6 +197,150 @@ func TestRunInvestigateServiceWithSQLite(t *testing.T) {
 		if !strings.Contains(investigation.String(), want) {
 			t.Fatalf("investigation missing %q: %s", want, investigation.String())
 		}
+	}
+}
+
+func TestRunQuerySearchWithSQLite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "incident.json")
+	dbPath := filepath.Join(dir, "kube-insight.db")
+	err := os.WriteFile(path, []byte(`{
+	  "apiVersion": "v1",
+	  "kind": "List",
+	  "items": [
+	    {
+	      "apiVersion": "v1",
+	      "kind": "Service",
+	      "metadata": {"name": "policy-webhook", "namespace": "policy-system", "uid": "svc-policy-webhook"}
+	    },
+	    {
+	      "apiVersion": "admissionregistration.k8s.io/v1",
+	      "kind": "ValidatingWebhookConfiguration",
+	      "metadata": {"name": "policy-guard", "uid": "vwc-policy-guard", "resourceVersion": "3"},
+	      "webhooks": [{
+	        "name": "policy-guard.platform.example.com",
+	        "failurePolicy": "Fail",
+	        "clientConfig": {"service": {"name": "policy-webhook", "namespace": "policy-system"}}
+	      }]
+	    },
+	    {
+	      "apiVersion": "events.k8s.io/v1",
+	      "kind": "Event",
+	      "metadata": {"name": "webapp-admission-failed", "namespace": "flux-system", "uid": "event-webapp-admission", "resourceVersion": "4"},
+	      "reason": "ReconciliationFailed",
+	      "type": "Warning",
+	      "message": "dry-run failed: failed calling webhook policy-guard.platform.example.com: no endpoints available for service policy-system/policy-webhook",
+	      "count": 4
+	    }
+	  ]
+	}`), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"ingest", "--file", path, "--db", dbPath}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var search bytes.Buffer
+	err = Run(context.Background(), []string{
+		"query", "search", "no", "endpoints",
+		"--db", dbPath,
+		"--limit", "5",
+	}, &search, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"matches": 1`,
+		`"coverage": {`,
+		`"includeHealth": true`,
+		`"kind": "Event"`,
+		`"latest_json"`,
+	} {
+		if !strings.Contains(search.String(), want) {
+			t.Fatalf("search missing %q: %s", want, search.String())
+		}
+	}
+	if strings.Contains(search.String(), `"bundles": [`) {
+		t.Fatalf("default search should be lightweight: %s", search.String())
+	}
+
+	search.Reset()
+	err = Run(context.Background(), []string{
+		"query", "search", "Fail",
+		"--kind", "ValidatingWebhookConfiguration",
+		"--db", dbPath,
+		"--max-versions-per-object", "1",
+	}, &search, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"kind": "ValidatingWebhookConfiguration"`,
+		`"fact:admission_webhook.failure_policy"`,
+		`"admission_webhook.service"`,
+		`"versions": [`,
+	} {
+		if !strings.Contains(search.String(), want) {
+			t.Fatalf("search missing %q: %s", want, search.String())
+		}
+	}
+}
+
+func TestRunQuerySchemaAndReadOnlySQLWithSQLite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pod.json")
+	dbPath := filepath.Join(dir, "kube-insight.db")
+	err := os.WriteFile(path, []byte(`{
+	  "apiVersion": "v1",
+	  "kind": "Pod",
+	  "metadata": {"name": "api-1", "namespace": "default", "uid": "pod-uid"},
+	  "status": {"phase": "Running"}
+	}`), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"ingest", "--file", path, "--db", dbPath}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	err = Run(context.Background(), []string{"query", "schema", "--db", dbPath}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"name": "latest_index"`, `"name": "object_facts"`, "All timestamps are Unix milliseconds"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("schema missing %q: %s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	err = Run(context.Background(), []string{
+		"query", "sql",
+		"--db", dbPath,
+		"--sql", "select ok.kind, li.namespace, li.name from latest_index li join object_kinds ok on ok.id = li.kind_id",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"kind": "Pod"`, `"namespace": "default"`, `"rowCount": 1`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("sql output missing %q: %s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	err = Run(context.Background(), []string{
+		"query", "sql",
+		"--db", dbPath,
+		"--sql", "delete from latest_index",
+	}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Fatalf("expected read-only rejection, got %v", err)
 	}
 }
 
@@ -419,6 +565,56 @@ func TestRunWatchHelpShowsPositionalResources(t *testing.T) {
 	}
 	if strings.Contains(out, "Available Commands") || strings.Contains(out, "watch resource") {
 		t.Fatalf("legacy subcommands should be hidden: %s", out)
+	}
+}
+
+func TestRunDBResourcesHealth(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "kube-insight.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.UpsertIngestionOffset(context.Background(), storage.IngestionOffset{
+		ClusterID: "c1",
+		Resource: kubeapi.ResourceInfo{
+			Version:    "v1",
+			Resource:   "pods",
+			Kind:       "Pod",
+			Namespaced: true,
+			Verbs:      []string{"list", "watch"},
+		},
+		ResourceVersion: "10",
+		Event:           storage.OffsetEventWatch,
+		Status:          "watch_error",
+		Error:           "stream reset",
+	})
+	closeErr := store.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = Run(context.Background(), []string{
+		"db", "resources", "health",
+		"--db", dbPath,
+		"--errors-only",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"errors": 1`,
+		`"status": "watch_error"`,
+		`"error": "stream reset"`,
+		`"resource": "pods"`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q: %s", want, stdout.String())
+		}
 	}
 }
 

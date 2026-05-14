@@ -87,6 +87,7 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	root.AddCommand(dbCommand(ctx, stdout, state))
 	root.AddCommand(watchCommand(ctx, stdout, stderr, state))
 	root.AddCommand(queryCommand(ctx, stdout, state))
+	root.AddCommand(serveCommand(ctx, stdout, stderr, state))
 	root.AddCommand(devCommand(ctx, stdout, state))
 	root.AddCommand(hiddenCommand(ingestCommand(ctx, stdout, state)))
 	root.AddCommand(hiddenCommand(collectCommand(ctx, stdout, state)))

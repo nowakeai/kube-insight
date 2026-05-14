@@ -72,6 +72,7 @@ func (ReferenceExtractor) Extract(ctx context.Context, obs core.Observation) (Ev
 	case "HTTPRoute", "GRPCRoute", "TCPRoute", "TLSRoute", "UDPRoute":
 		appendGatewayRouteEdges(ctx, obs, spec, &out)
 	}
+	appendStatusConditionFacts(obs, &out)
 
 	return out, nil
 }
@@ -266,12 +267,14 @@ func appendCRDConversionWebhookEdges(ctx context.Context, obs core.Observation, 
 	service := specMap(clientConfig, "service")
 	namespace, _ := service["namespace"].(string)
 	appendNamedRefEdge(ctx, obs, out, "crd_conversion_webhook_uses_service", "", "Service", namespace, service, "name")
+	appendServiceRefFact(obs, out, "crd_conversion_webhook.service", namespace, service)
 }
 
 func appendAPIServiceEdges(ctx context.Context, obs core.Observation, spec map[string]any, out *Evidence) {
 	service := specMap(spec, "service")
 	namespace, _ := service["namespace"].(string)
 	appendNamedRefEdge(ctx, obs, out, "apiservice_uses_service", "", "Service", namespace, service, "name")
+	appendServiceRefFact(obs, out, "apiservice.service", namespace, service)
 }
 
 func appendGatewayEdges(ctx context.Context, obs core.Observation, spec map[string]any, out *Evidence) {
@@ -365,6 +368,11 @@ func appendRBACBindingEdges(ctx context.Context, obs core.Observation, out *Evid
 		Namespace: roleNamespace,
 		Name:      roleName,
 	})
+	if roleName != "" {
+		value := roleKind + "/" + roleName
+		out.Facts = append(out.Facts, fact(obs, "rbac.role_ref", value, 50))
+		out.Changes = append(out.Changes, change(obs, "rbac", "roleRef", "replace", "", value, 50))
+	}
 
 	subjects, ok := obs.Object["subjects"].([]any)
 	if !ok {
@@ -394,6 +402,11 @@ func appendRBACBindingEdges(ctx context.Context, obs core.Observation, out *Evid
 			Namespace: namespace,
 			Name:      name,
 		})
+		value := kind + "/" + name
+		if namespace != "" {
+			value = kind + "/" + namespace + "/" + name
+		}
+		out.Facts = append(out.Facts, fact(obs, "rbac.subject", value, 40))
 	}
 }
 
@@ -447,6 +460,22 @@ func appendWebhookEdges(ctx context.Context, obs core.Observation, out *Evidence
 		if !ok {
 			continue
 		}
+		webhookName, _ := webhook["name"].(string)
+		if webhookName != "" {
+			out.Facts = append(out.Facts, fact(obs, "admission_webhook.name", webhookName, 40))
+		}
+		if failurePolicy, _ := webhook["failurePolicy"].(string); failurePolicy != "" {
+			severity := 40
+			if failurePolicy == "Fail" {
+				severity = 70
+			}
+			out.Facts = append(out.Facts, fact(obs, "admission_webhook.failure_policy", failurePolicy, severity))
+			path := "webhooks.failurePolicy"
+			if webhookName != "" {
+				path = "webhooks." + webhookName + ".failurePolicy"
+			}
+			out.Changes = append(out.Changes, change(obs, "admission_webhook", path, "replace", "", failurePolicy, severity))
+		}
 		clientConfig, _ := webhook["clientConfig"].(map[string]any)
 		service, _ := clientConfig["service"].(map[string]any)
 		name, _ := service["name"].(string)
@@ -456,6 +485,48 @@ func appendWebhookEdges(ctx context.Context, obs core.Observation, out *Evidence
 			Namespace: namespace,
 			Name:      name,
 		})
+		appendServiceRefFact(obs, out, "admission_webhook.service", namespace, service)
+	}
+}
+
+func appendServiceRefFact(obs core.Observation, out *Evidence, key, namespace string, service map[string]any) {
+	name, _ := service["name"].(string)
+	if name == "" {
+		return
+	}
+	if namespace == "" {
+		namespace, _ = service["namespace"].(string)
+	}
+	value := name
+	if namespace != "" {
+		value = namespace + "/" + name
+	}
+	out.Facts = append(out.Facts, fact(obs, key, value, 50))
+	out.Changes = append(out.Changes, change(obs, "reference", key, "replace", "", value, 50))
+}
+
+func appendStatusConditionFacts(obs core.Observation, out *Evidence) {
+	status, _ := obs.Object["status"].(map[string]any)
+	conditions, _ := status["conditions"].([]any)
+	for _, item := range conditions {
+		condition, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		typ, _ := condition["type"].(string)
+		value, _ := condition["status"].(string)
+		if typ == "" || value == "" {
+			continue
+		}
+		severity := 20
+		if value == "False" || value == "Unknown" {
+			severity = 60
+		}
+		out.Facts = append(out.Facts, fact(obs, "status_condition."+typ, value, severity))
+		out.Changes = append(out.Changes, change(obs, "status", "status.conditions."+typ, "replace", "", value, severity))
+		if reason, _ := condition["reason"].(string); reason != "" {
+			out.Facts = append(out.Facts, fact(obs, "status_condition."+typ+".reason", reason, severity))
+		}
 	}
 }
 

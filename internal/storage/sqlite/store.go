@@ -512,33 +512,47 @@ func ensureEdgeTarget(ctx context.Context, tx *sql.Tx, clusterID int64, obs core
 
 func targetRef(ctx context.Context, tx *sql.Tx, clusterID, version, defaultNamespace, target string) (core.ResourceRef, error) {
 	parts := strings.Split(target, "/")
-	if len(parts) < 2 || len(parts) > 4 {
+	if len(parts) < 2 {
 		return core.ResourceRef{}, fmt.Errorf("invalid edge target %q", target)
 	}
 	group := ""
 	resource := parts[0]
 	namespace := ""
 	name := parts[1]
-	switch len(parts) {
-	case 3:
-		if strings.Contains(parts[0], ".") {
-			group = parts[0]
-			resource = parts[1]
-			name = parts[2]
-		} else {
-			namespace = parts[1]
-			name = parts[2]
-		}
-	case 4:
+	if strings.Contains(parts[0], ".") && len(parts) >= 3 {
 		group = parts[0]
 		resource = parts[1]
-		namespace = parts[2]
-		name = parts[3]
+		info, ok := lookupAPIResource(ctx, tx, group, resource)
+		if !ok {
+			resolver := kubeapi.NewResolver()
+			info, _ = resolver.ResolveGVR(group, version, resource)
+		}
+		if info.Namespaced && len(parts) >= 4 {
+			namespace = parts[2]
+			name = strings.Join(parts[3:], "/")
+		} else {
+			name = strings.Join(parts[2:], "/")
+		}
+		return core.ResourceRef{
+			ClusterID: clusterID,
+			Group:     info.Group,
+			Version:   info.Version,
+			Resource:  info.Resource,
+			Kind:      info.Kind,
+			Namespace: namespace,
+			Name:      name,
+		}, nil
 	}
 	info, ok := lookupAPIResource(ctx, tx, group, resource)
 	if !ok {
 		resolver := kubeapi.NewResolver()
 		info, _ = resolver.ResolveGVR(group, version, resource)
+	}
+	if info.Namespaced && len(parts) >= 3 {
+		namespace = parts[1]
+		name = strings.Join(parts[2:], "/")
+	} else if len(parts) > 2 {
+		name = strings.Join(parts[1:], "/")
 	}
 	if namespace == "" && info.Namespaced {
 		namespace = defaultNamespace

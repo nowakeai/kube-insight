@@ -83,6 +83,10 @@ type BundleSummary struct {
 }
 
 func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceBundle, error) {
+	return s.InvestigateWithOptions(ctx, target, InvestigationOptions{})
+}
+
+func (s *Store) InvestigateWithOptions(ctx context.Context, target ObjectTarget, opts InvestigationOptions) (EvidenceBundle, error) {
 	logger := logging.FromContext(ctx).With("component", "query")
 	object, dbObjectID, err := s.FindObject(ctx, target)
 	if err != nil {
@@ -116,7 +120,16 @@ func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceB
 			Changes: len(changes),
 		},
 	}
-	logger.Info("investigation query completed", "cluster", object.ClusterID, "kind", object.Kind, "namespace", object.Namespace, "name", object.Name, "facts", len(facts), "edges", len(edges), "changes", len(changes))
+	if opts.MaxVersionsPerObject > 0 || hasInvestigationWindow(opts) {
+		limit := opts.MaxVersionsPerObject
+		if limit <= 0 {
+			limit = 3
+		}
+		if err := s.attachBundleVersions(ctx, &bundle, opts, limit); err != nil {
+			return EvidenceBundle{}, err
+		}
+	}
+	logger.Info("investigation query completed", "cluster", object.ClusterID, "kind", object.Kind, "namespace", object.Namespace, "name", object.Name, "facts", len(facts), "edges", len(edges), "changes", len(changes), "versions", bundle.Summary.Versions)
 	return bundle, nil
 }
 

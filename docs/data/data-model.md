@@ -351,6 +351,17 @@ For cluster-scoped resources, `namespace` is null. For namespaced resources,
 for a namespace-scoped watch. Offsets let the collector resume and make gap
 detection explicit.
 
+The same table powers watch health:
+
+```text
+kube-insight db resources health --errors-only
+kube-insight db resources health --stale-after 5m
+```
+
+Health output is intended for humans, automation, and agents to decide whether
+an evidence answer is based on fresh complete watch data or a partial/stale
+resource stream.
+
 ## Storage Maintenance
 
 High-churn watch ingestion creates dead rows and index bloat in SQL backends.

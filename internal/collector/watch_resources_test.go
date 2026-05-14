@@ -113,6 +113,26 @@ func TestGracefulWatchStop(t *testing.T) {
 	}
 }
 
+func TestTransientWatchStreamErrorClassification(t *testing.T) {
+	transient := []error{
+		errWatchClosed,
+		errors.New(`an error on the server ("unable to decode an event from the watch stream: stream error: stream ID 441; INTERNAL_ERROR; received from peer") has prevented the request from succeeding`),
+		errors.New("http2: client connection lost"),
+		errors.New("connection reset by peer"),
+	}
+	for _, err := range transient {
+		if !isTransientWatchStreamError(err) {
+			t.Fatalf("error should be transient: %v", err)
+		}
+	}
+	if isTransientWatchStreamError(errors.New("forbidden: User cannot watch pods")) {
+		t.Fatal("authorization errors should not be transient")
+	}
+	if isTransientWatchStreamError(errors.New("resource version too old")) {
+		t.Fatal("expired resource versions are handled by relist logic")
+	}
+}
+
 func TestNeedsResourceDiscoveryForExactCLIResources(t *testing.T) {
 	if !needsResourceDiscovery([]Resource{{Name: "pods"}}) {
 		t.Fatal("bare exact resource should need discovery metadata")

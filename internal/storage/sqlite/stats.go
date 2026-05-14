@@ -31,6 +31,13 @@ type Stats struct {
 	OffsetLagMS                    int64            `json:"offset_lag_ms"`
 	RawBytes                       int64            `json:"raw_bytes"`
 	BlobBytes                      int64            `json:"blob_bytes"`
+	DatabaseBytes                  int64            `json:"database_bytes"`
+	WALBytes                       int64            `json:"wal_bytes"`
+	LiveBytes                      int64            `json:"live_bytes"`
+	SlackBytes                     int64            `json:"slack_bytes"`
+	PageSize                       int64            `json:"page_size"`
+	PageCount                      int64            `json:"page_count"`
+	FreelistPages                  int64            `json:"freelist_pages"`
 	TableBytes                     int64            `json:"table_bytes"`
 	IndexBytes                     int64            `json:"index_bytes"`
 	VersionBytes                   int64            `json:"version_bytes"`
@@ -102,6 +109,9 @@ where ok.kind = 'EndpointSlice'`},
 		}
 	}
 	if err := s.addPageStats(ctx, &out); err != nil {
+		return Stats{}, err
+	}
+	if err := s.addFileStats(ctx, &out); err != nil {
 		return Stats{}, err
 	}
 	if err := s.addOffsetLag(ctx, &out); err != nil {
@@ -243,6 +253,23 @@ func (s *Store) addPageStats(ctx context.Context, out *Stats) error {
 		}
 	}
 	return rows.Err()
+}
+
+func (s *Store) addFileStats(ctx context.Context, out *Stats) error {
+	fileStats, err := databaseFileStats(s.path)
+	if err != nil {
+		return err
+	}
+	out.DatabaseBytes = fileStats.DatabaseBytes
+	out.WALBytes = fileStats.WALBytes
+	out.LiveBytes = out.TableBytes + out.IndexBytes
+	if out.DatabaseBytes+out.WALBytes > out.LiveBytes {
+		out.SlackBytes = out.DatabaseBytes + out.WALBytes - out.LiveBytes
+	}
+	out.PageSize, _ = s.pragmaInt64(ctx, "page_size")
+	out.PageCount, _ = s.pragmaInt64(ctx, "page_count")
+	out.FreelistPages, _ = s.pragmaInt64(ctx, "freelist_count")
+	return nil
 }
 
 func jsonInt(doc, key string) int64 {

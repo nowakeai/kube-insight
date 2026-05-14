@@ -342,6 +342,8 @@ func runWatchContexts(ctx context.Context, cmd *cobra.Command, state *cliState, 
 		return out, err
 	}
 	defer sharedStore.Close()
+	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sharedStore, rt.Config.Storage.Maintenance)
+	defer stopMaintenance()
 	opts.Logf("using shared db", "db", sharedDBPath)
 
 	var wg sync.WaitGroup
@@ -408,6 +410,8 @@ func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, r
 		return collector.WatchResourcesSummary{}, dbPath, err
 	}
 	defer sqliteStore.Close()
+	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage.Maintenance)
+	defer stopMaintenance()
 	opts.Store = sqliteStore
 	summary, err := collector.WatchResourcesClientGo(ctx, opts)
 	return summary, dbPath, err
@@ -432,6 +436,10 @@ func newWatchLogf(logger *slog.Logger) collector.WatchLogFunc {
 
 func watchLogLevel(message string) slog.Level {
 	text := strings.ToLower(message)
+	if strings.Contains(text, "watch stream interrupted") ||
+		strings.Contains(text, "watch stream reconnect") {
+		return slog.LevelInfo
+	}
 	if strings.Contains(text, "error") ||
 		strings.Contains(text, "retry") ||
 		strings.Contains(text, "expired") {

@@ -152,11 +152,12 @@ order by
   case coalesce(io.status, 'not_started')
     when 'watch_error' then 0
     when 'list_error' then 1
-    when 'not_started' then 2
-    when 'listed' then 3
-    when 'watching' then 4
-    when 'bookmark' then 5
-    else 6
+    when 'retrying' then 2
+    when 'not_started' then 3
+    when 'listed' then 4
+    when 'watching' then 5
+    when 'bookmark' then 6
+    else 7
   end,
   c.name,
   ar.api_group,
@@ -283,7 +284,7 @@ func resourceHealthMatches(record ResourceHealthRecord, opts ResourceHealthOptio
 }
 
 func isResourceHealthError(record ResourceHealthRecord) bool {
-	return record.Error != "" || record.Status == "watch_error" || record.Status == "list_error"
+	return record.Status == "watch_error" || record.Status == "list_error"
 }
 
 func offsetTimes(event storage.OffsetEvent, now int64) (sql.NullInt64, sql.NullInt64, sql.NullInt64) {

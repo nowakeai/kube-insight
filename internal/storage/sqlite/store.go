@@ -52,7 +52,9 @@ func (s *Store) Close() error {
 func (s *Store) bootstrap(ctx context.Context) error {
 	for _, stmt := range []string{
 		"pragma foreign_keys = on",
+		"pragma auto_vacuum = incremental",
 		"pragma journal_mode = wal",
+		"pragma journal_size_limit = 67108864",
 		"pragma busy_timeout = 5000",
 		storagesql.Schema,
 	} {

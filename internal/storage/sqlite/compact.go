@@ -21,6 +21,12 @@ type CompactOptions struct {
 	PruneUnchanged bool
 }
 
+type DatabaseFileStats struct {
+	DatabaseBytes int64 `json:"databaseBytes"`
+	WALBytes      int64 `json:"walBytes"`
+	TotalBytes    int64 `json:"totalBytes"`
+}
+
 func (s *Store) Compact(ctx context.Context, options ...CompactOptions) (CompactReport, error) {
 	opts := CompactOptions{}
 	if len(options) > 0 {
@@ -73,16 +79,36 @@ func (s *Store) Compact(ctx context.Context, options ...CompactOptions) (Compact
 }
 
 func databaseFilesBytes(path string) (int64, error) {
-	var total int64
-	for _, candidate := range []string{path, path + "-wal"} {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return 0, err
-		}
-		total += info.Size()
+	stats, err := databaseFileStats(path)
+	if err != nil {
+		return 0, err
 	}
-	return total, nil
+	return stats.TotalBytes, nil
+}
+
+func databaseFileStats(path string) (DatabaseFileStats, error) {
+	dbBytes, err := fileSizeIfExists(path)
+	if err != nil {
+		return DatabaseFileStats{}, err
+	}
+	walBytes, err := fileSizeIfExists(path + "-wal")
+	if err != nil {
+		return DatabaseFileStats{}, err
+	}
+	return DatabaseFileStats{
+		DatabaseBytes: dbBytes,
+		WALBytes:      walBytes,
+		TotalBytes:    dbBytes + walBytes,
+	}, nil
+}
+
+func fileSizeIfExists(path string) (int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return info.Size(), nil
 }

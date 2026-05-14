@@ -189,7 +189,8 @@ Current PoC implementation:
   resourceVersion. This prevents early long-lived watch streams from blocking
   coverage of later resources.
 - Multiple GVR workers record per-resource health, queue, retry, and error
-  summaries.
+  summaries. Transient watch stream disconnects are recorded as `retrying`;
+  terminal failures are recorded as `watch_error` or `list_error`.
 - `kube-insight db resources health` reports each GVR's last list/watch/bookmark
   time, current status, last error, resourceVersion, latest object count, and
   stale state.
@@ -197,7 +198,8 @@ Current PoC implementation:
 - BOOKMARK events update `last_bookmark_at` and `resource_version`.
 - Watch failures retry from the latest observed resourceVersion; stale
   resourceVersion/410 Gone errors clear the resourceVersion and force a full
-  relist.
+  relist. HTTP/2 stream resets and Kubernetes watch decode interruptions are
+  treated as reconnects unless the retry limit is exhausted.
 - Each LIST snapshot reconciles deletes by comparing previously active latest
   objects for the GVR with the current LIST items and writing `DELETED`
   observations for missing objects.

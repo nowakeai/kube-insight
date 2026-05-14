@@ -45,7 +45,7 @@ join api_resources ar on ar.removed_at is null
 left join ingestion_offsets io
   on io.cluster_id = c.id
  and io.api_resource_id = ar.id
-where coalesce(io.status, 'not_started') in ('not_started', 'list_error', 'watch_error')
+where coalesce(io.status, 'not_started') in ('not_started', 'retrying', 'list_error', 'watch_error')
 order by status, ar.api_group, ar.resource
 limit 50;
 ```

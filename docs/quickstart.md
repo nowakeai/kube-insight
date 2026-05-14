@@ -77,6 +77,11 @@ facts, edges, or changes.
 
 ## Compact Storage
 
+Long-running `watch` and `serve --watch` processes run lightweight SQLite
+maintenance automatically. The periodic task checkpoints/truncates WAL and runs
+incremental vacuum when possible, so normal watch operation should not require
+frequent full compaction.
+
 After stopping a watcher, compact the local SQLite store:
 
 ```bash

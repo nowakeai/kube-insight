@@ -26,6 +26,8 @@ func configCommand(stdout io.Writer, state *cliState) *cobra.Command {
 				LogFormat    string   `json:"logFormat"`
 				Storage      string   `json:"storage"`
 				SQLitePath   string   `json:"sqlitePath,omitempty"`
+				Maintenance  bool     `json:"maintenance"`
+				MaintEvery   int      `json:"maintenanceIntervalSeconds"`
 				Collection   bool     `json:"collection"`
 				Kubeconfig   string   `json:"kubeconfig,omitempty"`
 				UseClientGo  bool     `json:"useClientGo"`
@@ -46,6 +48,8 @@ func configCommand(stdout io.Writer, state *cliState) *cobra.Command {
 				LogFormat:    rt.Config.Logging.Format,
 				Storage:      rt.Config.Storage.Driver,
 				SQLitePath:   rt.Config.Storage.SQLite.Path,
+				Maintenance:  rt.Config.Storage.Maintenance.Enabled,
+				MaintEvery:   rt.Config.Storage.Maintenance.IntervalSeconds,
 				Collection:   rt.Config.Collection.Enabled,
 				Kubeconfig:   rt.Config.Collection.Kubeconfig,
 				UseClientGo:  rt.Config.Collection.UseClientGo,

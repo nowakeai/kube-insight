@@ -76,7 +76,9 @@ kube-insight --log-format logfmt serve --watch --api --mcp
 Default `info` logs are tuned for long-running service mode: lifecycle,
 batch ingest summaries, watch start/finish, and warnings stay visible; high
 volume per-object watch events, bookmarks, individual resource list details,
-and single-object ingest summaries move to `debug`.
+and single-object ingest summaries move to `debug`. Recoverable watch stream
+disconnects are reported as reconnects instead of warnings; health status keeps
+them visible as `retrying` until the stream resumes.
 
 ## Instance Roles
 
@@ -146,6 +148,12 @@ kube-insight serve --watch --api --mcp --db kubeinsight.db
 kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
 kube-insight serve --watch pods events.events.k8s.io --api --db kubeinsight.db
 ```
+
+`watch` and `serve --watch` start lightweight SQLite maintenance by default.
+This periodic task checkpoints/truncates WAL, runs `pragma optimize`, and runs
+incremental vacuum when possible. It does not run full `VACUUM`; use
+`kube-insight db compact` for offline compaction after large migrations,
+retention purges, or duplicate-version pruning.
 
 Service listen flags:
 

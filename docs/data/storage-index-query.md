@@ -219,8 +219,11 @@ app text generated always as
 Maintenance rules:
 
 - Use WAL mode during ingestion.
-- Run `wal_checkpoint` after large ingestion batches or before exporting the
-  SQLite file.
+- `watch` and `serve --watch` run lightweight maintenance by default:
+  `wal_checkpoint(TRUNCATE)`, `pragma optimize`, and incremental vacuum when
+  freelist pages exist.
+- Run manual `wal_checkpoint` before exporting the SQLite file if the watcher is
+  not running.
 - Use `kube-insight db compact --prune-unchanged` after backfilling
   observations or after large retention deletes. This preserves observation
   history while removing duplicate retained content versions and their repeated

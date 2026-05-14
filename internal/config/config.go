@@ -35,14 +35,26 @@ type LoggingConfig struct {
 }
 
 type StorageConfig struct {
-	Driver    string            `yaml:"driver" json:"driver"`
-	SQLite    SQLiteConfig      `yaml:"sqlite" json:"sqlite"`
-	Postgres  SQLDatabaseConfig `yaml:"postgres" json:"postgres"`
-	Cockroach SQLDatabaseConfig `yaml:"cockroach" json:"cockroach"`
+	Driver      string            `yaml:"driver" json:"driver"`
+	SQLite      SQLiteConfig      `yaml:"sqlite" json:"sqlite"`
+	Postgres    SQLDatabaseConfig `yaml:"postgres" json:"postgres"`
+	Cockroach   SQLDatabaseConfig `yaml:"cockroach" json:"cockroach"`
+	Maintenance MaintenanceConfig `yaml:"maintenance" json:"maintenance"`
 }
 
 type SQLiteConfig struct {
 	Path string `yaml:"path" json:"path"`
+}
+
+type MaintenanceConfig struct {
+	Enabled                     bool  `yaml:"enabled" json:"enabled"`
+	IntervalSeconds             int   `yaml:"intervalSeconds" json:"intervalSeconds"`
+	MinWalBytes                 int64 `yaml:"minWalBytes" json:"minWalBytes"`
+	IncrementalVacuumPages      int   `yaml:"incrementalVacuumPages" json:"incrementalVacuumPages"`
+	JournalSizeLimitBytes       int64 `yaml:"journalSizeLimitBytes" json:"journalSizeLimitBytes"`
+	RunOnStart                  bool  `yaml:"runOnStart" json:"runOnStart"`
+	SkipWhenDatabaseBusy        bool  `yaml:"skipWhenDatabaseBusy" json:"skipWhenDatabaseBusy"`
+	LogUnchangedMaintenanceRuns bool  `yaml:"logUnchangedMaintenanceRuns" json:"logUnchangedMaintenanceRuns"`
 }
 
 type SQLDatabaseConfig struct {
@@ -184,6 +196,15 @@ func Default() Config {
 		Storage: StorageConfig{
 			Driver: "sqlite",
 			SQLite: SQLiteConfig{Path: "kubeinsight.db"},
+			Maintenance: MaintenanceConfig{
+				Enabled:                true,
+				IntervalSeconds:        300,
+				MinWalBytes:            16 * 1024 * 1024,
+				IncrementalVacuumPages: 256,
+				JournalSizeLimitBytes:  64 * 1024 * 1024,
+				RunOnStart:             false,
+				SkipWhenDatabaseBusy:   true,
+			},
 		},
 		Collection: CollectionConfig{
 			Enabled:     true,
@@ -283,6 +304,20 @@ func (c Config) Validate() error {
 	if c.Collection.Concurrency < 0 {
 		return errors.New("collection.concurrency must be non-negative")
 	}
+	if c.Storage.Maintenance.Enabled {
+		if c.Storage.Maintenance.IntervalSeconds <= 0 {
+			return errors.New("storage.maintenance.intervalSeconds must be positive when maintenance is enabled")
+		}
+		if c.Storage.Maintenance.MinWalBytes < 0 {
+			return errors.New("storage.maintenance.minWalBytes must be non-negative")
+		}
+		if c.Storage.Maintenance.IncrementalVacuumPages < 0 {
+			return errors.New("storage.maintenance.incrementalVacuumPages must be non-negative")
+		}
+		if c.Storage.Maintenance.JournalSizeLimitBytes < 0 {
+			return errors.New("storage.maintenance.journalSizeLimitBytes must be non-negative")
+		}
+	}
 	if err := validateFilters(c.Filters); err != nil {
 		return err
 	}
@@ -358,12 +393,12 @@ func setReflectValue(v reflect.Value, value string) error {
 			return err
 		}
 		v.SetBool(parsed)
-	case reflect.Int:
-		parsed, err := strconv.Atoi(value)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		parsed, err := strconv.ParseInt(value, 10, v.Type().Bits())
 		if err != nil {
 			return err
 		}
-		v.SetInt(int64(parsed))
+		v.SetInt(parsed)
 	case reflect.Float64:
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {

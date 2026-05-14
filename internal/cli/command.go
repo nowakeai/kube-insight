@@ -22,6 +22,9 @@ type cliState struct {
 	concurrency       int
 	collectionEnabled bool
 	clientGo          bool
+	maintenance       bool
+	maintenanceEvery  int
+	minWalBytes       int64
 	logLevel          string
 	logFormat         string
 }
@@ -79,6 +82,9 @@ func newRootCommand(ctx context.Context, stdout, stderr io.Writer) *cobra.Comman
 	flags.IntVar(&state.concurrency, "concurrency", 0, "Resource worker concurrency")
 	flags.BoolVar(&state.collectionEnabled, "collection-enabled", false, "Enable collection/watch in effective config")
 	flags.BoolVar(&state.clientGo, "client-go", false, "Use client-go instead of kubectl where supported")
+	flags.BoolVar(&state.maintenance, "storage-maintenance", false, "Run lightweight SQLite maintenance with watch; env: KUBE_INSIGHT_STORAGE_MAINTENANCE_ENABLED")
+	flags.IntVar(&state.maintenanceEvery, "maintenance-interval-seconds", 0, "SQLite watch maintenance interval in seconds; env: KUBE_INSIGHT_STORAGE_MAINTENANCE_INTERVAL_SECONDS")
+	flags.Int64Var(&state.minWalBytes, "maintenance-min-wal-bytes", 0, "Minimum WAL bytes before checkpoint; env: KUBE_INSIGHT_STORAGE_MAINTENANCE_MIN_WAL_BYTES")
 	flags.StringVar(&state.logLevel, "log-level", "", "Log level: debug, info, warn, error; env: KUBE_INSIGHT_LOGGING_LEVEL")
 	flags.StringVar(&state.logFormat, "log-format", "", "Log format: text, json, or logfmt; env: KUBE_INSIGHT_LOGGING_FORMAT")
 

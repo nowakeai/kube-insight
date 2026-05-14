@@ -188,18 +188,25 @@ func WatchResourceStreamClientGo(ctx context.Context, opts WatchOptions) (WatchS
 		if isGracefulWatchStop(err, deadline) {
 			return summary, nil
 		}
-		summary.WatchErrors++
-		_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 		attempts++
 		if opts.MaxRetries >= 0 && attempts > opts.MaxRetries {
+			summary.WatchErrors++
+			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 			return summary, err
 		}
 		if isResourceVersionExpired(err) {
 			summary.Relists++
 			needsList = true
+			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "retrying", err.Error())
 			watchLog(opts.Logf, "resourceVersion expired", "resource", resourceLabel(prepared.Resource), "relist", summary.Relists, "error", err)
-		} else {
+		} else if isTransientWatchStreamError(err) {
 			summary.Retries++
+			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "retrying", err.Error())
+			watchLog(opts.Logf, "watch stream reconnect", "resource", resourceLabel(prepared.Resource), "retries", summary.Retries, "resourceVersion", emptyLabel(summary.ResourceVersion), "error", err)
+		} else {
+			summary.WatchErrors++
+			summary.Retries++
+			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 			watchLog(opts.Logf, "retry watch", "resource", resourceLabel(prepared.Resource), "retries", summary.Retries, "resourceVersion", emptyLabel(summary.ResourceVersion), "error", err)
 		}
 		if err := sleepBeforeRetry(ctx, deadline, attempts); err != nil {

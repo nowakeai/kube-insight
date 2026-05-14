@@ -40,6 +40,8 @@ func TestWatchLogLevelClassifiesHighVolumeAndErrors(t *testing.T) {
 		"initial list worker done": slog.LevelDebug,
 		"retry watch":              slog.LevelWarn,
 		"event error":              slog.LevelWarn,
+		"watch stream interrupted": slog.LevelInfo,
+		"watch stream reconnect":   slog.LevelInfo,
 		"resourceVersion expired":  slog.LevelWarn,
 		"watch finished":           slog.LevelInfo,
 	}

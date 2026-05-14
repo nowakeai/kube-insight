@@ -13,6 +13,17 @@ storage:
   driver: sqlite
   sqlite:
     path: kubeinsight.db
+  maintenance:
+    # Lightweight maintenance runs with watch/serve --watch. It checkpoints WAL
+    # and runs incremental vacuum; full db compact remains an explicit command.
+    enabled: true
+    intervalSeconds: 300
+    minWalBytes: 16777216
+    incrementalVacuumPages: 256
+    journalSizeLimitBytes: 67108864
+    runOnStart: false
+    skipWhenDatabaseBusy: true
+    logUnchangedMaintenanceRuns: false
   postgres:
     dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
   cockroach:

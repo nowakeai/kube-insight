@@ -14,6 +14,9 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Storage.Driver != "sqlite" || cfg.Storage.SQLite.Path == "" {
 		t.Fatalf("storage = %#v", cfg.Storage)
 	}
+	if !cfg.Storage.Maintenance.Enabled || cfg.Storage.Maintenance.IntervalSeconds <= 0 {
+		t.Fatalf("maintenance = %#v", cfg.Storage.Maintenance)
+	}
 	if cfg.Instance.Role != "all" || !cfg.Collection.Enabled {
 		t.Fatalf("instance/collection = %#v %#v", cfg.Instance, cfg.Collection)
 	}
@@ -49,10 +52,12 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	t.Setenv("KUBE_INSIGHT_COLLECTION_CONCURRENCY", "9")
 	t.Setenv("KUBE_INSIGHT_LOGGING_LEVEL", "debug")
 	t.Setenv("KUBE_INSIGHT_LOGGING_FORMAT", "json")
+	t.Setenv("KUBE_INSIGHT_STORAGE_MAINTENANCE_MIN_WAL_BYTES", "1048576")
 	t.Setenv("KUBE_INSIGHT_FILTERS", `[{name: managed_fields, action: keep_modified, removePaths: [/metadata/managedFields]}]`)
 	cfg, err := LoadEffective(filepath.Join("..", "..", "config", "kube-insight.example.yaml"), "KUBE_INSIGHT", map[string]string{
-		"collection.namespace": "payments",
-		"storage.sqlite.path":  "override.db",
+		"collection.namespace":                "payments",
+		"storage.sqlite.path":                 "override.db",
+		"storage.maintenance.intervalSeconds": "60",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -68,6 +73,9 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	}
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" {
 		t.Fatalf("logging = %#v", cfg.Logging)
+	}
+	if cfg.Storage.Maintenance.IntervalSeconds != 60 || cfg.Storage.Maintenance.MinWalBytes != 1048576 {
+		t.Fatalf("maintenance = %#v", cfg.Storage.Maintenance)
 	}
 	if len(cfg.Filters) != 1 || cfg.Filters[0].Name != "managed_fields" {
 		t.Fatalf("filters = %#v", cfg.Filters)

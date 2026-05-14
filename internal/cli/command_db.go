@@ -164,7 +164,7 @@ func dbResourcesHealthCommand(ctx context.Context, stdout io.Writer, state *cliS
 		},
 	}
 	cmd.Flags().StringVar(&opts.ClusterID, "cluster", "", "Cluster ID")
-	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status, such as listed, bookmark, watch_error, list_error, or not_started")
+	cmd.Flags().StringVar(&opts.Status, "status", "", "Filter by status, such as listed, bookmark, retrying, watch_error, list_error, or not_started")
 	cmd.Flags().BoolVar(&opts.ErrorsOnly, "errors-only", false, "Show only resources with watch/list errors")
 	cmd.Flags().DurationVar(&opts.StaleAfter, "stale-after", 0, "Mark rows stale when updated longer ago than this duration")
 	cmd.Flags().IntVar(&opts.Limit, "limit", 100, "Maximum rows to return; 0 means no limit")

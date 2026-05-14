@@ -83,6 +83,15 @@ func rootConfigOverrides(cmd *cobra.Command, state *cliState) map[string]string 
 	if flagChanged(cmd, "client-go") {
 		overrides["collection.useClientGo"] = strconv.FormatBool(state.clientGo)
 	}
+	if flagChanged(cmd, "storage-maintenance") {
+		overrides["storage.maintenance.enabled"] = strconv.FormatBool(state.maintenance)
+	}
+	if flagChanged(cmd, "maintenance-interval-seconds") {
+		overrides["storage.maintenance.intervalSeconds"] = strconv.Itoa(state.maintenanceEvery)
+	}
+	if flagChanged(cmd, "maintenance-min-wal-bytes") {
+		overrides["storage.maintenance.minWalBytes"] = strconv.FormatInt(state.minWalBytes, 10)
+	}
 	if flagChanged(cmd, "log-level") {
 		overrides["logging.level"] = state.logLevel
 	}

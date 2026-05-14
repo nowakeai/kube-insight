@@ -25,9 +25,11 @@ import (
 
 type WatchOptions struct {
 	Context              string
+	ClusterID            string
 	Resource             Resource
 	Namespace            string
 	Store                storage.Store
+	Logf                 WatchLogFunc
 	MaxEvents            int
 	Timeout              time.Duration
 	StartResourceVersion string
@@ -36,6 +38,7 @@ type WatchOptions struct {
 
 type WatchSummary struct {
 	Context           string         `json:"context"`
+	ClusterID         string         `json:"clusterId,omitempty"`
 	Resource          Resource       `json:"resource"`
 	Namespace         string         `json:"namespace,omitempty"`
 	Listed            int            `json:"listed"`
@@ -54,18 +57,23 @@ type WatchSummary struct {
 
 type WatchResourcesOptions struct {
 	Context           string
+	ClusterID         string
 	Resources         []Resource
 	DiscoverResources bool
 	Namespace         string
 	Store             storage.Store
+	Logf              WatchLogFunc
 	MaxEvents         int
 	Timeout           time.Duration
 	Concurrency       int
 	MaxRetries        int
 }
 
+type WatchLogFunc func(message string, args ...any)
+
 type WatchResourcesSummary struct {
 	Context            string               `json:"context"`
+	ClusterID          string               `json:"clusterId,omitempty"`
 	Resources          int                  `json:"resources"`
 	Completed          int                  `json:"completed"`
 	Errors             int                  `json:"errors"`
@@ -104,138 +112,51 @@ type WatchResourceQueue struct {
 	QueueWaitMS float64  `json:"queueWaitMs"`
 }
 
-type FakeWatchReconciliationOptions struct {
-	Context     string
-	Store       storage.Store
-	Namespace   string
-	Concurrency int
-}
-
 var errWatchClosed = errors.New("watch channel closed")
-
-func RunFakeWatchReconciliation(ctx context.Context, opts FakeWatchReconciliationOptions) (WatchResourcesSummary, error) {
-	if opts.Store == nil {
-		return WatchResourcesSummary{}, fmt.Errorf("fake watch reconciliation requires a store")
-	}
-	if opts.Context == "" {
-		opts.Context = "fake"
-	}
-	if opts.Namespace == "" {
-		opts.Namespace = "default"
-	}
-	if opts.Concurrency <= 0 {
-		opts.Concurrency = 1
-	}
-	cases := []struct {
-		resource Resource
-		previous []core.ResourceRef
-		current  []unstructured.Unstructured
-	}{
-		{
-			resource: Resource{Name: "pods", Version: "v1", Resource: "pods", Kind: "Pod", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
-			previous: []core.ResourceRef{
-				{ClusterID: opts.Context, Version: "v1", Resource: "pods", Kind: "Pod", Namespace: opts.Namespace, Name: "keep", UID: "pod-keep"},
-				{ClusterID: opts.Context, Version: "v1", Resource: "pods", Kind: "Pod", Namespace: opts.Namespace, Name: "gone", UID: "pod-gone"},
-				{ClusterID: opts.Context, Version: "v1", Resource: "pods", Kind: "Pod", Namespace: "other", Name: "hidden", UID: "pod-hidden"},
-			},
-			current: []unstructured.Unstructured{fakeObject("v1", "Pod", opts.Namespace, "keep", "pod-keep")},
-		},
-		{
-			resource: Resource{Name: "services", Version: "v1", Resource: "services", Kind: "Service", Namespaced: true, Verbs: []string{"get", "list", "watch"}},
-			previous: []core.ResourceRef{
-				{ClusterID: opts.Context, Version: "v1", Resource: "services", Kind: "Service", Namespace: opts.Namespace, Name: "api", UID: "svc-api"},
-				{ClusterID: opts.Context, Version: "v1", Resource: "services", Kind: "Service", Namespace: opts.Namespace, Name: "orphan", UID: "svc-orphan"},
-			},
-			current: []unstructured.Unstructured{fakeObject("v1", "Service", opts.Namespace, "api", "svc-api")},
-		},
-	}
-	out := WatchResourcesSummary{
-		Context:       opts.Context,
-		Resources:     len(cases),
-		Concurrency:   opts.Concurrency,
-		MaxQueueDepth: max(0, len(cases)-opts.Concurrency),
-		Workers:       make([]WatchWorkerSummary, len(cases)),
-	}
-	for i, tc := range cases {
-		info := resourceInfo(tc.resource)
-		if apiStore, ok := opts.Store.(storage.APIResourceStore); ok {
-			if err := apiStore.UpsertAPIResources(ctx, []kubeapi.ResourceInfo{info}, time.Now().UTC()); err != nil {
-				return out, err
-			}
-		}
-		list := &unstructured.UnstructuredList{Items: tc.current}
-		list.SetResourceVersion(fmt.Sprintf("fake-%d", i+1))
-		reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.Context, info, opts.Namespace, list.GetResourceVersion(), tc.previous, list)
-		summary := WatchSummary{
-			Context:           opts.Context,
-			Resource:          tc.resource,
-			Namespace:         opts.Namespace,
-			Listed:            len(tc.current),
-			ResourceVersion:   list.GetResourceVersion(),
-			Deleted:           reconciled.Deleted,
-			ReconciledDeleted: reconciled.Deleted,
-			UnknownVisibility: reconciled.UnknownVisibility,
-			Stored:            reconciled.Ingest.StoredObservations,
-			Ingest:            reconciled.Ingest,
-		}
-		worker := WatchWorkerSummary{
-			Resource:    tc.resource,
-			Summary:     &summary,
-			Queued:      i >= opts.Concurrency,
-			QueueWaitMS: fakeQueueWaitMS(i, opts.Concurrency),
-		}
-		if err != nil {
-			worker.Error = err.Error()
-			out.Workers[i] = worker
-			out.Errors++
-			continue
-		}
-		out.Workers[i] = worker
-		out.Completed++
-		out.Listed += summary.Listed
-		out.Deleted += summary.Deleted
-		out.ReconciledDeleted += summary.ReconciledDeleted
-		out.UnknownVisibility += summary.UnknownVisibility
-		out.Stored += summary.Stored
-		out.Ingest = addIngest(out.Ingest, summary.Ingest)
-	}
-	out.ResourceQueue = resourceQueueMetrics(out.Workers, out.Concurrency)
-	for _, metric := range out.ResourceQueue {
-		out.QueueWaitMS += metric.QueueWaitMS
-		if metric.Queued {
-			out.BackpressureEvents++
-		}
-	}
-	return out, nil
-}
 
 func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (WatchResourcesSummary, error) {
 	if opts.Store == nil {
 		return WatchResourcesSummary{}, fmt.Errorf("watch requires a store")
 	}
 	if opts.Context == "" {
+		watchLog(opts.Logf, "resolving current kubeconfig context")
 		current, err := CurrentContextClientGo()
 		if err != nil {
 			return WatchResourcesSummary{}, err
 		}
 		opts.Context = current
 	}
+	if opts.ClusterID == "" {
+		identity, err := ResolveClusterIdentityClientGo(ctx, opts.Context)
+		if err != nil {
+			return WatchResourcesSummary{}, err
+		}
+		opts.ClusterID = identity.ID
+		if clusterStore, ok := opts.Store.(storage.ClusterStore); ok {
+			if err := clusterStore.UpsertCluster(ctx, storage.ClusterRecord{
+				Name:   identity.ID,
+				UID:    identity.UID,
+				Source: clusterSource(identity),
+			}); err != nil {
+				return WatchResourcesSummary{}, err
+			}
+		}
+		watchLog(opts.Logf, "resolved cluster", "context", opts.Context, "clusterId", opts.ClusterID, "uid", emptyLabel(identity.UID))
+	}
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 4
 	}
 	if opts.MaxRetries < 0 {
-		opts.MaxRetries = 3
+		opts.MaxRetries = -1
 	}
-	if opts.Timeout <= 0 && opts.MaxEvents <= 0 {
-		opts.Timeout = 30 * time.Second
-	}
-
 	resources := opts.Resources
 	if opts.DiscoverResources || len(resources) == 0 {
+		watchLog(opts.Logf, "discovering watchable resources", "context", opts.Context)
 		discovered, err := DiscoverResourcesClientGo(ctx, opts.Context)
 		if err != nil && len(discovered) == 0 {
 			return WatchResourcesSummary{}, err
 		}
+		watchLog(opts.Logf, "discovered watchable resources", "resources", len(discovered), "context", opts.Context)
 		if len(resources) == 0 {
 			resources = discovered
 		} else {
@@ -246,9 +167,21 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 	if len(resources) == 0 {
 		return WatchResourcesSummary{}, fmt.Errorf("no watchable resources found")
 	}
+	if apiStore, ok := opts.Store.(storage.APIResourceStore); ok {
+		infos := make([]kubeapi.ResourceInfo, 0, len(resources))
+		for _, resource := range resources {
+			infos = append(infos, resourceInfo(resource))
+		}
+		if err := apiStore.UpsertAPIResources(ctx, infos, time.Now().UTC()); err != nil {
+			return WatchResourcesSummary{}, err
+		}
+		watchLog(opts.Logf, "registered api resources", "resources", len(infos), "context", opts.Context)
+	}
+	watchLog(opts.Logf, "starting watch", "context", opts.Context, "namespace", watchNamespaceLabel(opts.Namespace), "resources", len(resources), "concurrency", opts.Concurrency, "maxEvents", opts.MaxEvents, "timeout", watchTimeoutLabel(opts.Timeout))
 
 	summary := WatchResourcesSummary{
 		Context:       opts.Context,
+		ClusterID:     opts.ClusterID,
 		Resources:     len(resources),
 		Concurrency:   opts.Concurrency,
 		MaxQueueDepth: max(0, len(resources)-opts.Concurrency),
@@ -276,17 +209,23 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 			if i >= opts.Concurrency {
 				summary.Workers[i].Queued = true
 			}
+			watchLog(opts.Logf, "worker start", "resource", resourceLabel(resource), "queueWaitMs", waitMS)
 			workerSummary, err := WatchResourceClientGo(ctx, WatchOptions{
 				Context:    opts.Context,
+				ClusterID:  opts.ClusterID,
 				Resource:   resource,
 				Namespace:  opts.Namespace,
 				Store:      opts.Store,
+				Logf:       opts.Logf,
 				MaxEvents:  opts.MaxEvents,
 				Timeout:    opts.Timeout,
 				MaxRetries: opts.MaxRetries,
 			})
 			if err != nil {
 				summary.Workers[i].Error = err.Error()
+				watchLog(opts.Logf, "worker error", "resource", resourceLabel(resource), "error", err)
+			} else {
+				watchLog(opts.Logf, "worker done", "resource", resourceLabel(resource), "listed", workerSummary.Listed, "events", workerSummary.Events, "stored", workerSummary.Stored, "bookmarks", workerSummary.Bookmarks, "deleted", workerSummary.Deleted)
 			}
 			summary.Workers[i].Summary = &workerSummary
 		}()
@@ -317,6 +256,7 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 		summary.Ingest = addIngest(summary.Ingest, worker.Summary.Ingest)
 	}
 	summary.ResourceQueue = resourceQueueMetrics(summary.Workers, summary.Concurrency)
+	watchLog(opts.Logf, "watch finished", "context", summary.Context, "completed", summary.Completed, "errors", summary.Errors, "listed", summary.Listed, "events", summary.Events, "stored", summary.Stored)
 	return summary, nil
 }
 
@@ -344,13 +284,6 @@ func resourceQueueMetrics(workers []WatchWorkerSummary, concurrency int) []Watch
 	return out
 }
 
-func fakeQueueWaitMS(index, concurrency int) float64 {
-	if concurrency <= 0 || index < concurrency {
-		return 0
-	}
-	return float64(index-concurrency+1) * 10
-}
-
 func resourceQueuePriority(resource Resource) string {
 	profile := resourceprofile.ForResource(resourceInfo(resource))
 	return profile.Priority
@@ -361,24 +294,40 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 		return WatchSummary{}, fmt.Errorf("watch requires a store")
 	}
 	if opts.Context == "" {
+		watchLog(opts.Logf, "resolving current kubeconfig context")
 		current, err := CurrentContextClientGo()
 		if err != nil {
 			return WatchSummary{}, err
 		}
 		opts.Context = current
 	}
-	if opts.MaxEvents <= 0 && opts.Timeout <= 0 {
-		opts.MaxEvents = 1
+	if opts.ClusterID == "" {
+		identity, err := ResolveClusterIdentityClientGo(ctx, opts.Context)
+		if err != nil {
+			return WatchSummary{}, err
+		}
+		opts.ClusterID = identity.ID
+		if clusterStore, ok := opts.Store.(storage.ClusterStore); ok {
+			if err := clusterStore.UpsertCluster(ctx, storage.ClusterRecord{
+				Name:   identity.ID,
+				UID:    identity.UID,
+				Source: clusterSource(identity),
+			}); err != nil {
+				return WatchSummary{}, err
+			}
+		}
+		watchLog(opts.Logf, "resolved cluster", "context", opts.Context, "clusterId", opts.ClusterID, "uid", emptyLabel(identity.UID))
 	}
 	if opts.MaxRetries < 0 {
-		opts.MaxRetries = 3
+		opts.MaxRetries = -1
 	}
 
 	resolved, err := resolveResourceClientGo(ctx, opts.Context, opts.Resource)
 	if err != nil {
 		return WatchSummary{}, err
 	}
-	config, err := restConfig(opts.Context)
+	watchLog(opts.Logf, "resolved resource", "resource", resourceLabel(resolved), "apiVersion", resourceAPIVersion(resolved), "namespaced", resolved.Namespaced)
+	config, err := watchRestConfig(opts.Context)
 	if err != nil {
 		return WatchSummary{}, err
 	}
@@ -403,6 +352,7 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 	}
 	summary := WatchSummary{
 		Context:   opts.Context,
+		ClusterID: opts.ClusterID,
 		Resource:  resolved,
 		Namespace: opts.Namespace,
 	}
@@ -413,6 +363,7 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 	resourceVersion := opts.StartResourceVersion
 	attempts := 0
 	for {
+		watchLog(opts.Logf, "list resource", "resource", resourceLabel(resolved), "namespace", watchNamespaceLabel(opts.Namespace), "resourceVersion", emptyLabel(resourceVersion))
 		err := listAndWatchOnce(ctx, resourceClient, opts, info, deadline, resourceVersion, &summary)
 		if err == nil {
 			return summary, nil
@@ -421,17 +372,19 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 			return summary, nil
 		}
 		summary.WatchErrors++
-		_ = upsertOffset(ctx, opts.Store, opts.Context, info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
+		_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 		attempts++
-		if attempts > opts.MaxRetries {
+		if opts.MaxRetries >= 0 && attempts > opts.MaxRetries {
 			return summary, err
 		}
 		if isResourceVersionExpired(err) {
 			summary.Relists++
 			resourceVersion = ""
+			watchLog(opts.Logf, "resourceVersion expired", "resource", resourceLabel(resolved), "relist", summary.Relists, "error", err)
 		} else {
 			summary.Retries++
 			resourceVersion = summary.ResourceVersion
+			watchLog(opts.Logf, "retry watch", "resource", resourceLabel(resolved), "retries", summary.Retries, "resourceVersion", emptyLabel(resourceVersion), "error", err)
 		}
 		if err := sleepBeforeRetry(ctx, deadline, attempts); err != nil {
 			return summary, err
@@ -440,7 +393,7 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 }
 
 func listAndWatchOnce(ctx context.Context, resourceClient dynamic.ResourceInterface, opts WatchOptions, info kubeapi.ResourceInfo, deadline time.Time, resourceVersion string, summary *WatchSummary) error {
-	previousRefs, err := latestResourceRefs(ctx, opts.Store, opts.Context, info, opts.Namespace)
+	previousRefs, err := latestResourceRefs(ctx, opts.Store, opts.ClusterID, info, opts.Namespace)
 	if err != nil {
 		return err
 	}
@@ -450,17 +403,18 @@ func listAndWatchOnce(ctx context.Context, resourceClient dynamic.ResourceInterf
 	}
 	summary.Listed += len(list.Items)
 	summary.ResourceVersion = list.GetResourceVersion()
+	watchLog(opts.Logf, "listed resource", "resource", info.Resource, "namespace", watchNamespaceLabel(opts.Namespace), "items", len(list.Items), "resourceVersion", emptyLabel(summary.ResourceVersion))
 	if listData, err := json.Marshal(list); err != nil {
 		return err
 	} else {
-		ingested, err := ingestList(ctx, opts.Store, opts.Context, listData)
+		ingested, err := ingestList(ctx, opts.Store, opts.ClusterID, listData)
 		if err != nil {
 			return err
 		}
 		summary.Ingest = addIngest(summary.Ingest, ingested)
 		summary.Stored += ingested.StoredObservations
 	}
-	reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.Context, info, opts.Namespace, summary.ResourceVersion, previousRefs, list)
+	reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, previousRefs, list)
 	if err != nil {
 		return err
 	}
@@ -469,10 +423,11 @@ func listAndWatchOnce(ctx context.Context, resourceClient dynamic.ResourceInterf
 	summary.UnknownVisibility += reconciled.UnknownVisibility
 	summary.Stored += reconciled.Ingest.StoredObservations
 	summary.Ingest = addIngest(summary.Ingest, reconciled.Ingest)
-	if err := upsertOffset(ctx, opts.Store, opts.Context, info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventList, "listed", ""); err != nil {
+	if err := upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventList, "listed", ""); err != nil {
 		return err
 	}
 
+	watchLog(opts.Logf, "watching resource", "resource", info.Resource, "namespace", watchNamespaceLabel(opts.Namespace), "resourceVersion", emptyLabel(summary.ResourceVersion))
 	watchOptions := metav1.ListOptions{
 		ResourceVersion:     summary.ResourceVersion,
 		AllowWatchBookmarks: true,
@@ -504,19 +459,20 @@ func listAndWatchOnce(ctx context.Context, resourceClient dynamic.ResourceInterf
 			if !ok {
 				return errWatchClosed
 			}
-			if err := handleWatchEvent(ctx, opts.Store, opts.Context, info, opts.Namespace, event, summary); err != nil {
+			if err := handleWatchEvent(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, event, summary, opts.Logf); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace string, event watch.Event, summary *WatchSummary) error {
+func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace string, event watch.Event, summary *WatchSummary, logf WatchLogFunc) error {
 	if event.Type == watch.Error {
 		err := apierrors.FromObject(event.Object)
 		if err == nil {
 			err = fmt.Errorf("watch error event")
 		}
+		watchLog(logf, "event error", "resource", info.Resource, "error", err)
 		_ = upsertOffset(ctx, store, clusterID, info, namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 		return err
 	}
@@ -530,6 +486,7 @@ func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string
 	}
 	if event.Type == watch.Bookmark {
 		summary.Bookmarks++
+		watchLog(logf, "bookmark", "resource", info.Resource, "resourceVersion", emptyLabel(summary.ResourceVersion), "bookmarks", summary.Bookmarks)
 		return upsertOffset(ctx, store, clusterID, info, namespace, summary.ResourceVersion, storage.OffsetEventBookmark, "bookmark", "")
 	}
 	data, err := watchEventJSON(event.Type, obj)
@@ -546,6 +503,7 @@ func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string
 	}
 	summary.Stored += ingested.StoredObservations
 	summary.Ingest = addIngest(summary.Ingest, ingested)
+	watchLog(logf, "event", "type", event.Type, "resource", info.Resource, "namespace", emptyLabel(obj.GetNamespace()), "name", obj.GetName(), "resourceVersion", emptyLabel(summary.ResourceVersion), "stored", ingested.StoredObservations, "events", summary.Events)
 	return upsertOffset(ctx, store, clusterID, info, namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watching", "")
 }
 

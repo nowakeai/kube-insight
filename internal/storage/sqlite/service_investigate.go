@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/logging"
 )
 
 type ServiceInvestigation struct {
@@ -45,6 +46,7 @@ func (s *Store) InvestigateService(ctx context.Context, target ObjectTarget) (Se
 }
 
 func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target ObjectTarget, opts InvestigationOptions) (ServiceInvestigation, error) {
+	logger := logging.FromContext(ctx).With("component", "query")
 	if target.Kind == "" {
 		target.Kind = "Service"
 	}
@@ -125,6 +127,7 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target Object
 		Topology: topology,
 	}
 	out.Summary = summarizeServiceInvestigation(out)
+	logger.Info("service investigation completed", "cluster", serviceRecord.ClusterID, "namespace", serviceRecord.Namespace, "name", serviceRecord.Name, "objects", out.Summary.Objects, "endpointSlices", out.Summary.EndpointSlices, "pods", out.Summary.Pods, "events", out.Summary.Events, "facts", out.Summary.Facts, "changes", out.Summary.Changes, "versions", out.Summary.Versions)
 	return out, nil
 }
 

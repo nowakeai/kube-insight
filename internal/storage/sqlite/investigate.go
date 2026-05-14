@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/logging"
 )
 
 type ObjectTarget struct {
@@ -82,6 +83,7 @@ type BundleSummary struct {
 }
 
 func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceBundle, error) {
+	logger := logging.FromContext(ctx).With("component", "query")
 	object, dbObjectID, err := s.FindObject(ctx, target)
 	if err != nil {
 		return EvidenceBundle{}, err
@@ -102,7 +104,7 @@ func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceB
 	if err != nil {
 		return EvidenceBundle{}, err
 	}
-	return EvidenceBundle{
+	bundle := EvidenceBundle{
 		Object:  object,
 		Latest:  latest,
 		Facts:   facts,
@@ -113,7 +115,9 @@ func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceB
 			Edges:   len(edges),
 			Changes: len(changes),
 		},
-	}, nil
+	}
+	logger.Info("investigation query completed", "cluster", object.ClusterID, "kind", object.Kind, "namespace", object.Namespace, "name", object.Name, "facts", len(facts), "edges", len(edges), "changes", len(changes))
+	return bundle, nil
 }
 
 func (s *Store) FindObject(ctx context.Context, target ObjectTarget) (ObjectRecord, int64, error) {

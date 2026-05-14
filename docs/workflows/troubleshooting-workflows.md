@@ -148,6 +148,169 @@ resource version diff
 
 The product should explicitly show "then vs now".
 
+## Workflow 7: Webhook Broke Deployments Briefly
+
+Question:
+
+```text
+Why did creates/updates fail for several minutes even though the webhook is
+healthy now?
+```
+
+Traditional investigation pain:
+
+- admission webhook Events may be gone,
+- webhook configuration may already be rolled back,
+- cert-manager Certificate and Secret may have changed since the incident,
+- APIService or ValidatingWebhookConfiguration status must be correlated by
+  hand.
+
+Kube-insight route:
+
+```text
+failed workload event
+  -> ValidatingWebhookConfiguration / MutatingWebhookConfiguration
+  -> webhook service
+  -> EndpointSlice
+  -> webhook Pods
+  -> Certificate / CertificateRequest / Order / Challenge
+  -> Secret metadata and keys
+  -> exact config/certificate version diffs
+```
+
+Expected evidence:
+
+```text
+10:01:03 ValidatingWebhookConfiguration webhook.cert-manager.io caBundle changed
+10:01:08 Certificate api-cert Ready=False reason=DoesNotExist
+10:01:09 Secret api-tls had keys [tls.crt,tls.key] regenerated
+10:02:12 Webhook Pod Ready=False
+10:05:44 Certificate Ready=True and webhook Pod Ready=True
+```
+
+Advantage:
+
+- Finds webhook service and cert-manager chain from stored edges.
+- Shows exact before/after webhook and Certificate versions.
+- Does not need expired Events to still exist in the cluster.
+
+## Workflow 8: RBAC Change Caused Permission Loss
+
+Question:
+
+```text
+Which RBAC change caused the controller to lose access?
+```
+
+Traditional investigation pain:
+
+- `kubectl auth can-i` only answers current state,
+- RoleBinding may have been fixed before investigation,
+- ClusterRole aggregation and subject references are easy to miss.
+
+Kube-insight route:
+
+```text
+controller Pod
+  -> ServiceAccount
+  -> RoleBinding / ClusterRoleBinding
+  -> Role / ClusterRole
+  -> rules diff
+  -> Events and failed reconciliations
+```
+
+Expected evidence:
+
+```text
+09:58:20 Role api-reader removed verb=list from pods
+09:58:24 RoleBinding api-reader-binding still points to Role api-reader
+09:59:01 Controller Event Forbidden: cannot list pods
+10:07:45 Role api-reader restored verb=list
+```
+
+Advantage:
+
+- Shows historical permissions instead of only current permissions.
+- Uses RoleBinding edges rather than scanning every RBAC object.
+- Returns exact Role version diffs as proof.
+
+## Workflow 9: CRD Or Controller Upgrade Regressed Custom Resources
+
+Question:
+
+```text
+Did a CRD/schema/controller change break custom resources?
+```
+
+Traditional investigation pain:
+
+- CRD status and schema are large,
+- controller Events may be noisy or expired,
+- custom resources vary by group and are often missed by hardcoded collectors.
+
+Kube-insight route:
+
+```text
+CustomResourceDefinition
+  -> discovered API resource
+  -> custom resource versions
+  -> controller Deployment / Pods
+  -> Events and status facts
+  -> CRD schema diff
+```
+
+Expected evidence:
+
+```text
+13:10:02 CRD widgets.example.com stored version changed v1beta1 -> v1
+13:10:04 schema removed spec.endpoint
+13:11:31 Widget api-widget status Ready=False reason=ValidationFailed
+13:12:10 Controller Deployment image changed controller:v1.8.1 -> v1.9.0
+```
+
+Advantage:
+
+- Discovery-backed collection can watch CRDs and custom resources.
+- CRD definitions are mostly preserved; only truly sensitive fields are
+  redacted.
+- Dynamic resolver maps custom GVRs without adding code for every CRD.
+
+## Workflow 10: Namespace-Scoped Collector Lost Visibility
+
+Question:
+
+```text
+Were objects deleted, or did our collector lose namespace/RBAC visibility?
+```
+
+Traditional investigation pain:
+
+- relist output cannot distinguish deletion from scope loss unless previous
+  visibility is tracked,
+- incorrect delete tombstones corrupt later history.
+
+Kube-insight route:
+
+```text
+latest refs before relist
+  -> relist namespace/resource scope
+  -> missing in-scope objects => delete tombstone
+  -> missing out-of-scope objects => unknown visibility
+```
+
+Expected evidence:
+
+```text
+pods/default/api-0 missing from default relist -> confirmed deleted
+pods/other/api-1 outside current namespace scope -> unknown_visibility
+```
+
+Advantage:
+
+- Avoids false delete history when permissions or namespace scope changes.
+- Reports `reconciledDeleted` and `unknownVisibility` separately.
+- Exposes per-GVR queue/backpressure to diagnose collector lag.
+
 ## Evidence Ranking
 
 Initial scoring inputs:

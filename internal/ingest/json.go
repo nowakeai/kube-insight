@@ -12,6 +12,7 @@ import (
 	"kube-insight/internal/extractor"
 	"kube-insight/internal/filter"
 	"kube-insight/internal/kubeapi"
+	"kube-insight/internal/logging"
 	"kube-insight/internal/storage"
 )
 
@@ -58,10 +59,12 @@ func DefaultPipeline(store storage.Store) Pipeline {
 }
 
 func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) {
+	logger := logging.FromContext(ctx).With("component", "ingest")
 	inputs, err := decodeObservationInputs(data)
 	if err != nil {
 		return Summary{}, err
 	}
+	logger.Info("decoded observations", "observations", len(inputs), "bytes", len(data))
 	resolver := p.Resolver
 	if resolver == nil {
 		resolver = kubeapi.NewResolver()
@@ -71,6 +74,7 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 		if err != nil {
 			return Summary{}, err
 		}
+		logger.Debug("loaded api resource registry", "resources", len(resources))
 		for _, resource := range resources {
 			resolver.Register(resource)
 		}
@@ -93,6 +97,7 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 	for _, input := range inputs {
 		summary.Observations++
 		obs := observationFromObject(clusterID, input.Type, now(), resolver, input.Object)
+		logger.Debug("ingesting observation", "cluster", obs.Ref.ClusterID, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "type", obs.Type)
 		filtered, decisions, err := p.Filters.Apply(ctx, obs)
 		if err != nil {
 			return summary, err
@@ -104,10 +109,12 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 		}
 		if discarded(decisions, filter.DiscardResource) {
 			summary.DiscardedResources++
+			logger.Debug("discarded resource", "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name)
 			continue
 		}
 		if discarded(decisions, filter.DiscardChange) && filtered.Type != core.ObservationDeleted {
 			summary.DiscardedChanges++
+			logger.Debug("discarded change", "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name)
 			continue
 		}
 		if hasDecision(decisions, filter.KeepModified) {
@@ -127,6 +134,7 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 		summary.Changes += len(evidence.Changes)
 	}
 
+	logger.Info("ingest completed", "observations", summary.Observations, "stored", summary.StoredObservations, "modified", summary.ModifiedObservations, "discardedChanges", summary.DiscardedChanges, "discardedResources", summary.DiscardedResources, "facts", summary.Facts, "edges", summary.Edges, "changes", summary.Changes)
 	return summary, nil
 }
 

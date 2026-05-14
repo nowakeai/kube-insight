@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"kube-insight/internal/logging"
 	"kube-insight/internal/sanitize"
 )
 
@@ -34,6 +35,7 @@ type SampleOptions struct {
 	OutputDir         string
 	Contexts          []string
 	AllContexts       bool
+	Namespace         string
 	DiscoverResources bool
 	UseClientGo       bool
 	Resources         []Resource
@@ -149,6 +151,7 @@ func CurrentContext(ctx context.Context) (string, error) {
 }
 
 func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, error) {
+	logger := logging.FromContext(ctx).With("component", "collector")
 	if opts.OutputDir == "" {
 		opts.OutputDir = filepath.Join("testdata", "kube-samples")
 	}
@@ -180,6 +183,7 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 		}
 		contexts = []string{current}
 	}
+	logger.Info("collect samples started", "contexts", len(contexts), "resources", len(opts.Resources), "discoverResources", opts.DiscoverResources, "outputDir", opts.OutputDir)
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return SampleManifest{}, err
 	}
@@ -190,6 +194,7 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 		MaxItems:    opts.MaxItems,
 	}
 	for _, kubeContext := range contexts {
+		logger.Info("collect context started", "context", kubeContext)
 		clusterAlias := "cluster-" + shortHash(opts.Salt, kubeContext)
 		clusterDir := filepath.Join(opts.OutputDir, clusterAlias)
 		if err := os.MkdirAll(clusterDir, 0o755); err != nil {
@@ -200,15 +205,18 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 		if opts.DiscoverResources {
 			discovered, err := discoverResources(ctx, kubeContext, opts.UseClientGo)
 			if err != nil {
+				logger.Warn("resource discovery failed", "context", kubeContext, "error", err)
 				cluster.Resources = append(cluster.Resources, ResourceEntry{
 					Name:  "api-resources",
 					Error: err.Error(),
 				})
 			} else {
+				logger.Info("resource discovery completed", "context", kubeContext, "resources", len(discovered))
 				resources = mergeResources(discovered, resources)
 			}
 		}
 		for _, resource := range resources {
+			logger.Debug("collect resource started", "context", kubeContext, "resource", resource.Name)
 			entry := ResourceEntry{
 				Name:       resource.Name,
 				Group:      resource.Group,
@@ -217,21 +225,24 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 				Kind:       resource.Kind,
 				Namespaced: resource.Namespaced,
 			}
-			data, err := getResourceWithOptions(ctx, kubeContext, resource, opts.UseClientGo)
+			data, err := getResourceWithOptions(ctx, kubeContext, resource, opts.UseClientGo, opts.Namespace)
 			if err != nil {
 				entry.Error = err.Error()
+				logger.Warn("collect resource failed", "context", kubeContext, "resource", resource.Name, "error", err)
 				cluster.Resources = append(cluster.Resources, entry)
 				continue
 			}
 			capped, count, err := capList(data, opts.MaxItems)
 			if err != nil {
 				entry.Error = err.Error()
+				logger.Warn("cap resource list failed", "context", kubeContext, "resource", resource.Name, "error", err)
 				cluster.Resources = append(cluster.Resources, entry)
 				continue
 			}
 			sanitized, err := sanitize.KubernetesJSON(capped, sanitize.KubernetesOptions{Salt: opts.Salt})
 			if err != nil {
 				entry.Error = err.Error()
+				logger.Warn("sanitize resource failed", "context", kubeContext, "resource", resource.Name, "error", err)
 				cluster.Resources = append(cluster.Resources, entry)
 				continue
 			}
@@ -242,8 +253,10 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 			}
 			entry.File = filepath.ToSlash(filepath.Join(clusterAlias, fileName))
 			entry.Items = count
+			logger.Debug("collect resource completed", "context", kubeContext, "resource", resource.Name, "items", count)
 			cluster.Resources = append(cluster.Resources, entry)
 		}
+		logger.Info("collect context completed", "context", kubeContext, "resources", len(cluster.Resources))
 		manifest.Clusters = append(manifest.Clusters, cluster)
 	}
 
@@ -255,6 +268,7 @@ func CollectSamples(ctx context.Context, opts SampleOptions) (SampleManifest, er
 	if err := os.WriteFile(filepath.Join(opts.OutputDir, "manifest.json"), manifestData, 0o600); err != nil {
 		return manifest, err
 	}
+	logger.Info("collect samples completed", "contexts", len(manifest.Clusters), "outputDir", opts.OutputDir)
 	return manifest, nil
 }
 
@@ -343,16 +357,20 @@ func mergeResources(groups ...[]Resource) []Resource {
 }
 
 func getResource(ctx context.Context, kubeContext string, resource Resource) ([]byte, error) {
-	return getResourceWithOptions(ctx, kubeContext, resource, false)
+	return getResourceWithOptions(ctx, kubeContext, resource, false, "")
 }
 
-func getResourceWithOptions(ctx context.Context, kubeContext string, resource Resource, useClientGo bool) ([]byte, error) {
+func getResourceWithOptions(ctx context.Context, kubeContext string, resource Resource, useClientGo bool, namespace string) ([]byte, error) {
 	if useClientGo {
-		return ListResourceClientGo(ctx, kubeContext, resource)
+		return ListResourceClientGo(ctx, kubeContext, resource, namespace)
 	}
 	args := []string{"--context", kubeContext, "get", resource.Name, "-o", "json", "--request-timeout=20s"}
 	if resource.Namespaced {
-		args = append(args[:4], append([]string{"-A"}, args[4:]...)...)
+		scopeArgs := []string{"-A"}
+		if namespace != "" {
+			scopeArgs = []string{"-n", namespace}
+		}
+		args = append(args[:4], append(scopeArgs, args[4:]...)...)
 	}
 	return runKubectl(ctx, args...)
 }

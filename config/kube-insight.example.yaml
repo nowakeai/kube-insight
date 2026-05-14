@@ -1,0 +1,99 @@
+version: v1alpha1
+
+instance:
+  # all: local single process; writer: discovery/watch/ingest only;
+  # api: read/query/API/Web/MCP only, no watch writers.
+  role: all
+
+logging:
+  level: info
+  format: text
+
+storage:
+  driver: sqlite
+  sqlite:
+    path: kubeinsight.db
+  postgres:
+    dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
+  cockroach:
+    dsnEnv: KUBE_INSIGHT_COCKROACH_DSN
+
+collection:
+  enabled: true
+  kubeconfig: ""
+  useClientGo: true
+  contexts: []
+  allContexts: false
+  namespace: ""
+  concurrency: 4
+  resources:
+    all: true
+    include: []
+    exclude:
+      - events.events.k8s.io
+      - leases.coordination.k8s.io
+
+filters:
+  - name: secret_metadata_only
+    enabled: true
+    action: keep_modified
+    resources: [secrets]
+    removePaths:
+      - /data
+      - /stringData
+    keepSecretKeys: true
+  - name: managed_fields
+    enabled: true
+    action: keep_modified
+    removePaths:
+      - /metadata/managedFields
+  - name: lease_skip
+    enabled: true
+    action: discard_resource
+    resources: [leases.coordination.k8s.io]
+
+extractors:
+  - name: reference
+    enabled: true
+  - name: pod
+    enabled: true
+    resources: [pods]
+  - name: node
+    enabled: true
+    resources: [nodes]
+  - name: event
+    enabled: true
+    resources: [events, events.events.k8s.io]
+  - name: endpointslice
+    enabled: true
+    resources: [endpointslices.discovery.k8s.io]
+
+plugins:
+  goja:
+    enabled: false
+    directories:
+      - ./plugins
+
+server:
+  api:
+    enabled: false
+    listen: 127.0.0.1:8080
+  web:
+    enabled: false
+    listen: 127.0.0.1:8081
+  chat:
+    enabled: false
+    openaiApiKeyEnv: OPENAI_API_KEY
+    model: gpt-5.2
+
+mcp:
+  enabled: false
+  listen: 127.0.0.1:8090
+
+validation:
+  maxStoredToRawRatio: 20
+  maxLatestLookupP95Ms: 250
+  maxHistoricalGetP95Ms: 250
+  maxServiceInvestigationP95Ms: 5000
+  minServiceVersions: 3
+  minServiceDiffs: 1

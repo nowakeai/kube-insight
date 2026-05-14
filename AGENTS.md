@@ -20,7 +20,7 @@ cmd/kube-insight/
   CLI entrypoint.
 
 internal/cli/
-  Standard-library CLI dispatcher.
+  Cobra-based CLI command tree and typed option wiring.
 
 internal/core/
   Shared domain types: observations, resource refs, facts, edges, changes,
@@ -65,6 +65,11 @@ internal/collector/
 - Facts and edges are the investigation candidate path; versions are proof.
 - Storage implementations should satisfy `internal/storage.Store`.
 
+## Maintainability Rules
+
+- Keep code files at or below 800 lines. Split large files by responsibility
+  before adding more behavior.
+
 ## Development Commands
 
 Preferred checks:
@@ -78,22 +83,26 @@ Current runnable CLI:
 
 ```bash
 go run ./cmd/kube-insight version
-go run ./cmd/kube-insight ingest --file sample.json
-go run ./cmd/kube-insight ingest --dir testdata/kube-samples --db kube-insight.db
-go run ./cmd/kube-insight discover resources --db kube-insight.db --context staging
-go run ./cmd/kube-insight discover resources --client-go --db kube-insight.db --context staging
-go run ./cmd/kube-insight collect samples --all-contexts --discover-resources --db kube-insight.db --output testdata/generated/kube-samples
-go run ./cmd/kube-insight collect ingest --context staging --discover-resources --db kube-insight.db --resource pods --max-items 10 --output testdata/generated/live-samples
-go run ./cmd/kube-insight collect ingest --client-go --context staging --discover-resources --db kube-insight.db --resource pods --max-items 10 --output testdata/generated/live-samples
-go run ./cmd/kube-insight watch resource --client-go --context staging --db kube-insight.db --resource pods --max-events 1 --timeout 30s --retries 3
-go run ./cmd/kube-insight watch resources --client-go --context staging --db kube-insight.db --resource pods --resource services --concurrency 2 --max-events 0 --timeout 30s --retries 3
-go run ./cmd/kube-insight generate samples --fixtures testdata/fixtures/kube --output testdata/generated/kube-samples --clusters 3 --copies 100
-go run ./cmd/kube-insight investigate --db kube-insight.db --kind Pod --namespace default --name sample-pod
-go run ./cmd/kube-insight investigate service api --namespace default --db kube-insight.db --from 2026-05-14T10:00:00Z --to 2026-05-14T11:00:00Z --max-evidence-objects 5 --max-versions-per-object 3
-go run ./cmd/kube-insight topology --db kube-insight.db --kind Pod --namespace default --name sample-pod
-go run ./cmd/kube-insight benchmark local --fixtures testdata/fixtures/kube --output testdata/generated/benchmark-samples --db kube-insight-benchmark.db --clusters 3 --copies 100 --query-runs 25
-go run ./cmd/kube-insight benchmark watch --context staging --db kube-insight-watch-benchmark.db --resource pods --resource services --duration 30s --concurrency 2 --retries 3
-go run ./cmd/kube-insight validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db kube-insight-poc-validation.db --clusters 1 --copies 2 --query-runs 3
+go run ./cmd/kube-insight config validate --file config/kube-insight.example.yaml
+go run ./cmd/kube-insight dev ingest --file sample.json
+go run ./cmd/kube-insight dev ingest --dir testdata/kube-samples --db kubeinsight.db
+go run ./cmd/kube-insight dev discover resources --db kubeinsight.db --context staging
+go run ./cmd/kube-insight dev discover resources --client-go --db kubeinsight.db --context staging
+go run ./cmd/kube-insight dev collect samples --all-contexts --discover-resources --db kubeinsight.db --output testdata/generated/kube-samples
+go run ./cmd/kube-insight dev collect ingest --context staging --discover-resources --db kubeinsight.db --resource pods --max-items 10 --output testdata/generated/live-samples
+go run ./cmd/kube-insight dev collect ingest --client-go --context staging --discover-resources --db kubeinsight.db --resource pods --max-items 10 --output testdata/generated/live-samples
+go run ./cmd/kube-insight watch --context staging --max-events 1 --timeout 30s --retries 3 pods
+go run ./cmd/kube-insight watch --context staging --concurrency 2 --max-events 0 --timeout 30s --retries 3 pods services
+go run ./cmd/kube-insight watch --context staging 'v1/*' 'apps/v1/*'
+go run ./cmd/kube-insight db clusters --db kubeinsight.db
+go run ./cmd/kube-insight db clusters delete k8s-00000000-0000-0000-0000-000000000000 --db kubeinsight.db --yes
+go run ./cmd/kube-insight dev generate samples --fixtures testdata/fixtures/kube --output testdata/generated/kube-samples --clusters 3 --copies 100
+go run ./cmd/kube-insight query object --db kubeinsight.db --kind Pod --namespace default --name sample-pod
+go run ./cmd/kube-insight query service api --namespace default --db kubeinsight.db --from 2026-05-14T10:00:00Z --to 2026-05-14T11:00:00Z --max-evidence-objects 5 --max-versions-per-object 3
+go run ./cmd/kube-insight query topology --db kubeinsight.db --kind Pod --namespace default --name sample-pod
+go run ./cmd/kube-insight dev benchmark local --fixtures testdata/fixtures/kube --output testdata/generated/benchmark-samples --db kube-insight-benchmark.db --clusters 3 --copies 100 --query-runs 25
+go run ./cmd/kube-insight dev benchmark watch --context staging --db kube-insight-watch-benchmark.db --resource pods --resource services --duration 30s --concurrency 2 --retries 3
+go run ./cmd/kube-insight dev validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db kube-insight-poc-validation.db --clusters 1 --copies 2 --query-runs 3
 ./scripts/poc-demo.sh
 ```
 

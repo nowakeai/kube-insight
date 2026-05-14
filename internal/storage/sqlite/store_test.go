@@ -134,6 +134,70 @@ func TestStorePersistsObservationEvidence(t *testing.T) {
 	}
 }
 
+func TestListAndDeleteClusters(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	if err := store.UpsertCluster(context.Background(), storage.ClusterRecord{
+		Name:   "k8s-cluster-uid",
+		UID:    "cluster-uid",
+		Source: "dev-context https://127.0.0.1:6443",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	obs := core.Observation{
+		Type:       core.ObservationModified,
+		ObservedAt: time.Unix(10, 0),
+		Ref: core.ResourceRef{
+			ClusterID: "k8s-cluster-uid",
+			Version:   "v1",
+			Resource:  "pods",
+			Kind:      "Pod",
+			Namespace: "default",
+			Name:      "api",
+			UID:       "pod-uid",
+		},
+		Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]any{
+				"name":      "api",
+				"namespace": "default",
+				"uid":       "pod-uid",
+			},
+		},
+	}
+	if err := store.PutObservation(context.Background(), obs, extractor.Evidence{}); err != nil {
+		t.Fatal(err)
+	}
+
+	clusters, err := store.ListClusters(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 || clusters[0].Name != "k8s-cluster-uid" || clusters[0].UID != "cluster-uid" || clusters[0].Objects != 1 || clusters[0].Versions != 1 {
+		t.Fatalf("clusters = %#v", clusters)
+	}
+
+	deleted, err := store.DeleteCluster(context.Background(), "k8s-cluster-uid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Name != "k8s-cluster-uid" || deleted.Objects != 1 || deleted.Versions != 1 {
+		t.Fatalf("deleted = %#v", deleted)
+	}
+	clusters, err = store.ListClusters(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 0 {
+		t.Fatalf("clusters after delete = %#v", clusters)
+	}
+}
+
 func TestStorePersistsGroupedEdgeTarget(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
 	if err != nil {

@@ -16,6 +16,7 @@ import (
 	"kube-insight/internal/core"
 	"kube-insight/internal/extractor"
 	"kube-insight/internal/kubeapi"
+	"kube-insight/internal/logging"
 	"kube-insight/internal/resourceprofile"
 	storagesql "kube-insight/internal/storage/sql"
 
@@ -62,6 +63,7 @@ func (s *Store) bootstrap(ctx context.Context) error {
 }
 
 func (s *Store) PutObservation(ctx context.Context, obs core.Observation, evidence extractor.Evidence) error {
+	logger := logging.FromContext(ctx).With("component", "storage")
 	if obs.Ref.Name == "" {
 		return errors.New("observation ref name is required")
 	}
@@ -121,7 +123,11 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	logger.Debug("stored observation", "cluster", obs.Ref.ClusterID, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "type", obs.Type, "versionId", versionID, "facts", len(evidence.Facts), "edges", len(evidence.Edges), "changes", len(evidence.Changes), "bytes", len(doc))
+	return nil
 }
 
 func (s *Store) GetFacts(ctx context.Context, objectID string) ([]core.Fact, error) {

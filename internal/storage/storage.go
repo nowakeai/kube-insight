@@ -21,6 +21,20 @@ type APIResourceStore interface {
 	APIResources(context.Context) ([]kubeapi.ResourceInfo, error)
 }
 
+type ClusterRecord struct {
+	Name      string
+	UID       string
+	Source    string
+	CreatedAt time.Time
+	Objects   int64
+	Versions  int64
+	Latest    int64
+}
+
+type ClusterStore interface {
+	UpsertCluster(context.Context, ClusterRecord) error
+}
+
 type FilterDecisionStore interface {
 	PutFilterDecisions(context.Context, core.Observation, []filter.Decision) error
 }

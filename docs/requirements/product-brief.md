@@ -77,13 +77,13 @@ cause without enough signal.
 CLI:
 
 ```bash
-kube-insight collect --context staging --out data/kube-samples.json
-kube-insight ingest --context staging --cluster staging
-kube-insight investigate service checkout-api \
+kube-insight dev collect samples --context staging --output data/kube-samples
+kube-insight dev ingest --dir data/kube-samples --db kube-insight.db
+kube-insight query service checkout-api \
   --namespace production \
   --from 2026-05-11T10:05:00Z \
   --to 2026-05-11T10:20:00Z
-kube-insight topology service checkout-api --at 2026-05-11T10:10:00Z
+kube-insight query topology --db kube-insight.db --kind Service --name checkout-api --namespace production
 kube-insight diff deployment checkout-api --from-version 120 --to-version 125
 ```
 

@@ -6,6 +6,7 @@ import (
 
 	"kube-insight/internal/core"
 	"kube-insight/internal/kubeapi"
+	"kube-insight/internal/logging"
 )
 
 type Evidence struct {
@@ -53,22 +54,26 @@ func NewRegistry(extractors ...Extractor) *Registry {
 }
 
 func (r *Registry) Extract(ctx context.Context, obs core.Observation) (Evidence, error) {
+	logger := logging.FromContext(ctx).With("component", "extractor")
 	var out Evidence
 	for _, e := range r.common {
 		evidence, err := e.Extract(ctx, obs)
 		if err != nil {
 			return out, err
 		}
+		logger.Debug("extractor evidence", "extractor", e.Kind(), "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "facts", len(evidence.Facts), "edges", len(evidence.Edges), "changes", len(evidence.Changes))
 		out = mergeEvidence(out, evidence)
 	}
 	e, ok := r.byKind[obs.Ref.Kind]
 	if !ok {
+		logger.Debug("no kind extractor", "kind", obs.Ref.Kind, "resource", obs.Ref.Resource)
 		return out, nil
 	}
 	evidence, err := e.Extract(ctx, obs)
 	if err != nil {
 		return out, err
 	}
+	logger.Debug("extractor evidence", "extractor", e.Kind(), "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "facts", len(evidence.Facts), "edges", len(evidence.Edges), "changes", len(evidence.Changes))
 	return mergeEvidence(out, evidence), nil
 }
 

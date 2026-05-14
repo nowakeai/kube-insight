@@ -26,12 +26,15 @@ Read these in order:
 6. [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
 7. [Global Watcher Design](ingestion/global-watcher-design.md)
 8. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
-9. [Security, Privacy, And Retention](security/security-retention.md)
-10. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
-11. [Backend Strategy](research/backend-strategy.md)
-12. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
-13. [Test Acceptance Plan](validation/test-acceptance-plan.md)
-14. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+9. [Configuration](configuration/configuration.md)
+10. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
+11. [Security, Privacy, And Retention](security/security-retention.md)
+12. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
+13. [Backend Strategy](research/backend-strategy.md)
+14. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
+15. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
+16. [Test Acceptance Plan](validation/test-acceptance-plan.md)
+17. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
 
 ## Categories
 
@@ -40,6 +43,8 @@ Read these in order:
 | `requirements/` | Product definition, target users, core use cases, MVP boundary. |
 | `architecture/` | System-level components, deployment shape, and technology stack. |
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
+| `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
+| `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |
 | `security/` | Redaction, retention, authorization, and Kubernetes RBAC inheritance. |

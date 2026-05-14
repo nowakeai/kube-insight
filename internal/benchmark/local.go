@@ -12,6 +12,7 @@ import (
 
 	"kube-insight/internal/collector"
 	"kube-insight/internal/ingest"
+	"kube-insight/internal/logging"
 	"kube-insight/internal/samplegen"
 	"kube-insight/internal/storage/sqlite"
 )
@@ -249,6 +250,7 @@ func RunWatch(ctx context.Context, opts WatchOptions) (Report, error) {
 		return Report{}, err
 	}
 	start := time.Now()
+	watchLogger := logging.FromContext(ctx).With("component", "watch")
 	watchSummary, err := collector.WatchResourcesClientGo(ctx, collector.WatchResourcesOptions{
 		Context:           opts.Context,
 		Resources:         opts.Resources,
@@ -259,6 +261,9 @@ func RunWatch(ctx context.Context, opts WatchOptions) (Report, error) {
 		Timeout:           opts.Duration,
 		Concurrency:       opts.Concurrency,
 		MaxRetries:        opts.MaxRetries,
+		Logf: func(message string, args ...any) {
+			watchLogger.Info(message, args...)
+		},
 	})
 	duration := time.Since(start).Seconds()
 	if err != nil {

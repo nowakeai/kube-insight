@@ -1,0 +1,238 @@
+# Configuration
+
+The default configuration file is:
+
+```bash
+config/kube-insight.example.yaml
+```
+
+Validate it with:
+
+```bash
+kube-insight config validate --file config/kube-insight.example.yaml
+```
+
+Runtime configuration is resolved in this order:
+
+1. YAML configuration file.
+2. Environment variables.
+3. Command-line flags.
+
+Environment variables use the `KUBE_INSIGHT_` prefix plus the YAML path in
+upper snake case:
+
+```bash
+KUBE_INSIGHT_INSTANCE_ROLE=writer
+KUBE_INSIGHT_LOGGING_LEVEL=info
+KUBE_INSIGHT_LOGGING_FORMAT=json
+KUBE_INSIGHT_STORAGE_SQLITE_PATH=./kubeinsight.db
+KUBE_INSIGHT_COLLECTION_KUBECONFIG=$HOME/.kube/config
+KUBE_INSIGHT_COLLECTION_CONTEXTS=staging,prod
+KUBE_INSIGHT_COLLECTION_NAMESPACE=payments
+KUBE_INSIGHT_COLLECTION_CONCURRENCY=8
+```
+
+Lists of strings use comma-separated values. Structured lists such as
+`filters` and `extractors` can be replaced with inline YAML:
+
+```bash
+KUBE_INSIGHT_FILTERS='[{name: managed_fields, action: keep_modified, removePaths: [/metadata/managedFields]}]'
+```
+
+Equivalent flag overrides:
+
+```bash
+kube-insight --config kube-insight.yaml \
+  --role writer \
+  --kubeconfig "$HOME/.kube/config" \
+  --context staging \
+  --namespace payments \
+  --log-level debug \
+  --log-format json \
+  --db ./kubeinsight.db \
+  collect ingest --discover-resources
+```
+
+## Logging
+
+Logs are written to stderr so stdout can stay machine-readable for JSON command
+results. The CLI uses structured `slog` logging and supports text and JSON
+formats:
+
+```yaml
+logging:
+  level: info
+  format: text
+```
+
+Equivalent overrides:
+
+```bash
+kube-insight --log-level debug --log-format json watch pods
+```
+
+## Instance Roles
+
+Kube-insight should support multiple application instances against the same
+backend. Exactly one production instance should normally own discovery/watch/
+ingest writes, while other instances only serve API/Web/MCP reads.
+
+```yaml
+instance:
+  role: writer
+
+collection:
+  enabled: true
+
+server:
+  api:
+    enabled: false
+  web:
+    enabled: false
+mcp:
+  enabled: false
+```
+
+Reader/API instance:
+
+```yaml
+instance:
+  role: api
+
+collection:
+  enabled: false
+
+server:
+  api:
+    enabled: true
+```
+
+Supported roles:
+
+- `all`: local single-process mode; may collect/watch and serve APIs.
+- `writer`: discovery/watch/ingest only; API/Web/MCP listeners disabled.
+- `api`: query/API/Web/MCP only; collection/watch disabled.
+
+## Watch All Resources
+
+For local PoC and broad cluster capture, use discovery-backed collection:
+
+```yaml
+collection:
+  enabled: true
+  kubeconfig: ""
+  useClientGo: true
+  contexts: []
+  allContexts: false
+  namespace: ""
+  resources:
+    all: true
+    include: []
+    exclude:
+      - leases.coordination.k8s.io
+```
+
+Equivalent CLI paths:
+
+```bash
+kube-insight dev collect ingest --client-go --discover-resources --db kubeinsight.db
+kube-insight watch
+kube-insight watch pods services
+kube-insight watch 'v1/*' 'apps/v1/*'
+```
+
+Discovery writes `api_resources`, and later ingestion uses that table as the
+authoritative GVR, scope, and kind mapping.
+
+Without `--db`, watch and storage management commands use `./kubeinsight.db`.
+The watcher resolves a stable cluster ID from the Kubernetes cluster identity
+and stores the kubeconfig context as metadata, so context renames do not create
+a new cluster record.
+
+Stored clusters can be inspected and removed with:
+
+```bash
+kube-insight db clusters
+kube-insight db clusters delete <cluster-id> --yes
+```
+
+## Filters
+
+Filters are ordered. A filter can be disabled, can target resources/kinds, and
+can remove JSON pointer paths.
+
+```yaml
+filters:
+  - name: secret_metadata_only
+    enabled: true
+    action: keep_modified
+    resources: [secrets]
+    removePaths: [/data, /stringData]
+    keepSecretKeys: true
+```
+
+Supported first-version actions:
+
+- `keep`
+- `keep_modified`
+- `discard_change`
+- `discard_resource`
+
+Future plugin path:
+
+```yaml
+filters:
+  - name: custom_noise_filter
+    enabled: true
+    action: keep_modified
+    script: ./plugins/filters/noise.js
+```
+
+The Goja plugin contract should receive an observation and return the same
+auditable decision shape as built-in filters.
+
+## Extractors
+
+Extractors can be enabled or disabled and can target resources/kinds.
+
+```yaml
+extractors:
+  - name: pod
+    enabled: true
+    resources: [pods]
+```
+
+Future plugin path:
+
+```yaml
+extractors:
+  - name: custom_rollout_facts
+    enabled: true
+    resources: [deployments.apps]
+    script: ./plugins/extractors/rollout.js
+```
+
+Extractor plugins should emit the same logical outputs as built-ins: facts,
+edges, changes, and optional summaries. Versions remain proof.
+
+## Storage
+
+SQLite is the local PoC default:
+
+```yaml
+storage:
+  driver: sqlite
+  sqlite:
+    path: kubeinsight.db
+```
+
+Postgres and CockroachDB are planned as shared central backends. Application
+role separation is controlled by `instance.role`, not by separate read/write
+DSNs:
+
+```yaml
+storage:
+  driver: postgres
+  postgres:
+    dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
+```

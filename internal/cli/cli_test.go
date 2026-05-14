@@ -26,6 +26,25 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunRootHelpIsGrouped(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--help"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{"config", "db", "dev", "query", "watch"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	for _, hidden := range []string{"benchmark", "collect", "discover", "generate", "ingest", "investigate", "topology", "validate", "completion"} {
+		if strings.Contains(out, "  "+hidden+" ") {
+			t.Fatalf("root help exposed %q: %s", hidden, out)
+		}
+	}
+}
+
 func TestRunIngestFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pod.json")
@@ -235,6 +254,56 @@ func TestRunGenerateSamples(t *testing.T) {
 	}
 }
 
+func TestRunConfigValidate(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"config", "validate",
+		"--file", filepath.Join("..", "..", "config", "kube-insight.example.yaml"),
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"ok": true`,
+		`"role": "all"`,
+		`"storage": "sqlite"`,
+		`"collection": true`,
+		`"resourcesAll": true`,
+		`"filters":`,
+		`"extractors":`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunConfigValidateEnvAndFlagPrecedence(t *testing.T) {
+	t.Setenv("KUBE_INSIGHT_STORAGE_SQLITE_PATH", "env.db")
+	t.Setenv("KUBE_INSIGHT_COLLECTION_CONTEXTS", "staging,prod")
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"config", "validate",
+		"--file", filepath.Join("..", "..", "config", "kube-insight.example.yaml"),
+		"--db", "flag.db",
+		"--namespace", "payments",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"sqlitePath": "flag.db"`,
+		`"contexts": [`,
+		`"staging"`,
+		`"prod"`,
+		`"namespace": "payments"`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
 func TestRunBenchmarkLocal(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "benchmark.db")
@@ -332,6 +401,86 @@ func TestRunBenchmarkWatchRequiresResourceOrDiscovery(t *testing.T) {
 	}
 }
 
+func TestRunWatchHelpShowsPositionalResources(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"watch", "--help"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"watch [RESOURCE_PATTERN ...]",
+		"v1/*",
+		"apps/v1/*",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "Available Commands") || strings.Contains(out, "watch resource") {
+		t.Fatalf("legacy subcommands should be hidden: %s", out)
+	}
+}
+
+func TestWatchResourcePatternMatching(t *testing.T) {
+	resources := []collector.Resource{
+		{Name: "pods", Group: "", Version: "v1", Resource: "pods", Kind: "Pod", Namespaced: true},
+		{Name: "deployments.apps", Group: "apps", Version: "v1", Resource: "deployments", Kind: "Deployment", Namespaced: true},
+		{Name: "deployments.apps", Group: "apps", Version: "v1beta1", Resource: "deployments", Kind: "Deployment", Namespaced: true},
+		{Name: "leases.coordination.k8s.io", Group: "coordination.k8s.io", Version: "v1", Resource: "leases", Kind: "Lease", Namespaced: true},
+	}
+	matched := matchResourcePatterns(resources, []string{"v1/*", "apps/v1/*"})
+	if len(matched) != 2 {
+		t.Fatalf("matched = %#v", matched)
+	}
+	if matched[0].Name != "pods" || matched[1].Name != "deployments.apps" || matched[1].Version != "v1" {
+		t.Fatalf("matched = %#v", matched)
+	}
+}
+
+func TestDefaultWatchDBPathIsStable(t *testing.T) {
+	got := defaultWatchDBPath("kind/dev:west")
+	if got != "kubeinsight.db" {
+		t.Fatalf("db path = %q", got)
+	}
+}
+
+func TestCompareResourceCoverage(t *testing.T) {
+	live := []collector.Resource{
+		{Name: "pods", Version: "v1", Resource: "pods", Kind: "Pod", Namespaced: true},
+		{Name: "deployments.apps", Group: "apps", Version: "v1", Resource: "deployments", Kind: "Deployment", Namespaced: true},
+	}
+	stored := []collector.Resource{
+		{Name: "pods", Version: "v1", Resource: "pods", Kind: "Pod", Namespaced: true},
+		{Name: "jobs.batch", Group: "batch", Version: "v1", Resource: "jobs", Kind: "Job", Namespaced: true},
+	}
+
+	report := compareResourceCoverage("dev", live, stored)
+	if report.LiveResources != 2 || report.Matched != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	if len(report.Missing) != 1 || report.Missing[0].Name != "deployments.apps" {
+		t.Fatalf("missing = %#v", report.Missing)
+	}
+	if len(report.Extra) != 1 || report.Extra[0].Name != "jobs.batch" {
+		t.Fatalf("extra = %#v", report.Extra)
+	}
+}
+
+func TestRunDBClustersDeleteRequiresConfirmation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--db", filepath.Join(t.TempDir(), "kubeinsight.db"),
+		"db", "clusters", "delete", "k8s-test",
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "without --yes") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunCollectIngestRequiresDB(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{"collect", "ingest", "--resource", "pods"}, &stdout, &stderr)
@@ -339,6 +488,24 @@ func TestRunCollectIngestRequiresDB(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "requires --db") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunWriteCommandRejectsAPIRole(t *testing.T) {
+	dir := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--role", "api",
+		"--collection-enabled=false",
+		"collect", "ingest",
+		"--db", filepath.Join(dir, "kube-insight.db"),
+		"--resource", "pods",
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "disabled when instance.role is api") {
 		t.Fatalf("error = %v", err)
 	}
 }

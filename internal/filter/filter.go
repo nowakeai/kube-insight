@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/logging"
 )
 
 type Outcome string
@@ -30,6 +31,7 @@ type Filter interface {
 type Chain []Filter
 
 func (c Chain) Apply(ctx context.Context, obs core.Observation) (core.Observation, []Decision, error) {
+	logger := logging.FromContext(ctx).With("component", "filter")
 	decisions := make([]Decision, 0, len(c))
 	for _, f := range c {
 		next, decision, err := f.Apply(ctx, obs)
@@ -42,6 +44,7 @@ func (c Chain) Apply(ctx context.Context, obs core.Observation) (core.Observatio
 			decision.Meta["filter"] = f.Name()
 		}
 		decisions = append(decisions, decision)
+		logger.Debug("filter decision", "filter", f.Name(), "outcome", decision.Outcome, "reason", decision.Reason, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name)
 		obs = next
 		if decision.Outcome == DiscardResource || decision.Outcome == DiscardChange {
 			break

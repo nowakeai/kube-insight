@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -13,10 +14,18 @@ import (
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
+
+type ClusterIdentity struct {
+	ID      string
+	UID     string
+	Context string
+	Server  string
+}
 
 func ConfiguredContextsClientGo() ([]string, error) {
 	config, err := loadClientConfig()
@@ -40,6 +49,51 @@ func CurrentContextClientGo() (string, error) {
 		return "", fmt.Errorf("current kubeconfig context is empty")
 	}
 	return config.CurrentContext, nil
+}
+
+func ResolveClusterIdentityClientGo(ctx context.Context, kubeContext string) (ClusterIdentity, error) {
+	config, err := loadClientConfig()
+	if err != nil {
+		return ClusterIdentity{}, err
+	}
+	if kubeContext == "" {
+		kubeContext = config.CurrentContext
+	}
+	if kubeContext == "" {
+		return ClusterIdentity{}, fmt.Errorf("current kubeconfig context is empty")
+	}
+	identity := ClusterIdentity{Context: kubeContext}
+	if contextConfig := config.Contexts[kubeContext]; contextConfig != nil {
+		if clusterConfig := config.Clusters[contextConfig.Cluster]; clusterConfig != nil {
+			identity.Server = clusterConfig.Server
+		}
+	}
+
+	rest, err := restConfig(kubeContext)
+	if err != nil {
+		return ClusterIdentity{}, err
+	}
+	client, err := kubernetes.NewForConfig(rest)
+	if err != nil {
+		return ClusterIdentity{}, err
+	}
+	namespace, err := client.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{})
+	if err == nil && namespace.UID != "" {
+		identity.UID = string(namespace.UID)
+		identity.ID = "k8s-" + identity.UID
+		return identity, nil
+	}
+	if identity.Server != "" {
+		identity.ID = "server-" + clusterShortHash(identity.Server)
+		return identity, nil
+	}
+	identity.ID = "context-" + clusterShortHash(kubeContext)
+	return identity, nil
+}
+
+func clusterShortHash(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("%x", sum[:6])
 }
 
 func DiscoverResourcesClientGo(ctx context.Context, kubeContext string) ([]Resource, error) {
@@ -67,7 +121,7 @@ func DiscoverResourcesClientGo(ctx context.Context, kubeContext string) ([]Resou
 	return resources, nil
 }
 
-func ListResourceClientGo(ctx context.Context, kubeContext string, resource Resource) ([]byte, error) {
+func ListResourceClientGo(ctx context.Context, kubeContext string, resource Resource, namespace string) ([]byte, error) {
 	config, err := restConfig(kubeContext)
 	if err != nil {
 		return nil, err
@@ -88,7 +142,10 @@ func ListResourceClientGo(ctx context.Context, kubeContext string, resource Reso
 	listOptions := metav1.ListOptions{}
 	var list any
 	if resolved.Namespaced {
-		list, err = client.Resource(gvr).Namespace(metav1.NamespaceAll).List(ctx, listOptions)
+		if namespace == "" {
+			namespace = metav1.NamespaceAll
+		}
+		list, err = client.Resource(gvr).Namespace(namespace).List(ctx, listOptions)
 	} else {
 		list, err = client.Resource(gvr).List(ctx, listOptions)
 	}
@@ -170,6 +227,14 @@ func resourceMatches(candidate, target Resource) bool {
 }
 
 func restConfig(kubeContext string) (*rest.Config, error) {
+	return restConfigWithTimeout(kubeContext, 20*time.Second)
+}
+
+func watchRestConfig(kubeContext string) (*rest.Config, error) {
+	return restConfigWithTimeout(kubeContext, 0)
+}
+
+func restConfigWithTimeout(kubeContext string, timeout time.Duration) (*rest.Config, error) {
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubeContext}
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
@@ -181,7 +246,7 @@ func restConfig(kubeContext string) (*rest.Config, error) {
 	config.UserAgent = "kube-insight"
 	config.QPS = 20
 	config.Burst = 40
-	config.Timeout = 20 * time.Second
+	config.Timeout = timeout
 	return config, nil
 }
 

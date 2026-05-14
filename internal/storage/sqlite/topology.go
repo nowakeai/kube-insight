@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"kube-insight/internal/logging"
 )
 
 type TopologyGraph struct {
@@ -28,6 +30,7 @@ type TopologySummary struct {
 }
 
 func (s *Store) Topology(ctx context.Context, target ObjectTarget) (TopologyGraph, error) {
+	logger := logging.FromContext(ctx).With("component", "query")
 	root, rootID, err := s.FindObject(ctx, target)
 	if err != nil {
 		return TopologyGraph{}, err
@@ -51,7 +54,7 @@ func (s *Store) Topology(ctx context.Context, target ObjectTarget) (TopologyGrap
 		nodes = append(nodes, node)
 	}
 
-	return TopologyGraph{
+	graph := TopologyGraph{
 		Root:  root,
 		Nodes: nodes,
 		Edges: edges,
@@ -59,7 +62,9 @@ func (s *Store) Topology(ctx context.Context, target ObjectTarget) (TopologyGrap
 			Nodes: len(nodes),
 			Edges: len(edges),
 		},
-	}, nil
+	}
+	logger.Info("topology query completed", "cluster", root.ClusterID, "kind", root.Kind, "namespace", root.Namespace, "name", root.Name, "nodes", len(nodes), "edges", len(edges))
+	return graph, nil
 }
 
 func (s *Store) relatedEdges(ctx context.Context, rootID int64) ([]TopologyEdge, error) {

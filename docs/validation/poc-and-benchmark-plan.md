@@ -30,7 +30,7 @@ staging
 Collect via global discovery watcher:
 
 ```bash
-kube-insight collect --context staging --all-resources --out data/kube-samples-staging.json
+kube-insight dev collect samples --context staging --discover-resources --out data/kube-samples-staging.json
 ```
 
 Minimum typed resources:
@@ -171,7 +171,7 @@ Pass condition:
 Implement:
 
 ```bash
-kube-insight investigate service SERVICE --namespace NS --from T1 --to T2
+kube-insight query service SERVICE --namespace NS --from T1 --to T2
 ```
 
 Flow:
@@ -316,19 +316,19 @@ Resource-specific acceptance:
 The local generated-data benchmark is available as:
 
 ```bash
-kube-insight benchmark local --fixtures testdata/fixtures/kube --output testdata/generated/benchmark-samples --db kube-insight-benchmark.db --query-runs 25
+kube-insight dev benchmark local --fixtures testdata/fixtures/kube --output testdata/generated/benchmark-samples --db kube-insight-benchmark.db --query-runs 25
 ```
 
 The live watch benchmark is available as:
 
 ```bash
-kube-insight benchmark watch --context staging --db kube-insight-watch-benchmark.db --resource pods --resource services --duration 30s --concurrency 2 --retries 3
+kube-insight dev benchmark watch --context staging --db kube-insight-watch-benchmark.db --resource pods --resource services --duration 30s --concurrency 2 --retries 3
 ```
 
 The local PoC validation gate is available as:
 
 ```bash
-kube-insight validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db kube-insight-poc-validation.db --clusters 1 --copies 2 --query-runs 3
+kube-insight dev validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db kube-insight-poc-validation.db --clusters 1 --copies 2 --query-runs 3
 ```
 
 The local demo entrypoint runs validation and writes a Service evidence bundle:

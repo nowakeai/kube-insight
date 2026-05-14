@@ -1,4 +1,5 @@
 /kube-insight
+/bin/
 *.db
 *.db-shm
 *.db-wal

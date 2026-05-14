@@ -175,9 +175,17 @@ or discard decision is durable.
 
 Current PoC implementation:
 
-- `kube-insight watch resource --client-go` supports a single GVR.
-- `kube-insight watch resources --client-go` supports multiple GVR workers with
-  bounded concurrency and per-worker error summaries.
+- `kube-insight watch` discovers and watches all watchable resources.
+- `kube-insight watch pods services` watches explicit resource names.
+- `kube-insight watch 'v1/*' 'apps/v1/*'` resolves group/version wildcard
+  patterns through discovery.
+- By default, watch targets the current kubeconfig context and writes to
+  `./kubeinsight.db`; `--all-contexts` watches every configured context into the
+  same database unless `--db` selects another path.
+- Runtime cluster identity is stored as a stable cluster ID derived from
+  Kubernetes cluster identity, with the kubeconfig context retained as metadata.
+- Multiple GVR workers run with bounded concurrency and per-worker error
+  summaries.
 - The worker performs an initial LIST, persists the list, then starts WATCH from
   the list resourceVersion.
 - ADDED/MODIFIED/DELETED events are ingested through the same JSON pipeline.

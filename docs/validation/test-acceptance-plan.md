@@ -31,7 +31,7 @@ Required before declaring the local PoC useful:
 - reconstruct retained versions within `max_delta_chain`,
 - answer service investigation scenarios from SQLite,
 - produce a benchmark JSON report,
-- pass `kube-insight validate poc`,
+- pass `kube-insight dev validate poc`,
 - pass all generated incident scenarios.
 
 ### Gate 2: Central Service

@@ -15,7 +15,9 @@
   <strong>Historical Kubernetes evidence for humans and agents.</strong><br>
   Capture sanitized cluster history, extract troubleshooting facts and topology
   edges, then query the evidence long after live state and Kubernetes Events
-  have moved on.
+  have moved on.<br>
+  Give agents a fast, sanitized evidence layer instead of broad live
+  <code>kubectl</code> access.
 </p>
 
 ---
@@ -32,6 +34,30 @@
 - Which Events disappeared from the apiserver but still matter?
 - What proof can an agent cite instead of guessing from summaries?
 
+## Why Not Point Agents at kubectl?
+
+Direct `kubectl` access makes an agent repeatedly list live resources, join
+relationships in prompt/tool code, and handle raw cluster payloads. That is
+slower for historical investigations and expands the security blast radius.
+
+kube-insight gives agents a narrower evidence interface:
+
+| Agent path | Speed | Security model |
+| --- | --- | --- |
+| Direct `kubectl` | Repeated live API calls, current-state only, agent must reconstruct joins across resource types. | Agent needs Kubernetes credentials and can receive raw object payloads unless every tool call is carefully constrained. |
+| kube-insight | Pre-extracted facts, edges, retained versions, and cluster-scoped SQL/MCP tools. | Filters run before storage, destructive filtering is audited, query tools are read-only, and service mode is designed for Kubernetes authz-aware access control. |
+
+In the recorded validation case, a retained Event-to-resource investigation ran
+in **28 ms** from kube-insight facts and edges, while a current `kubectl` Warning
+Event count took **3,176 ms** against the apiserver. A retained
+`PolicyViolation` count ran in **204 ms** versus **3,050 ms** for the comparable
+current `kubectl` count. That is roughly **15x to 113x faster** in this case,
+while also returning historical evidence that current Events no longer expose.
+
+The speedup is not a universal benchmark claim. It comes from changing the
+shape of the problem: kube-insight precomputes investigation candidates and
+keeps sanitized proof; `kubectl` asks the live apiserver each time.
+
 ## What It Does
 
 | Capability | What you get |
@@ -39,8 +65,8 @@
 | Historical versions | Retained Kubernetes JSON versions and observation timestamps. |
 | Searchable facts | Status, Event, rollout, RBAC, certificate, webhook, and endpoint facts. |
 | Topology edges | Workload, Service, EndpointSlice, Event, RBAC, cert-manager, and webhook relationships. |
-| Agent workflows | SQL recipes, MCP tools, and prompts for coverage-first investigation. |
-| Privacy controls | Filters run before hashing and storage; destructive filters write audit decisions. |
+| Faster agent workflows | SQL recipes, MCP tools, and prompts over pre-extracted evidence instead of repeated live `kubectl` joins. |
+| Safer agent access | Filters run before hashing and storage; destructive filters write audit decisions; read surfaces are designed for read-only, authz-aware service access. |
 | Local PoC mode | One binary, SQLite storage, CLI, HTTP API, and MCP surfaces. |
 | MVP storage path | PostgreSQL for central deployments, with CockroachDB for distributed metadata/query use cases. |
 

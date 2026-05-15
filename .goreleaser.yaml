@@ -1,0 +1,81 @@
+version: 2
+
+project_name: kube-insight
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  - id: kube-insight
+    main: ./cmd/kube-insight
+    binary: kube-insight
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: kube-insight
+    builds:
+      - kube-insight
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+dockers:
+  - image_templates:
+      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-amd64
+      - ghcr.io/nowakeai/kube-insight:latest-amd64
+    dockerfile: Dockerfile
+    use: buildx
+    goos: linux
+    goarch: amd64
+    ids:
+      - kube-insight
+    build_flag_templates:
+      - --platform=linux/amd64
+  - image_templates:
+      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-arm64
+      - ghcr.io/nowakeai/kube-insight:latest-arm64
+    dockerfile: Dockerfile
+    use: buildx
+    goos: linux
+    goarch: arm64
+    ids:
+      - kube-insight
+    build_flag_templates:
+      - --platform=linux/arm64
+
+docker_manifests:
+  - name_template: ghcr.io/nowakeai/kube-insight:{{ .Tag }}
+    image_templates:
+      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-amd64
+      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-arm64
+  - name_template: ghcr.io/nowakeai/kube-insight:latest
+    image_templates:
+      - ghcr.io/nowakeai/kube-insight:latest-amd64
+      - ghcr.io/nowakeai/kube-insight:latest-arm64

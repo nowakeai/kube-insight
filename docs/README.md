@@ -37,12 +37,22 @@ Read these in order:
 17. [Security, Privacy, And Retention](security/security-retention.md)
 18. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
 19. [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
-20. [Backend Strategy](research/backend-strategy.md)
-21. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
-22. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
-23. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
-24. [Test Acceptance Plan](validation/test-acceptance-plan.md)
-25. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+20. [Open Source Readiness](project/open-source-readiness.md)
+21. [Backend Strategy](research/backend-strategy.md)
+22. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
+23. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
+24. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
+25. [Test Acceptance Plan](validation/test-acceptance-plan.md)
+26. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+
+## Community And Release
+
+- [Contributing](../CONTRIBUTING.md)
+- [Security Policy](../SECURITY.md)
+- [Support](../SUPPORT.md)
+- [Maintainers](../MAINTAINERS.md)
+- [Code Of Conduct](../CODE_OF_CONDUCT.md)
+- [Release Process](../RELEASE.md)
 
 ## Categories
 
@@ -57,6 +67,7 @@ Read these in order:
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |
 | `security/` | Redaction, retention, authorization, and Kubernetes RBAC inheritance. |
+| `project/` | Open-source readiness and release hygiene. |
 | `research/` | Backend strategy and supporting research. |
 | `validation/` | PoC, benchmark, testing, and acceptance plans. |
 | `roadmap/` | Product roadmap, implementation phases, and unresolved questions. |

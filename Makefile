@@ -1,4 +1,4 @@
-.PHONY: test check-lines build validate demo fmt tidy clean
+.PHONY: test check-lines build validate open-source-check demo fmt tidy clean
 
 BIN ?= bin/kube-insight
 CONFIG ?= config/kube-insight.example.yaml
@@ -21,6 +21,9 @@ build:
 validate:
 	go run ./cmd/kube-insight config validate --file $(CONFIG)
 	go run ./cmd/kube-insight dev validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db testdata/generated/poc-validation/kube-insight.db --clusters 1 --copies 2 --query-runs 3
+
+open-source-check:
+	./scripts/open-source-check.sh
 
 demo:
 	./scripts/poc-demo.sh

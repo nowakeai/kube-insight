@@ -199,6 +199,9 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Maintainers](MAINTAINERS.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
 - [Release process](RELEASE.md)
 - [Full documentation index](docs/README.md)
 

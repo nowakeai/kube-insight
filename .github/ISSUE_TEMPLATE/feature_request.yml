@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose a kube-insight capability or workflow.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What Kubernetes investigation or operations problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should kube-insight do?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence model
+      description: What facts, edges, versions, observations, or query surfaces are involved?
+      placeholder: |
+        facts:
+        edges:
+        versions/proof:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ingestion/watch
+        - filters/sanitization
+        - extraction/facts/edges
+        - storage
+        - query/sql/history/search
+        - api/mcp/agent
+        - release/deployment
+        - documentation
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

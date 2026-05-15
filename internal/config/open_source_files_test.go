@@ -13,10 +13,18 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, path := range []string{
 		"README.md",
+		"CODE_OF_CONDUCT.md",
 		"CONTRIBUTING.md",
+		"MAINTAINERS.md",
+		"SUPPORT.md",
 		"SECURITY.md",
 		"RELEASE.md",
 		"Dockerfile",
+		".github/dependabot.yml",
+		".github/pull_request_template.md",
+		".github/ISSUE_TEMPLATE/bug_report.yml",
+		".github/ISSUE_TEMPLATE/config.yml",
+		".github/ISSUE_TEMPLATE/feature_request.yml",
 		".github/workflows/ci.yml",
 		".github/workflows/release.yml",
 		".goreleaser.yaml",

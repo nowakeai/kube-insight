@@ -89,6 +89,12 @@ Run the local insight vs kubectl benchmark:
 ./scripts/benchmark-insight-vs-kubectl.sh kubeinsight.db <kubectl-context>
 ```
 
+Run open-source readiness checks:
+
+```bash
+make open-source-check
+```
+
 Scrape metrics:
 
 ```bash

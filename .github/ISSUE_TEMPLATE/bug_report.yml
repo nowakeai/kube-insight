@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible kube-insight problem.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include kubeconfig files, bearer tokens,
+        generated SQLite databases, or unsanitized Kubernetes object payloads.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal commands, config, and sanitized fixtures needed to reproduce.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kube-insight version or commit
+      placeholder: v0.1.0 or git sha
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ingestion/watch
+        - filters/sanitization
+        - extraction/facts/edges
+        - storage/sqlite
+        - query/sql/history/search
+        - api/mcp
+        - cli/config
+        - docs/release
+        - unknown
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or output
+      render: text

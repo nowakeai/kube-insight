@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/nowakeai/kube-insight/security/policy
+    about: Please do not open public issues for vulnerabilities.
+  - name: Questions and support
+    url: https://github.com/nowakeai/kube-insight/discussions
+    about: Use discussions for usage questions once the public repository is available.

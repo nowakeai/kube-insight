@@ -57,6 +57,68 @@ func TestStoreResourceHealthTreatsRetryingAsUnstable(t *testing.T) {
 	}
 }
 
+func TestStoreResourceHealthScopesByCluster(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	resource := kubeapi.ResourceInfo{
+		Version:    "v1",
+		Resource:   "pods",
+		Kind:       "Pod",
+		Namespaced: true,
+		Verbs:      []string{"list", "watch"},
+	}
+	for _, offset := range []storage.IngestionOffset{
+		{
+			ClusterID:       "cluster-a",
+			Resource:        resource,
+			ResourceVersion: "10",
+			Event:           storage.OffsetEventWatch,
+			Status:          "watching",
+			At:              time.Unix(10, 0),
+		},
+		{
+			ClusterID:       "cluster-b",
+			Resource:        resource,
+			ResourceVersion: "20",
+			Event:           storage.OffsetEventWatch,
+			Status:          "watch_error",
+			Error:           "stream reset",
+			At:              time.Unix(20, 0),
+		},
+	} {
+		if err := store.UpsertIngestionOffset(ctx, offset); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a, err := store.ResourceHealth(ctx, ResourceHealthOptions{ClusterID: "cluster-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Summary.Resources != 1 || a.Summary.Healthy != 1 || a.Summary.Errors != 0 || !a.Summary.Complete {
+		t.Fatalf("cluster-a summary = %#v", a.Summary)
+	}
+	if len(a.Resources) != 1 || a.Resources[0].ClusterID != "cluster-a" {
+		t.Fatalf("cluster-a resources = %#v", a.Resources)
+	}
+
+	b, err := store.ResourceHealth(ctx, ResourceHealthOptions{ClusterID: "cluster-b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Summary.Resources != 1 || b.Summary.Errors != 1 || b.Summary.Complete {
+		t.Fatalf("cluster-b summary = %#v", b.Summary)
+	}
+	if len(b.Resources) != 1 || b.Resources[0].ClusterID != "cluster-b" || b.Resources[0].Error != "stream reset" {
+		t.Fatalf("cluster-b resources = %#v", b.Resources)
+	}
+}
+
 func TestStoreResourceHealthSkipsExcludedResources(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
 	if err != nil {

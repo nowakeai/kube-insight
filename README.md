@@ -47,16 +47,24 @@ kube-insight gives agents a narrower evidence interface:
 | Direct `kubectl` | Repeated live API calls, current-state only, agent must reconstruct joins across resource types. | Agent needs Kubernetes credentials and can receive raw object payloads unless every tool call is carefully constrained. |
 | kube-insight | Pre-extracted facts, edges, retained versions, and cluster-scoped SQL/MCP tools. | Filters run before storage, destructive filtering is audited, query tools are read-only, and service mode is designed for Kubernetes authz-aware access control. |
 
-In the recorded validation case, a retained Event-to-resource investigation ran
-in **28 ms** from kube-insight facts and edges, while a current `kubectl` Warning
-Event count took **3,176 ms** against the apiserver. A retained
-`PolicyViolation` count ran in **204 ms** versus **3,050 ms** for the comparable
-current `kubectl` count. That is roughly **15x to 113x faster** in this case,
-while also returning historical evidence that current Events no longer expose.
+In the recorded validation case, kube-insight first ran a bounded watcher
+refresh against the same cluster context used by `kubectl`. The timed query
+phase then completed common agent investigation steps in **24-215 ms**, while
+comparable direct `kubectl` operations took **3,104-5,745 ms**:
+
+| Agent scenario | kube-insight | kubectl | Speedup |
+| --- | ---: | ---: | ---: |
+| Retained PolicyViolation Event count | 215 ms | 3,214 ms | 14.9x |
+| Event to affected resource investigation | 26 ms | 3,307 ms | 127.2x |
+| Event message keyword search | 24 ms | 3,794 ms | 158.1x |
+| Service topology candidate list | 32 ms | 3,104 ms | 97.0x |
+| Workload inventory for scope selection | 26 ms | 5,745 ms | 221.0x |
 
 The speedup is not a universal benchmark claim. It comes from changing the
 shape of the problem: kube-insight precomputes investigation candidates and
-keeps sanitized proof; `kubectl` asks the live apiserver each time.
+keeps sanitized proof; `kubectl` asks the live apiserver each time. For
+current-state comparisons, keep the watcher running continuously or refresh the
+database and check collector health before trusting the result.
 
 ## What It Does
 
@@ -191,25 +199,24 @@ MCP prompts:
 - `kube_insight_event_history`
 - `kube_insight_object_history`
 
-## Example: Retained Events Beat Live Memory
+## Example: Agent Investigations Without Broad kubectl
 
 The validation case in
-[Insight vs kubectl Benchmark Notes](docs/validation/insight-vs-kubectl-benchmark.md)
-compares current `kubectl` Event queries with retained kube-insight evidence on
-a sanitized workload cluster.
+[kube-insight vs direct kubectl for agent investigations](docs/validation/insight-vs-kubectl-benchmark.md)
+compares five concrete agent investigation scenarios on a sanitized workload
+cluster after a bounded watcher refresh.
 
-| Query | Result |
-| --- | ---: |
-| kubectl current Warning Events | 1,850 |
-| kubectl current PolicyViolation Events | 1,776 |
-| kube-insight retained PolicyViolation Events | 22,470 |
-| insight retained PolicyViolation count | 204 ms |
-| insight Event-to-resource edge sample | 28 ms |
-| kubectl current Warning Event count | 3,176 ms |
+| Scenario | kube-insight | kubectl |
+| --- | ---: | ---: |
+| Retained PolicyViolation Event count | 215 ms | 3,214 ms |
+| Event to affected resource investigation | 26 ms | 3,307 ms |
+| Event message keyword search | 24 ms | 3,794 ms |
+| Service topology candidate list | 32 ms | 3,104 ms |
+| Workload inventory for scope selection | 26 ms | 5,745 ms |
 
-This is not a universal speed claim. The point is evidence shape:
-`kubectl` answers current apiserver state; kube-insight answers historical and
-cross-resource questions from retained proof.
+The point is evidence shape: kube-insight answers from retained, sanitized facts
+and topology edges; `kubectl` answers current apiserver state and leaves history
+and joins to the caller.
 
 ## Core Tables
 

@@ -6,6 +6,7 @@ cd "${root}"
 
 required_files=(
   README.md
+  LICENSE
   CONTRIBUTING.md
   SECURITY.md
   SUPPORT.md

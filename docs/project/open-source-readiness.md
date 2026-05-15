@@ -8,7 +8,7 @@ Use this checklist before pushing or tagging a public release.
 - [ ] `git status --short` is clean.
 - [ ] `todos.md` is ignored and not present in history.
 - [ ] Generated databases and validation output are ignored.
-- [ ] License selection is confirmed and committed.
+- [ ] `LICENSE` is present and README badge matches it.
 - [ ] Public security contact is configured.
 
 ## Community Files

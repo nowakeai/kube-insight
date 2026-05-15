@@ -7,7 +7,7 @@
   <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.26-00ADD8"></a>
   <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20PoC-4f46e5">
   <img alt="Agent ready" src="https://img.shields.io/badge/MCP-agent%20ready-16a34a">
-  <img alt="License" src="https://img.shields.io/badge/license-TBD-lightgrey">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
 <p align="center">
@@ -224,4 +224,4 @@ rule before running `go test ./...`.
 
 ## License
 
-License selection is pending project owner confirmation before public release.
+kube-insight is released under the [Apache License 2.0](LICENSE).

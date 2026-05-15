@@ -13,6 +13,7 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for _, path := range []string{
 		"README.md",
+		"LICENSE",
 		"CODE_OF_CONDUCT.md",
 		"CONTRIBUTING.md",
 		"MAINTAINERS.md",

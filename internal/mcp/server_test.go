@@ -39,22 +39,27 @@ func TestServeStdioTools(t *testing.T) {
 	input := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"select name from latest_index","maxRows":5}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"kube_insight_history","arguments":{"kind":"Pod","namespace":"default","name":"api-1","maxVersions":2,"maxObservations":5}}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"delete from latest_index"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"kube_insight_coverage_first","arguments":{"symptom":"webhook failures"}}}`,
+		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"select name from latest_index","maxRows":5}}}`,
+		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"kube_insight_history","arguments":{"kind":"Pod","namespace":"default","name":"api-1","maxVersions":2,"maxObservations":5}}}`,
+		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"delete from latest_index"}}}`,
 	}, "\n") + "\n"
 	var output bytes.Buffer
 	if err := ServeStdio(context.Background(), strings.NewReader(input), &output, ServerOptions{DBPath: dbPath}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 5 {
+	if len(lines) != 7 {
 		t.Fatalf("responses = %d: %s", len(lines), output.String())
 	}
 	for _, want := range []string{
 		`"protocolVersion":"2025-06-18"`,
+		`"prompts":{}`,
 		`"name":"kube_insight_sql"`,
 		`"name":"kube_insight_history"`,
+		`"name":"kube_insight_coverage_first"`,
+		`webhook failures`,
 		`\"name\": \"api-1\"`,
 		`\"observations\": 1`,
 		`"isError":true`,
@@ -65,11 +70,11 @@ func TestServeStdioTools(t *testing.T) {
 	}
 
 	var response map[string]any
-	if err := json.Unmarshal([]byte(lines[2]), &response); err != nil {
+	if err := json.Unmarshal([]byte(lines[4]), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response["id"].(float64) != 3 {
-		t.Fatalf("third response id = %#v", response["id"])
+	if response["id"].(float64) != 5 {
+		t.Fatalf("sql response id = %#v", response["id"])
 	}
 }
 

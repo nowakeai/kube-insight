@@ -49,6 +49,11 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+type promptGetParams struct {
+	Name      string            `json:"name"`
+	Arguments map[string]string `json:"arguments,omitempty"`
+}
+
 type sqlArguments struct {
 	SQL     string `json:"sql"`
 	MaxRows int    `json:"maxRows,omitempty"`
@@ -225,7 +230,8 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *rpcResponse {
 		return resultResponse(id, map[string]any{
 			"protocolVersion": protocolVersion,
 			"capabilities": map[string]any{
-				"tools": map[string]any{},
+				"tools":   map[string]any{},
+				"prompts": map[string]any{},
 			},
 			"serverInfo": map[string]any{
 				"name":    s.name,
@@ -236,6 +242,14 @@ func (s *Server) handleLine(ctx context.Context, line []byte) *rpcResponse {
 		return resultResponse(id, map[string]any{"tools": tools()})
 	case "tools/call":
 		result, err := s.callTool(ctx, request.Params)
+		if err != nil {
+			return errorResponse(id, -32602, err.Error())
+		}
+		return resultResponse(id, result)
+	case "prompts/list":
+		return resultResponse(id, map[string]any{"prompts": prompts()})
+	case "prompts/get":
+		result, err := promptResult(request.Params)
 		if err != nil {
 			return errorResponse(id, -32602, err.Error())
 		}
@@ -466,6 +480,131 @@ func tools() []map[string]any {
 			},
 		},
 	}
+}
+
+func prompts() []map[string]any {
+	return []map[string]any{
+		{
+			"name":        "kube_insight_coverage_first",
+			"description": "Start an investigation by checking collector health and cluster scope.",
+			"arguments": []map[string]any{
+				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
+				{"name": "symptom", "description": "Short description of the incident or question.", "required": false},
+			},
+		},
+		{
+			"name":        "kube_insight_event_history",
+			"description": "Investigate retained Kubernetes Events and follow Event edges to affected resources.",
+			"arguments": []map[string]any{
+				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
+				{"name": "reason", "description": "Optional Event reason such as PolicyViolation or FailedScheduling.", "required": false},
+				{"name": "keyword", "description": "Optional lowercase keyword to search in message previews.", "required": false},
+			},
+		},
+		{
+			"name":        "kube_insight_object_history",
+			"description": "Inspect one object's retained versions, observations, and diffs as proof.",
+			"arguments": []map[string]any{
+				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
+				{"name": "kind", "description": "Kubernetes Kind.", "required": false},
+				{"name": "namespace", "description": "Namespace for namespaced resources.", "required": false},
+				{"name": "name", "description": "Object name.", "required": false},
+				{"name": "uid", "description": "Object UID when known.", "required": false},
+			},
+		},
+	}
+}
+
+func promptResult(params json.RawMessage) (map[string]any, error) {
+	var input promptGetParams
+	if err := json.Unmarshal(params, &input); err != nil {
+		return nil, fmt.Errorf("invalid prompt params: %w", err)
+	}
+	text, description, err := promptText(input.Name, input.Arguments)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"description": description,
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": map[string]any{
+					"type": "text",
+					"text": text,
+				},
+			},
+		},
+	}, nil
+}
+
+func promptText(name string, args map[string]string) (string, string, error) {
+	switch name {
+	case "kube_insight_coverage_first":
+		symptom := promptArg(args, "symptom", "the reported Kubernetes problem")
+		cluster := promptArg(args, "cluster", "the relevant cluster")
+		return fmt.Sprintf(`Investigate %s with kube-insight.
+
+Use this order:
+1. Call kube_insight_health for %s. Treat list/watch errors and stale resources as evidence gaps.
+2. Call kube_insight_schema and list clusters with SQL: select id, name, source from clusters order by id.
+3. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
+4. Query facts and edges for candidate resources. Prefer exact fact_key/fact_value predicates before broad text search.
+5. Use kube_insight_history only for the final candidate objects or as proof for claims.
+
+Do not claim absence unless collector coverage is healthy for the resource types involved.`, symptom, cluster), "Coverage-first kube-insight investigation", nil
+	case "kube_insight_event_history":
+		cluster := promptArg(args, "cluster", "the relevant cluster")
+		reason := promptArg(args, "reason", "the Event reason")
+		keyword := promptArg(args, "keyword", "the message keyword")
+		return fmt.Sprintf(`Investigate retained Kubernetes Events in %s.
+
+Use kube_insight_sql to:
+1. List clusters and select one cluster_id.
+2. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
+3. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
+4. Join Event objects through object_edges with event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
+5. Fetch kube_insight_history for the affected resource and the Event when proof is needed.
+
+Compare retained Event history with current kubectl only as separate evidence; kubectl shows live apiserver state, not the retained window.`, cluster, reason, keyword), "Retained Event history investigation", nil
+	case "kube_insight_object_history":
+		target := promptObjectTarget(args)
+		return fmt.Sprintf(`Inspect object history for %s.
+
+Use kube_insight_history with the most specific identifier available, preferring uid when known. Include diffs and keep maxVersions/maxObservations bounded at first.
+
+Summarize:
+1. First and last observed times.
+2. Content-changing versions versus unchanged observations.
+3. Delete observations, if any. Treat deleted_at as the kube-insight delete observation time, not metadata.deletionTimestamp.
+4. Relevant version diffs and facts/edges that explain the incident.
+
+Use retained documents as proof before making a final claim.`, target), "Object history proof workflow", nil
+	default:
+		return "", "", fmt.Errorf("unknown prompt %q", name)
+	}
+}
+
+func promptArg(args map[string]string, key, fallback string) string {
+	if args == nil || args[key] == "" {
+		return fallback
+	}
+	return args[key]
+}
+
+func promptObjectTarget(args map[string]string) string {
+	if args == nil {
+		return "the target object"
+	}
+	if args["uid"] != "" {
+		return "uid " + args["uid"]
+	}
+	kind := promptArg(args, "kind", "Kind")
+	name := promptArg(args, "name", "name")
+	if args["namespace"] != "" {
+		return kind + " " + args["namespace"] + "/" + name
+	}
+	return kind + " " + name
 }
 
 func parseHistoryTime(value string) (time.Time, error) {

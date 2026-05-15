@@ -155,6 +155,12 @@ MCP stdio currently exposes:
 - `kube_insight_health`
 - `kube_insight_history`
 
+It also exposes prompts for common agent workflows:
+
+- `kube_insight_coverage_first`
+- `kube_insight_event_history`
+- `kube_insight_object_history`
+
 ## Validate PoC
 
 ```bash

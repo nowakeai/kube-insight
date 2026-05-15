@@ -1,38 +1,153 @@
-# Insight vs kubectl Benchmark Notes
+# kube-insight vs direct kubectl for agent investigations
 
 Last updated: 2026-05-15.
 
-This document records a point-in-time validation against
-a sanitized GKE workload cluster using the local `kubeinsight.db`.
+This report compares two ways an agent can investigate Kubernetes state:
 
-The goal is not to claim a universal speedup. The useful product claim is more
-specific:
+- direct `kubectl` access to the live apiserver,
+- kube-insight queries over retained, sanitized facts, edges, observations, and
+  versions.
 
-- kube-insight answers historical and cross-resource questions from retained
-  evidence.
-- kubectl answers current apiserver state and current Kubernetes Events.
-- For agent workflows, kube-insight exposes SQL-ready facts and edges so the
-  agent does not need to repeatedly list and join many resource types.
+The point is not that every kube-insight query is universally faster than every
+`kubectl` command. The point is that many agent investigations need repeated
+filtering, joins, and historical context. kube-insight moves those operations to
+a pre-extracted evidence layer, so the agent can query a smaller and safer
+surface.
+
+## Executive Summary
+
+Before the timed comparison, kube-insight ran a bounded watcher refresh against
+the same cluster context used by `kubectl`. The timed query phase did not
+include watcher startup/list time; in service deployments the watcher should run
+continuously. The timed kube-insight queries completed in **24-215 ms**.
+Comparable direct `kubectl` operations took **3,104-5,745 ms** because they had
+to ask the live apiserver for current Events or broad resource lists.
+
+| Scenario | kube-insight | kubectl | Speedup |
+| --- | ---: | ---: | ---: |
+| Retained PolicyViolation Event count | 215 ms | 3,214 ms | 14.9x |
+| Event to affected resource investigation | 26 ms | 3,307 ms | 127.2x |
+| Event message keyword search | 24 ms | 3,794 ms | 158.1x |
+| Service topology candidate list | 32 ms | 3,104 ms | 97.0x |
+| Workload inventory for scope selection | 26 ms | 5,745 ms | 221.0x |
+
+Simple latency chart, lower is better:
+
+```text
+Retained PolicyViolation Event count
+  kube-insight  215 ms | █
+  kubectl      3214 ms | █████████████
+
+Event to affected resource investigation
+  kube-insight   26 ms | █
+  kubectl      3307 ms | █████████████
+
+Event message keyword search
+  kube-insight   24 ms | █
+  kubectl      3794 ms | ███████████████
+
+Service topology candidate list
+  kube-insight   32 ms | █
+  kubectl      3104 ms | ████████████
+
+Workload inventory for scope selection
+  kube-insight   26 ms | █
+  kubectl      5745 ms | ███████████████████████
+```
+
+Each bar block is about 250 ms, with one block used as the minimum visible bar.
+
+## Why This Matters for Agents
+
+Direct `kubectl` is excellent for current-state checks, but it is a broad live
+cluster interface. An agent using only `kubectl` must repeatedly:
+
+- list live objects from the apiserver,
+- parse raw Kubernetes payloads,
+- reconstruct joins such as Event -> involved object or Service ->
+  EndpointSlice -> Pod,
+- handle missing history when Events have expired,
+- receive whatever raw fields the live API returns.
+
+kube-insight changes the agent workflow:
+
+- filters run before storage, so sensitive fields can be removed or redacted
+  before the agent queries them,
+- destructive filter decisions are auditable,
+- facts and edges are pre-extracted for common troubleshooting paths,
+- retained versions and observations provide proof after live state has moved
+  on,
+- SQL/MCP read surfaces are intentionally read-only,
+- service mode is designed to support Kubernetes authorization-aware query
+  boundaries.
 
 ## Reproduce
 
-Build the CLI and run the benchmark helper:
+For current-state comparisons, refresh kube-insight from the same cluster
+context immediately before the timed benchmark. For a one-shot validation run, a
+bounded watcher is enough to update the local evidence database and record
+collector coverage:
 
 ```bash
 make build
-./scripts/benchmark-insight-vs-kubectl.sh \
-  kubeinsight.db \
-  <kubectl-context>
+./bin/kube-insight watch \
+  --db kubeinsight.db \
+  --client-go \
+  --context <kubectl-context> \
+  --timeout 90s
+
+./bin/kube-insight db resources health --db kubeinsight.db --stale-after 10m
 ```
 
-The script writes command output under `testdata/generated/` and records elapsed
-time in `summary.tsv`. Set `GCLOUD_SDK_BIN=/path/to/google-cloud-sdk/bin` if the
-GKE auth plugin is not on `PATH`. Set `INSIGHT_CLUSTER_ID` when the target
-cluster is not `clusters.id = 1` in the local database.
+For production comparisons, keep `watch` running continuously and check
+collector health before trusting absence claims.
+
+Then run the multi-scenario helper:
+
+```bash
+./scripts/benchmark-agent-vs-kubectl.sh \
+  kubeinsight.db \
+  <kubectl-context> \
+  testdata/generated/agent-vs-kubectl-latest
+```
+
+The script writes:
+
+- `summary.tsv`: one row per scenario,
+- one kube-insight output file per scenario,
+- one kubectl output file per scenario.
+
+Useful environment variables:
+
+- `INSIGHT_CLUSTER_ID`: numeric `clusters.id` in the local kube-insight DB.
+- `INSIGHT_EVENT_KEYWORD`: Event message keyword used by the message-search
+  scenario.
+- `KUBE_INSIGHT_BIN`: path to the kube-insight binary.
+- `KUBECTL_BIN`: path to kubectl.
+- `GCLOUD_SDK_BIN`: optional path containing the GKE auth plugin.
+
+## Freshness Check
+
+This run used a bounded watcher refresh before the timed benchmark:
+
+| Watch refresh result | Value |
+| --- | ---: |
+| Discovered resources | 241 |
+| List/watch errors | 0 |
+| Listed objects | 4,226 |
+| Watch events during refresh | 43 |
+| Stored observations | 4,764 |
+
+The post-refresh health check reported 242 resource rows, 199 healthy, 42 queued,
+0 errors, and 1 stale resource under a 10-minute staleness threshold. The core
+resources used by these scenarios, including Events, Pods, Services,
+EndpointSlices, and common workload controllers, were refreshed during the run.
 
 ## Dataset
 
-After `db reindex`:
+The benchmark used a local kube-insight SQLite evidence database captured from a
+sanitized GKE workload cluster and the current live apiserver for the same
+cluster context.
 
 | Data | Rows |
 | --- | ---: |
@@ -56,153 +171,137 @@ Event facts:
 | `k8s_event.reporting_instance` | 25,643 |
 | `k8s_event.action` | 22,470 |
 
-## Event History Case
+For retained `PolicyViolation` Warning Events, kube-insight had **22,470**
+rows covering `2026-05-14 16:31:19` to `2026-05-15 04:17:52`. The live
+apiserver returned **1,938** current `PolicyViolation` Warning Events at the
+time of the run. This difference is expected: kube-insight is retaining
+historical evidence while `kubectl` sees current apiserver state.
 
-Question:
+## Scenarios
 
-> Which warning Events show policy admission failures, what resources did they
-> affect, and what policy/message caused them?
+### 1. Retained PolicyViolation Event count
 
-kube-insight SQL joins `object_facts` and `object_edges`:
+Agent question:
 
-```sql
-select
-  datetime(reason.ts/1000,'unixepoch') as event_time,
-  reason.fact_value as reason,
-  preview.fact_value as message_preview,
-  dst_kind.kind as target_kind,
-  coalesce(dst.namespace,'') as target_namespace,
-  dst.name as target_name
-from object_facts reason
-join objects ev on ev.id = reason.object_id
-join object_edges e
-  on e.src_id = ev.id
- and e.edge_type in (
-   'event_regarding_object',
-   'event_related_object',
-   'event_involves_object'
- )
-join objects dst on dst.id = e.dst_id
-join object_kinds dst_kind on dst_kind.id = dst.kind_id
-left join object_facts preview
-  on preview.version_id = reason.version_id
- and preview.fact_key = 'k8s_event.message_preview'
-where reason.fact_key = 'k8s_event.reason'
-  and reason.cluster_id = 1
-  and reason.fact_key <> 'k8s_event.message_preview'
-  and reason.fact_value in (
-    'PolicyViolation',
-    'FailedCreate',
-    'FailedScheduling',
-    'BackOff',
-    'Unhealthy',
-    'FailedMount'
-  )
-order by reason.ts desc
-limit 20;
-```
+> How many policy-admission Warning Events do we have, and what retained time
+> window do they cover?
 
-Observed result:
+kube-insight operation:
 
-- Returned `PolicyViolation` Events tied to `Pod`, workload `App`, and
-  `ValidatingAdmissionPolicy` targets.
-- Message preview included the failing policy
-  `validating-node-p4sa-audience` and the CEL error.
-- Runtime: 28 ms on the local SQLite DB with cluster-scoped SQL.
+- run one read-only SQL query over retained Event facts,
+- return count plus first/latest retained timestamps.
 
-## Current kubectl Comparison
+kubectl operation:
 
-Current apiserver counts:
+- list current `events.events.k8s.io` from all namespaces,
+- filter by `type=Warning,reason=PolicyViolation`,
+- count returned names.
 
-```bash
-kubectl get events.events.k8s.io -A \
-  --field-selector type=Warning \
-  -o name | wc -l
+Result: **215 ms** with kube-insight, **3,214 ms** with `kubectl`.
 
-kubectl get events.events.k8s.io -A \
-  --field-selector type=Warning,reason=PolicyViolation \
-  -o name | wc -l
-```
+### 2. Event to affected resource investigation
 
-Observed:
+Agent question:
 
-| Source | Query | Count |
-| --- | --- | ---: |
-| kubectl/apiserver | current Warning Events | 1,850 |
-| kubectl/apiserver | current PolicyViolation Events | 1,776 |
-| kube-insight | retained PolicyViolation Events | 22,470 |
+> Which Warning Events matter, and which Kubernetes objects were affected?
 
-kube-insight retained `PolicyViolation` window:
+kube-insight operation:
 
-| First seen | Latest seen | Rows |
-| --- | --- | ---: |
-| 2026-05-14 16:31:19 | 2026-05-15 04:17:52 | 22,470 |
+- query retained Event reason facts,
+- join Event objects through pre-extracted `object_edges`,
+- return affected resource kind, namespace, name, and message preview.
 
-The important difference is historical completeness. kubectl can still show the
-current live failure. kube-insight can also answer what happened earlier in the
-retained window and join those Events to affected resources without additional
-apiserver list calls.
+kubectl operation:
 
-Observed helper timings:
+- fetch current `PolicyViolation` Warning Events as JSON from the apiserver,
+- leave object relationship extraction to the caller.
 
-| Benchmark | Elapsed |
-| --- | ---: |
-| insight retained PolicyViolation count | 204 ms |
-| insight Event-to-resource edge sample | 28 ms |
-| kubectl current Warning Event count | 3,176 ms |
-| kubectl current PolicyViolation count | 3,050 ms |
+Result: **26 ms** with kube-insight, **3,307 ms** with `kubectl`.
 
-## Storage Notes
+### 3. Event message keyword search
 
-`db reindex` rebuilt derived evidence and increased facts from 133,187 to
-265,711. Most of the growth came from Event message previews and reporting
-fields.
+Agent question:
 
-`k8s_event.message_preview` is intentionally stored for triage, but it is not a
-good value for the generic exact-match fact index. The SQLite schema now keeps
-it out of `object_facts_key_value_time_idx`.
+> Which warning Event messages mention a specific policy or failure keyword?
 
-Observed index change:
+kube-insight operation:
 
-| Object | Before | After |
-| --- | ---: | ---: |
-| `object_facts_key_value_time_idx` | 43.6 MB | 14.3 MB |
+- search retained `k8s_event.message_preview` facts scoped by cluster,
+- return recent matching Event rows.
 
-A lightweight `object_facts_key_time_idx` supports agent queries that first find
-candidate rows by fact key, for example latest Event message previews, without
-indexing the preview text itself.
+kubectl operation:
 
-After compact:
+- fetch current Warning Events as JSON,
+- scan the payload text for the keyword.
 
-| File | Size |
-| --- | ---: |
-| `kubeinsight.db` | 300 MB |
-| `kubeinsight.db-wal` | 0 B |
+Result: **24 ms** with kube-insight, **3,794 ms** with `kubectl`.
 
-## Query Plan Notes
+### 4. Service topology candidate list
 
-Exact key/value queries are fastest when the SQL includes `cluster_id` and avoids
-long preview facts:
+Agent question:
 
-```sql
-where reason.cluster_id = 1
-  and reason.fact_key <> 'k8s_event.message_preview'
-  and reason.fact_key = 'k8s_event.reason'
-  and reason.fact_value = 'PolicyViolation'
-```
+> Which Services have EndpointSlices and Pod fan-out worth investigating?
 
-This lets SQLite use `object_facts_key_value_time_idx`.
+kube-insight operation:
 
-For exploratory agent queries that do not know `cluster_id` yet, start with
-`clusters`, then narrow subsequent queries by `cluster_id`.
+- use pre-extracted topology edges,
+- aggregate Service -> EndpointSlice -> Pod relationships in one SQL query.
 
-For latest-by-fact exploratory queries, SQLite can use
-`object_facts_key_time_idx`:
+kubectl operation:
 
-```sql
-select fact_value
-from object_facts
-where fact_key = 'k8s_event.message_preview'
-order by ts desc
-limit 20;
-```
+- fetch Services, EndpointSlices, and Pods from the live apiserver,
+- leave relationship joins to the caller.
+
+Result: **32 ms** with kube-insight, **3,104 ms** with `kubectl`.
+
+### 5. Workload inventory for scope selection
+
+Agent question:
+
+> What is the workload/routing object scope before narrowing the incident?
+
+kube-insight operation:
+
+- count common workload and routing kinds from `latest_index`.
+
+kubectl operation:
+
+- list Pods, Services, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs,
+  CronJobs, and EndpointSlices across all namespaces.
+
+Result: **26 ms** with kube-insight, **5,745 ms** with `kubectl`.
+
+## Interpretation
+
+The fastest kube-insight cases are not magic database tricks. They are the
+result of doing the expensive investigation work once during ingestion:
+
+- Kubernetes discovery maps resources into stable kinds and scopes.
+- Filters normalize, redact, or discard fields before storage.
+- Facts turn nested JSON status and Event data into indexed rows.
+- Edges turn object relationships into joinable topology.
+- Observations preserve when kube-insight saw an object even when content did
+  not change.
+- Versions preserve proof for final claims.
+
+For agents, this means fewer live API calls, fewer raw payloads, and fewer
+prompt-side joins. `kubectl` remains useful as a current-state comparison, but
+it should not be the only investigation interface when the question needs
+history, topology, or sanitized evidence.
+
+## Guardrails
+
+These numbers are point-in-time results from one sanitized workload cluster.
+They should be used as validation evidence for the product shape, not as a
+universal performance guarantee.
+
+The scenarios are also not always semantically identical:
+
+- kube-insight answers from retained evidence and can include history no longer
+  visible to the apiserver.
+- kubectl answers from current live state and may need additional client-side
+  parsing or joins to reach the same final answer.
+
+That semantic difference is part of the product value: kube-insight gives
+agents a purpose-built evidence layer instead of asking them to reconstruct
+history and relationships from raw live API calls.

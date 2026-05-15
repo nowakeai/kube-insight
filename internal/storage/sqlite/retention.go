@@ -207,6 +207,12 @@ where src_version_id in (select id from retention_versions)
 			return err
 		}
 		report.FilterDecisions, _ = res.RowsAffected()
+		res, err = tx.ExecContext(ctx, `delete from filter_decision_rollups where bucket_start < ?`, millis(report.FilterDecisionCutoff))
+		if err != nil {
+			return err
+		}
+		rows, _ := res.RowsAffected()
+		report.FilterDecisions += rows
 	}
 	return tx.Commit()
 }

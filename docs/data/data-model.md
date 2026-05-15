@@ -271,7 +271,8 @@ Use `latest_raw_documents` when a human or agent needs the current observed
 cluster shape. Use `latest_documents` when the question needs the latest
 retained proof document. `latest_index` remains rebuildable from `versions`;
 `latest_raw_index` is overwritten by future observations and is not historical
-proof.
+proof. Deleted objects are removed from `latest_raw_index`; delete history
+remains available through observations and retained versions.
 
 ## Historical Topology
 

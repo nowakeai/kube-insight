@@ -72,3 +72,32 @@ func TestStoreRawLatestTracksUnfilteredObservationWithoutNewVersion(t *testing.T
 		t.Fatalf("raw latest = resourceVersion %q generation %d doc %s", rawResourceVersion, rawGeneration, rawDoc)
 	}
 }
+
+func TestStoreRawLatestRemovesDeletedObject(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ref := core.ResourceRef{ClusterID: "c1", Version: "v1", Resource: "configmaps", Kind: "ConfigMap", Namespace: "default", Name: "settings", UID: "cm-uid"}
+	object := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "settings", "namespace": "default", "uid": "cm-uid"},
+	}
+	ctx := context.Background()
+	if err := store.PutRawLatest(ctx, core.Observation{Type: core.ObservationModified, ObservedAt: time.Unix(10, 0), ResourceVersion: "10", Ref: ref, Object: object}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PutRawLatest(ctx, core.Observation{Type: core.ObservationDeleted, ObservedAt: time.Unix(20, 0), ResourceVersion: "11", Ref: ref, Object: object}); err != nil {
+		t.Fatal(err)
+	}
+	var rawRows int
+	if err := store.db.QueryRow(`select count(*) from latest_raw_index`).Scan(&rawRows); err != nil {
+		t.Fatal(err)
+	}
+	if rawRows != 0 {
+		t.Fatalf("latest raw rows = %d, want 0", rawRows)
+	}
+}

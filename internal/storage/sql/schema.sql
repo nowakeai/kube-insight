@@ -220,6 +220,28 @@ create table if not exists filter_decisions (
   meta text
 );
 
+create table if not exists filter_decision_rollups (
+  bucket_start integer not null,
+  bucket_seconds integer not null,
+  cluster_name text not null,
+  api_group text not null,
+  api_version text not null,
+  resource text not null,
+  kind text not null,
+  observation_type text not null,
+  filter_name text not null,
+  outcome text not null,
+  reason text not null,
+  destructive boolean not null,
+  count integer not null,
+  first_seen integer not null,
+  last_seen integer not null,
+  primary key(
+    bucket_start, bucket_seconds, cluster_name, api_group, api_version,
+    resource, kind, observation_type, filter_name, outcome, reason, destructive
+  )
+);
+
 create table if not exists ingestion_offsets (
   cluster_id integer not null references clusters(id),
   api_resource_id integer not null references api_resources(id),
@@ -261,11 +283,20 @@ on versions(object_id, seq desc);
 create index if not exists versions_object_time_idx
 on versions(object_id, observed_at desc);
 
+create index if not exists versions_blob_ref_idx
+on versions(blob_ref);
+
+create index if not exists versions_parent_version_idx
+on versions(parent_version_id);
+
 create index if not exists object_observations_object_time_idx
 on object_observations(object_id, observed_at desc);
 
 create index if not exists object_observations_cluster_time_idx
 on object_observations(cluster_id, observed_at desc);
+
+create index if not exists object_observations_version_idx
+on object_observations(version_id);
 
 create index if not exists object_edges_src_time_idx
 on object_edges(cluster_id, edge_type, src_id, valid_from, valid_to);
@@ -273,11 +304,20 @@ on object_edges(cluster_id, edge_type, src_id, valid_from, valid_to);
 create index if not exists object_edges_dst_time_idx
 on object_edges(cluster_id, edge_type, dst_id, valid_from, valid_to);
 
+create index if not exists object_edges_src_version_idx
+on object_edges(src_version_id);
+
+create index if not exists object_edges_dst_version_idx
+on object_edges(dst_version_id);
+
 create index if not exists object_facts_key_value_time_idx
 on object_facts(cluster_id, fact_key, fact_value, ts desc);
 
 create index if not exists object_facts_object_time_idx
 on object_facts(cluster_id, object_id, ts desc);
+
+create index if not exists object_facts_version_idx
+on object_facts(version_id);
 
 create index if not exists object_facts_workload_time_idx
 on object_facts(cluster_id, workload_id, ts desc);
@@ -291,6 +331,9 @@ on object_facts(cluster_id, node_id, ts desc);
 create index if not exists object_changes_object_time_idx
 on object_changes(cluster_id, object_id, ts desc);
 
+create index if not exists object_changes_version_idx
+on object_changes(version_id);
+
 create index if not exists object_changes_path_time_idx
 on object_changes(cluster_id, change_family, path, ts desc);
 
@@ -299,3 +342,9 @@ on filter_decisions(cluster_name, resource, namespace, name, ts desc);
 
 create index if not exists filter_decisions_outcome_time_idx
 on filter_decisions(outcome, ts desc);
+
+create index if not exists filter_decision_rollups_ref_time_idx
+on filter_decision_rollups(cluster_name, resource, bucket_start desc);
+
+create index if not exists filter_decision_rollups_outcome_time_idx
+on filter_decision_rollups(outcome, bucket_start desc);

@@ -106,8 +106,11 @@ discard_resource
 Filter requirements:
 
 - Run before storage and before `doc_hash` calculation for retained documents.
-- Persist filter decisions to the audit table, including decisions that discard
-  the resource before a retained version exists.
+- Persist high-value filter decisions to the audit table, including decisions
+  that discard the resource before a retained version exists.
+- Roll up high-volume low-risk normalization decisions, such as
+  `resourceVersion`, `managedFields`, condition timestamp, and leader-election
+  annotation removal, into aggregate time buckets instead of per-object rows.
 - For destructive `keep_modified` decisions, include structured audit metadata
   such as `removedFields`, `redactedFields`, and policy-specific markers like
   `secretPayloadRemoved` so benchmark and safety checks can aggregate them.

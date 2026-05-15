@@ -41,10 +41,36 @@ func (s *Store) PutRawLatest(ctx context.Context, obs core.Observation) error {
 	if err != nil {
 		return err
 	}
+	if obs.Type == core.ObservationDeleted {
+		if err := deleteRawLatest(ctx, tx, objectRecord.ID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	if err := upsertRawLatest(ctx, tx, objectRecord.ID, clusterID, kindID, obs, observedAt, docHash, doc); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func deleteRawLatest(ctx context.Context, tx *sql.Tx, objectID int64) error {
+	_, err := tx.ExecContext(ctx, `delete from latest_raw_index where object_id = ?`, objectID)
+	return err
+}
+
+func (s *Store) DeleteRawLatestForDeletedObjects(ctx context.Context) (int64, error) {
+	res, err := s.db.ExecContext(ctx, `
+delete from latest_raw_index
+where object_id in (
+  select id
+  from objects
+  where deleted_at is not null
+)`)
+	if err != nil {
+		return 0, err
+	}
+	rows, _ := res.RowsAffected()
+	return rows, nil
 }
 
 func upsertRawLatest(ctx context.Context, tx *sql.Tx, objectID, clusterID, kindID int64, obs core.Observation, observedAt int64, docHash string, doc []byte) error {

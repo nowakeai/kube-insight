@@ -236,8 +236,9 @@ When processing filters change, existing retained history can be reprocessed
 with the current effective configuration:
 
 ```bash
-kube-insight db backfill --db kubeinsight.db          # dry run
-kube-insight db backfill --db kubeinsight.db --yes    # apply
+kube-insight db backfill --db kubeinsight.db                       # dry run
+kube-insight db backfill --db kubeinsight.db --yes                 # apply
+kube-insight db backfill --db kubeinsight.db --yes --batch-objects 200
 ```
 
 Backfill only rewrites retained history (`versions`, `blobs`, facts, edges,
@@ -245,6 +246,13 @@ changes, and observation version pointers). It does not rewrite
 `latest_raw_index`; that table reflects future latest observations from the
 watcher. Existing databases can only be backfilled from the JSON that was
 already retained.
+
+Backfill applies work in object batches instead of one database-wide
+transaction. Each batch scans complete object histories, applies updates, commits,
+and releases SQLite's write lock before the next batch. This lets a watcher keep
+making progress during large rule migrations, though individual write attempts can
+still wait briefly while a batch is committing. Tune `--batch-objects` downward
+for busier clusters or upward for faster offline maintenance.
 
 Retention is optional and disabled by default. Enable it when a deployment wants
 bounded local storage instead of full historical proof:

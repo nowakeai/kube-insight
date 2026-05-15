@@ -22,6 +22,8 @@ type Stats struct {
 	Edges                          int64            `json:"edges"`
 	Changes                        int64            `json:"changes"`
 	FilterDecisions                int64            `json:"filter_decisions"`
+	FilterDecisionRollups          int64            `json:"filter_decision_rollups"`
+	FilterDecisionRollupEvents     int64            `json:"filter_decision_rollup_events"`
 	DestructiveFilterDecisions     int64            `json:"destructive_filter_decisions"`
 	RedactedFields                 int64            `json:"redacted_fields"`
 	RemovedFields                  int64            `json:"removed_fields"`
@@ -80,6 +82,8 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		{&out.Edges, `select count(*) from object_edges`},
 		{&out.Changes, `select count(*) from object_changes`},
 		{&out.FilterDecisions, `select count(*) from filter_decisions`},
+		{&out.FilterDecisionRollups, `select count(*) from filter_decision_rollups`},
+		{&out.FilterDecisionRollupEvents, `select coalesce(sum(count), 0) from filter_decision_rollups`},
 		{&out.DestructiveFilterDecisions, `select count(*) from filter_decisions where destructive`},
 		{&out.ProcessingProfiles, `select count(*) from resource_processing_profiles`},
 		{&out.DisabledProcessingProfiles, `select count(*) from resource_processing_profiles where not enabled`},
@@ -248,7 +252,7 @@ func (s *Store) addPageStats(ctx context.Context, out *Stats) error {
 			out.FactBytes += bytes
 		case name == "object_edges" || strings.HasPrefix(name, "object_edges_"):
 			out.EdgeBytes += bytes
-		case name == "filter_decisions" || strings.HasPrefix(name, "filter_decisions_"):
+		case name == "filter_decisions" || strings.HasPrefix(name, "filter_decisions_") || name == "filter_decision_rollups" || strings.HasPrefix(name, "filter_decision_rollups_"):
 			out.FilterDecisionBytes += bytes
 		}
 	}

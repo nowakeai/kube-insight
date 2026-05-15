@@ -34,6 +34,7 @@ func dbCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Co
 
 func dbBackfillCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
 	var yes bool
+	var batchObjects int
 	var output string
 	cmd := &cobra.Command{
 		Use:   "backfill",
@@ -61,7 +62,8 @@ func dbBackfillCommand(ctx context.Context, stdout io.Writer, state *cliState) *
 			}
 			rules := rt.Config.ProfileRules()
 			report, err := store.BackfillRetainedHistory(runCtx, sqlite.BackfillOptions{
-				DryRun: !yes,
+				DryRun:       !yes,
+				BatchObjects: batchObjects,
 				Normalize: func(ctx context.Context, version sqlite.BackfillVersion) ([]byte, error) {
 					var object map[string]any
 					if err := json.Unmarshal(version.Document, &object); err != nil {
@@ -96,6 +98,7 @@ func dbBackfillCommand(ctx context.Context, stdout io.Writer, state *cliState) *
 		},
 	}
 	cmd.Flags().BoolVar(&yes, "yes", false, "Apply changes; without --yes this is a dry run")
+	cmd.Flags().IntVar(&batchObjects, "batch-objects", 500, "Objects per backfill transaction")
 	addOutputFlag(cmd, &output, outputTable)
 	return cmd
 }
@@ -547,9 +550,17 @@ func writeCompactReportTable(stdout io.Writer, report sqlite.CompactReport) erro
 		{"Edges", humanCount(report.StatsAfter.Edges)},
 		{"Changes", humanCount(report.StatsAfter.Changes)},
 		{"Filter decisions", humanCount(report.StatsAfter.FilterDecisions)},
+		{"Filter decision rollups", humanCount(report.StatsAfter.FilterDecisionRollups)},
+		{"Filter decision rollup events", humanCount(report.StatsAfter.FilterDecisionRollupEvents)},
 	}
 	if report.Pruned != nil {
 		rows = append(rows, []string{"Pruned unchanged versions", humanCount(report.Pruned.Versions)})
+	}
+	if report.FilterRollup != nil {
+		rows = append(rows, []string{"Rolled up filter decisions", humanCount(report.FilterRollup.RowsRolledUp)})
+	}
+	if report.DeletedRawLatestRows > 0 {
+		rows = append(rows, []string{"Deleted raw latest rows", humanCount(report.DeletedRawLatestRows)})
 	}
 	return writeSection(stdout, "Rows after compaction", []string{"Data", "Rows"}, rows)
 }
@@ -557,6 +568,7 @@ func writeCompactReportTable(stdout io.Writer, report sqlite.CompactReport) erro
 func writeBackfillReportTable(stdout io.Writer, report sqlite.BackfillReport) error {
 	if err := writeSection(stdout, "History backfill", []string{"Metric", "Value"}, [][]string{
 		{"Mode", map[bool]string{true: "dry-run", false: "apply"}[report.DryRun]},
+		{"Batches", humanCount(report.Batches)},
 		{"Objects scanned", humanCount(report.Objects)},
 		{"Versions scanned", humanCount(report.VersionsScanned)},
 		{"Versions normalized", humanCount(report.VersionsUpdated)},

@@ -253,10 +253,10 @@ default.
 Default mode:
 
 - store destructive decisions,
-- store `keep_modified` decisions,
+- store security-sensitive or custom `keep_modified` decisions as details,
 - treat routine metadata normalization such as `managedFields` removal as
   aggregated normalization, not per-object audit,
-- aggregate ordinary `keep` counts by filter/resource/time bucket,
+- aggregate routine normalization counts by filter/resource/time bucket,
 - expose debug-level per-observation filter logs when needed.
 
 Strict audit mode:

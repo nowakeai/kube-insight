@@ -722,19 +722,24 @@ func TestStorePersistsOnlyUsefulFilterDecisions(t *testing.T) {
 	if err := store.PutFilterDecisions(context.Background(), obs, decisions); err != nil {
 		t.Fatal(err)
 	}
-	var rows int
+	var rows, destructive, rollups, rollupEvents int
 	if err := store.db.QueryRow(`select count(*) from filter_decisions`).Scan(&rows); err != nil {
 		t.Fatal(err)
 	}
 	if rows != 2 {
 		t.Fatalf("filter decision rows = %d, want 2", rows)
 	}
-	var destructive int
 	if err := store.db.QueryRow(`select count(*) from filter_decisions where destructive`).Scan(&destructive); err != nil {
 		t.Fatal(err)
 	}
 	if destructive != 2 {
 		t.Fatalf("destructive filter decision rows = %d, want 2", destructive)
+	}
+	if err := store.db.QueryRow(`select count(*), coalesce(sum(count), 0) from filter_decision_rollups`).Scan(&rollups, &rollupEvents); err != nil {
+		t.Fatal(err)
+	}
+	if rollups != 4 || rollupEvents != 4 {
+		t.Fatalf("filter decision rollups/events = %d/%d, want 4/4", rollups, rollupEvents)
 	}
 }
 

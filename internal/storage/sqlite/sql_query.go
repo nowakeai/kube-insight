@@ -258,6 +258,7 @@ func schemaTableDescription(name string) string {
 		"object_facts":                 "Extracted searchable facts with time, severity, key/value, and optional object/node/workload/service anchors.",
 		"object_changes":               "Scalar change summaries and important path changes for retained versions.",
 		"filter_decisions":             "Auditable ingestion filter decisions, including destructive redaction/removal metadata.",
+		"filter_decision_rollups":      "Hourly aggregate counts for high-volume low-risk filter decisions such as resourceVersion and managedFields normalization.",
 		"ingestion_offsets":            "Per-resource collector health, last list/watch/bookmark times, resourceVersion, queued/retrying/error status.",
 		"maintenance_runs":             "Storage maintenance audit records for compaction/checkpoint/retention tasks.",
 	}

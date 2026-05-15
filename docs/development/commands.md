@@ -76,6 +76,19 @@ Inspect storage and collector health:
 ./bin/kube-insight db compact --db kubeinsight.db
 ```
 
+Rebuild derived facts, edges, and changes after extractor/profile changes:
+
+```bash
+./bin/kube-insight db reindex --db kubeinsight.db
+./bin/kube-insight db reindex --db kubeinsight.db --yes
+```
+
+Run the local insight vs kubectl benchmark:
+
+```bash
+./scripts/benchmark-insight-vs-kubectl.sh kubeinsight.db <kubectl-context>
+```
+
 Scrape metrics:
 
 ```bash

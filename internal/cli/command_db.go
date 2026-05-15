@@ -27,6 +27,7 @@ func dbCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Co
 	cmd.AddCommand(dbBackfillCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClustersCommand(ctx, stdout, state))
 	cmd.AddCommand(dbCompactCommand(ctx, stdout, state))
+	cmd.AddCommand(dbReindexCommand(ctx, stdout, state))
 	cmd.AddCommand(dbRetentionCommand(ctx, stdout, state))
 	cmd.AddCommand(dbResourcesCommand(ctx, stdout, state))
 	return cmd

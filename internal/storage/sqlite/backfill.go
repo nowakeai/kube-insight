@@ -31,6 +31,7 @@ type BackfillVersion struct {
 	ObjectID        int64
 	Sequence        int64
 	ObservedAt      time.Time
+	ObservationType core.ObservationType
 	ResourceVersion string
 	Ref             core.ResourceRef
 	Document        []byte

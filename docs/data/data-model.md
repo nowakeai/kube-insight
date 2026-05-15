@@ -138,7 +138,12 @@ node_status.allocatable
 k8s_event.type
 k8s_event.reason
 k8s_event.message_fingerprint
+k8s_event.message_preview
+k8s_event.action
+k8s_event.reporting_controller
+k8s_event.reporting_instance
 k8s_event.count
+k8s_event.series_count
 endpoint.ready
 endpoint.serving
 endpoint.terminating
@@ -170,6 +175,9 @@ Identity rules:
 - Use `cluster/kind/namespace/name` as the human-readable key.
 - Track delete/recreate as different objects if UID changes.
 - For resources without UID, fall back to namespaced identity.
+- `deleted_at` is the time kube-insight observed a Kubernetes delete event for
+  the object. It is not copied from `metadata.deletionTimestamp`, which records
+  Kubernetes graceful deletion intent before the object is actually removed.
 
 ## Versions
 
@@ -225,6 +233,14 @@ blobs(
 
 The blob layer should be content-addressed. It can later move from SQL storage
 to object storage without changing the logical model.
+
+## Derived Evidence Reindex
+
+`object_facts`, `object_edges`, and `object_changes` are derived from retained
+JSON versions. When extractor sets or resource profiles change, run
+`kube-insight db reindex` to rebuild those derived rows from `versions` and
+`blobs` without re-watching the cluster. The command is dry-run by default; use
+`--yes` to apply changes in small object batches.
 
 ## Latest Snapshots
 

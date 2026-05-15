@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="780">
+  <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="680">
 </p>
 
 <p align="center">

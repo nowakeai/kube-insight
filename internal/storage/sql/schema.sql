@@ -311,7 +311,11 @@ create index if not exists object_edges_dst_version_idx
 on object_edges(dst_version_id);
 
 create index if not exists object_facts_key_value_time_idx
-on object_facts(cluster_id, fact_key, fact_value, ts desc);
+on object_facts(cluster_id, fact_key, fact_value, ts desc)
+where fact_key <> 'k8s_event.message_preview';
+
+create index if not exists object_facts_key_time_idx
+on object_facts(fact_key, ts desc);
 
 create index if not exists object_facts_object_time_idx
 on object_facts(cluster_id, object_id, ts desc);

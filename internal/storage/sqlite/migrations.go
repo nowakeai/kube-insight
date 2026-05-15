@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 func (s *Store) migrate(ctx context.Context) error {
@@ -16,6 +17,12 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := s.backfillLatestRawIndex(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateObjectFactsKeyValueIndex(ctx); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `create index if not exists object_facts_key_time_idx on object_facts(fact_key, ts desc)`); err != nil {
 		return err
 	}
 	return s.backfillObjectObservations(ctx)
@@ -87,6 +94,39 @@ from latest_index li
 join versions v on v.id = li.latest_version_id
 join blobs b on b.digest = v.blob_ref
 where b.codec = 'identity'`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) migrateObjectFactsKeyValueIndex(ctx context.Context) error {
+	var sqlText string
+	err := s.db.QueryRowContext(ctx, `
+select coalesce(sql, '')
+from sqlite_master
+where type = 'index'
+  and name = 'object_facts_key_value_time_idx'`).Scan(&sqlText)
+	if err == sql.ErrNoRows {
+		sqlText = ""
+	} else if err != nil {
+		return err
+	}
+	if sqlText != "" && strings.Contains(strings.ToLower(sqlText), "where fact_key <> 'k8s_event.message_preview'") {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	for _, stmt := range []string{
+		`drop index if exists object_facts_key_value_time_idx`,
+		`create index object_facts_key_value_time_idx
+on object_facts(cluster_id, fact_key, fact_value, ts desc)
+where fact_key <> 'k8s_event.message_preview'`,
 	} {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
 			return err

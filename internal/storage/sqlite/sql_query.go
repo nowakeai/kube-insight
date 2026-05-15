@@ -350,13 +350,25 @@ func schemaRelationships() []SQLSchemaRelationship {
 func schemaRecipes() []SQLSchemaRecipe {
 	return []SQLSchemaRecipe{
 		{
+			Name:        "cluster_scope",
+			Description: "Start here. Pick a cluster id, then keep cluster_id in follow-up queries.",
+			SQL: `select id, name, source
+from clusters
+order by id`,
+		},
+		{
 			Name:        "coverage_first",
 			Description: "Check collector coverage and resources that may make evidence incomplete.",
-			SQL: `select ar.api_group, ar.api_version, ar.resource, ar.kind,
-       coalesce(io.status, 'not_started') as status, io.error
-from api_resources ar
-left join ingestion_offsets io on io.api_resource_id = ar.id
+			SQL: `select c.name as cluster, ar.api_group, ar.api_version, ar.resource, ar.kind,
+       coalesce(io.status, 'not_started') as status, io.error,
+       datetime(io.updated_at / 1000, 'unixepoch') as updated_at
+from clusters c
+join api_resources ar on ar.removed_at is null
+left join ingestion_offsets io
+  on io.cluster_id = c.id
+ and io.api_resource_id = ar.id
 where coalesce(io.status, 'not_started') in ('not_started','retrying','list_error','watch_error')
+  and c.id = 1
 order by status, ar.api_group, ar.resource
 limit 50`,
 		},
@@ -366,23 +378,72 @@ limit 50`,
 			SQL: `select ok.api_group, ok.api_version, ok.kind, li.namespace, li.name, li.uid
 from latest_raw_index li
 join object_kinds ok on ok.id = li.kind_id
-where ok.kind = 'Pod'
+where li.cluster_id = 1
+  and ok.kind = 'Pod'
 order by li.observed_at desc
 limit 50`,
 		},
 		{
+			Name:        "warning_event_reason_counts",
+			Description: "Count retained warning Events by reason inside one cluster.",
+			SQL: `select reason.fact_value as reason,
+       count(*) as retained_events,
+       min(datetime(reason.ts / 1000, 'unixepoch')) as first_seen,
+       max(datetime(reason.ts / 1000, 'unixepoch')) as latest_seen
+from object_facts reason
+join object_facts typ
+  on typ.version_id = reason.version_id
+ and typ.fact_key = 'k8s_event.type'
+where reason.cluster_id = 1
+  and reason.fact_key <> 'k8s_event.message_preview'
+  and reason.fact_key = 'k8s_event.reason'
+  and typ.fact_value = 'Warning'
+group by reason.fact_value
+order by retained_events desc
+limit 50`,
+		},
+		{
+			Name:        "policy_violation_events",
+			Description: "Find retained admission policy failures and their history window.",
+			SQL: `select reason.fact_value as reason,
+       count(*) as retained_events,
+       min(datetime(reason.ts / 1000, 'unixepoch')) as first_seen,
+       max(datetime(reason.ts / 1000, 'unixepoch')) as latest_seen
+from object_facts reason
+join object_facts typ
+  on typ.version_id = reason.version_id
+ and typ.fact_key = 'k8s_event.type'
+where reason.cluster_id = 1
+  and reason.fact_key <> 'k8s_event.message_preview'
+  and reason.fact_key = 'k8s_event.reason'
+  and reason.fact_value = 'PolicyViolation'
+  and typ.fact_value = 'Warning'
+group by reason.fact_value`,
+		},
+		{
 			Name:        "event_to_involved_object",
 			Description: "Follow Event edges to the object the Event references.",
-			SQL: `select ev.namespace as event_namespace, ev.name as event_name,
-       dst_kind.kind as involved_kind, dst.namespace as involved_namespace, dst.name as involved_name,
-       reason.fact_value as reason
-from object_edges e
-join objects ev on ev.id = e.src_id
+			SQL: `select datetime(reason.ts / 1000, 'unixepoch') as event_time,
+       reason.fact_value as reason,
+       preview.fact_value as message_preview,
+       dst_kind.kind as involved_kind,
+       dst.namespace as involved_namespace,
+       dst.name as involved_name
+from object_facts reason
+join objects ev on ev.id = reason.object_id
+join object_edges e
+  on e.src_id = ev.id
+ and e.edge_type in ('event_regarding_object','event_involves_object','event_related_object')
 join objects dst on dst.id = e.dst_id
 join object_kinds dst_kind on dst_kind.id = dst.kind_id
-left join object_facts reason on reason.object_id = ev.id and reason.fact_key = 'k8s_event.reason'
-where e.edge_type in ('event_regarding_object','event_involves_object','event_related_object')
-order by e.valid_from desc
+left join object_facts preview
+  on preview.version_id = reason.version_id
+ and preview.fact_key = 'k8s_event.message_preview'
+where reason.cluster_id = 1
+  and reason.fact_key <> 'k8s_event.message_preview'
+  and reason.fact_key = 'k8s_event.reason'
+  and reason.fact_value in ('PolicyViolation','FailedCreate','FailedScheduling','BackOff','Unhealthy','FailedMount')
+order by reason.ts desc
 limit 50`,
 		},
 		{
@@ -396,6 +457,7 @@ join objects svc on svc.id = svc_edge.dst_id
 join object_edges pod_edge on pod_edge.src_id = slice.id and pod_edge.edge_type = 'endpointslice_targets_pod'
 join objects pod on pod.id = pod_edge.dst_id
 where svc_edge.edge_type = 'endpointslice_for_service'
+  and svc_edge.cluster_id = 1
 order by svc.namespace, svc.name, slice.name, pod.name
 limit 100`,
 		},
@@ -410,6 +472,7 @@ join object_kinds binding_kind on binding_kind.id = binding.kind_id
 join objects target on target.id = e.dst_id
 join object_kinds target_kind on target_kind.id = target.kind_id
 where e.edge_type in ('rbac_binding_binds_subject','rbac_binding_grants_role')
+  and e.cluster_id = 1
 order by binding.name, e.edge_type
 limit 100`,
 		},
@@ -423,7 +486,24 @@ join objects src on src.id = e.src_id
 join object_kinds src_kind on src_kind.id = src.kind_id
 join objects dst on dst.id = e.dst_id
 where e.edge_type in ('webhook_uses_service','crd_conversion_webhook_uses_service','apiservice_uses_service')
+  and e.cluster_id = 1
 order by e.edge_type, src.name
+limit 100`,
+		},
+		{
+			Name:        "certmanager_edges",
+			Description: "Follow cert-manager Certificate and CertificateRequest relationships.",
+			SQL: `select src_kind.kind as source_kind, src.namespace as source_namespace, src.name as source_name,
+       e.edge_type,
+       dst_kind.kind as target_kind, dst.namespace as target_namespace, dst.name as target_name
+from object_edges e
+join objects src on src.id = e.src_id
+join object_kinds src_kind on src_kind.id = src.kind_id
+join objects dst on dst.id = e.dst_id
+join object_kinds dst_kind on dst_kind.id = dst.kind_id
+where e.cluster_id = 1
+  and e.edge_type like 'certmanager_%'
+order by e.valid_from desc
 limit 100`,
 		},
 		{
@@ -436,7 +516,10 @@ from objects o
 join object_kinds ok on ok.id = o.kind_id
 join versions v on v.object_id = o.id
 join blobs b on b.digest = v.blob_ref
-where ok.kind = 'Pod' and o.namespace = 'default' and o.name = 'example'
+where o.cluster_id = 1
+  and ok.kind = 'Pod'
+  and o.namespace = 'default'
+  and o.name = 'example'
 order by v.seq desc
 limit 20`,
 		},

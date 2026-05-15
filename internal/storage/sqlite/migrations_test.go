@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,6 +109,38 @@ on latest_index(cluster_id, kind_id, namespace, name)`,
 	}
 	if latestDocs != 1 {
 		t.Fatalf("latest_documents rows = %d, want 1", latestDocs)
+	}
+}
+
+func TestMigrateObjectFactsKeyValueIndexExcludesEventMessagePreview(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "kube-insight.db")
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	var sqlText string
+	if err := store.db.QueryRow(`
+select sql
+from sqlite_master
+where type = 'index'
+  and name = 'object_facts_key_value_time_idx'`).Scan(&sqlText); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(sqlText), "where fact_key <> 'k8s_event.message_preview'") {
+		t.Fatalf("index sql = %q", sqlText)
+	}
+	var keyTimeSQL string
+	if err := store.db.QueryRow(`
+select sql
+from sqlite_master
+where type = 'index'
+  and name = 'object_facts_key_time_idx'`).Scan(&keyTimeSQL); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToLower(keyTimeSQL), "object_facts(fact_key, ts desc)") {
+		t.Fatalf("key time index sql = %q", keyTimeSQL)
 	}
 }
 

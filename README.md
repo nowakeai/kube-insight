@@ -1,11 +1,12 @@
 <p align="center">
-  <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="720">
+  <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="780">
 </p>
 
 <p align="center">
   <a href="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml/badge.svg"></a>
   <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.26-00ADD8"></a>
-  <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20PoC-4f46e5">
+  <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20PoC-64748b">
+  <img alt="MVP storage" src="https://img.shields.io/badge/MVP%20storage-Postgres%20%2B%20Cockroach-2563eb">
   <img alt="Agent ready" src="https://img.shields.io/badge/MCP-agent%20ready-16a34a">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
@@ -40,7 +41,8 @@
 | Topology edges | Workload, Service, EndpointSlice, Event, RBAC, cert-manager, and webhook relationships. |
 | Agent workflows | SQL recipes, MCP tools, and prompts for coverage-first investigation. |
 | Privacy controls | Filters run before hashing and storage; destructive filters write audit decisions. |
-| Local-first PoC | One binary, SQLite storage, CLI, HTTP API, and MCP surfaces. |
+| Local PoC mode | One binary, SQLite storage, CLI, HTTP API, and MCP surfaces. |
+| MVP storage path | PostgreSQL for central deployments, with CockroachDB for distributed metadata/query use cases. |
 
 ## How It Works
 
@@ -57,7 +59,7 @@ flowchart LR
     E["Evidence extraction<br/>facts, edges, changes"]
   end
 
-  subgraph Store["SQLite evidence store"]
+  subgraph Store["SQLite PoC / Postgres + Cockroach MVP evidence store"]
     F["versions"]
     G["object_facts"]
     H["object_edges"]
@@ -82,36 +84,47 @@ flowchart LR
 
 ## Quick Start
 
-Build the CLI:
+Download the latest `v0.0.1` release binary:
 
 ```bash
-make build
+KI_VERSION=0.0.1
+KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+KI_ARCH="$(uname -m)"
+case "${KI_ARCH}" in
+  x86_64) KI_ARCH=amd64 ;;
+  aarch64) KI_ARCH=arm64 ;;
+esac
+
+curl -L -o kube-insight.tar.gz \
+  "https://github.com/nowakeai/kube-insight/releases/download/v${KI_VERSION}/kube-insight_${KI_VERSION}_${KI_OS}_${KI_ARCH}.tar.gz"
+tar -xzf kube-insight.tar.gz kube-insight
+chmod +x kube-insight
 ```
 
 Watch the current kubeconfig context into a local SQLite database:
 
 ```bash
-./bin/kube-insight watch --db kubeinsight.db
+./kube-insight watch --db kubeinsight.db
 ```
 
 Check collector coverage before trusting an investigation:
 
 ```bash
-./bin/kube-insight db resources health --db kubeinsight.db --stale-after 10m
-./bin/kube-insight db resources health --db kubeinsight.db --errors-only
+./kube-insight db resources health --db kubeinsight.db --stale-after 10m
+./kube-insight db resources health --db kubeinsight.db --errors-only
 ```
 
 Start SQL investigations by selecting a cluster:
 
 ```bash
-./bin/kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
+./kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
   "select id, name, source from clusters order by id"
 ```
 
 Serve API and MCP for local agent workflows:
 
 ```bash
-./bin/kube-insight serve --watch --api --mcp --db kubeinsight.db
+./kube-insight serve --watch --api --mcp --db kubeinsight.db
 ```
 
 See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
@@ -123,7 +136,7 @@ history examples.
 sequenceDiagram
   participant Agent
   participant MCP as kube-insight MCP
-  participant DB as SQLite evidence
+  participant DB as Evidence store
   participant Kube as Kubernetes API
 
   Agent->>MCP: kube_insight_health
@@ -207,9 +220,11 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Release Status
 
-kube-insight is a local-first PoC. The current storage backend is SQLite, with
-the storage semantics kept above the backend so Postgres/Cockroach support can
-share the same data model later.
+kube-insight is currently released as a local-first PoC with SQLite. The MVP
+storage target is PostgreSQL for central service deployments, with CockroachDB
+planned for distributed metadata and query deployments. Storage semantics stay
+above the backend so SQLite, PostgreSQL, and CockroachDB can share the same
+product behavior.
 
 ## Development
 

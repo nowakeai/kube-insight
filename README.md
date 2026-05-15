@@ -1,63 +1,163 @@
-# kube-insight
+<p align="center">
+  <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="720">
+</p>
 
-`kube-insight` records Kubernetes history and turns retained cluster state into
-queryable troubleshooting evidence for humans and agents.
+<p align="center">
+  <a href="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.26-00ADD8"></a>
+  <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20PoC-4f46e5">
+  <img alt="Agent ready" src="https://img.shields.io/badge/MCP-agent%20ready-16a34a">
+  <img alt="License" src="https://img.shields.io/badge/license-TBD-lightgrey">
+</p>
 
-Kubernetes is excellent at showing the current state of a cluster. Incident
-investigation often needs a different view: what changed, which objects were
-related, and what evidence still exists after Events expired or live state moved
-on. kube-insight keeps sanitized resource versions, extracts compact facts and
-edges, and exposes read-only query surfaces over local SQLite.
+<p align="center">
+  <strong>Historical Kubernetes evidence for humans and agents.</strong><br>
+  Capture sanitized cluster history, extract troubleshooting facts and topology
+  edges, then query the evidence long after live state and Kubernetes Events
+  have moved on.
+</p>
 
-## Why kube-insight
+---
 
-- Historical evidence: retained versions and observation timestamps show what
-  the cluster looked like when a problem happened.
-- Agent-ready data: facts, edges, status changes, and SQL recipes let agents
-  inspect evidence without repeatedly listing and joining Kubernetes resources.
-- Proof-preserving storage: compact facts point to retained JSON versions, so
-  summaries can be checked against source documents.
-- Local-first PoC: run against a kubeconfig context, store data in SQLite, and
-  expose CLI, HTTP API, and MCP surfaces from one binary.
-- Privacy-aware ingestion: default processing removes noisy or sensitive fields
-  before retained hashing and storage.
+## Why kube-insight?
 
-## Quickstart
+`kubectl` is the fastest way to ask what the cluster looks like now.
+`kube-insight` is for the questions that arrive later:
+
+- What changed around the time the incident started?
+- Which objects were related to the failed workload, webhook, certificate, or
+  policy?
+- Did a delete actually happen, or was there only a graceful deletion timestamp?
+- Which Events disappeared from the apiserver but still matter?
+- What proof can an agent cite instead of guessing from summaries?
+
+## What It Does
+
+| Capability | What you get |
+| --- | --- |
+| Historical versions | Retained Kubernetes JSON versions and observation timestamps. |
+| Searchable facts | Status, Event, rollout, RBAC, certificate, webhook, and endpoint facts. |
+| Topology edges | Workload, Service, EndpointSlice, Event, RBAC, cert-manager, and webhook relationships. |
+| Agent workflows | SQL recipes, MCP tools, and prompts for coverage-first investigation. |
+| Privacy controls | Filters run before hashing and storage; destructive filters write audit decisions. |
+| Local-first PoC | One binary, SQLite storage, CLI, HTTP API, and MCP surfaces. |
+
+## How It Works
+
+```mermaid
+flowchart LR
+  subgraph K8s["Kubernetes API"]
+    A["Discovery"]
+    B["List / Watch"]
+  end
+
+  subgraph Ingest["kube-insight ingestion"]
+    C["Filters<br/>redact, normalize, discard"]
+    D["Retained versions<br/>content-addressed JSON"]
+    E["Evidence extraction<br/>facts, edges, changes"]
+  end
+
+  subgraph Store["SQLite evidence store"]
+    F["versions"]
+    G["object_facts"]
+    H["object_edges"]
+    I["object_observations"]
+  end
+
+  subgraph Query["Read surfaces"]
+    J["CLI"]
+    K["HTTP API"]
+    L["MCP tools + prompts"]
+  end
+
+  A --> B --> C --> D --> F
+  C --> E --> G
+  E --> H
+  B --> I
+  F --> J
+  G --> J
+  H --> K
+  I --> L
+```
+
+## Quick Start
+
+Build the CLI:
 
 ```bash
 make build
+```
+
+Watch the current kubeconfig context into a local SQLite database:
+
+```bash
 ./bin/kube-insight watch --db kubeinsight.db
 ```
 
-Check collector coverage:
+Check collector coverage before trusting an investigation:
 
 ```bash
 ./bin/kube-insight db resources health --db kubeinsight.db --stale-after 10m
+./bin/kube-insight db resources health --db kubeinsight.db --errors-only
 ```
 
-Run a read-only SQL investigation:
+Start SQL investigations by selecting a cluster:
 
 ```bash
 ./bin/kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
   "select id, name, source from clusters order by id"
 ```
 
-Serve local API and MCP endpoints:
+Serve API and MCP for local agent workflows:
 
 ```bash
 ./bin/kube-insight serve --watch --api --mcp --db kubeinsight.db
 ```
 
-See [docs/quickstart.md](docs/quickstart.md) for the full local workflow.
+See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
+history examples.
 
-## Benchmark Snapshot
+## Agent Investigation Loop
+
+```mermaid
+sequenceDiagram
+  participant Agent
+  participant MCP as kube-insight MCP
+  participant DB as SQLite evidence
+  participant Kube as Kubernetes API
+
+  Agent->>MCP: kube_insight_health
+  MCP->>DB: collector health and offsets
+  DB-->>MCP: stale/error coverage gaps
+  Agent->>MCP: kube_insight_schema
+  Agent->>MCP: kube_insight_sql<br/>cluster-scoped facts and edges
+  MCP->>DB: read-only SQL
+  DB-->>Agent: candidate objects
+  Agent->>MCP: kube_insight_history
+  DB-->>Agent: retained versions and observations
+  Agent->>Kube: optional kubectl comparison
+```
+
+MCP tools:
+
+- `kube_insight_schema`: tables, indexes, relationships, and SQL recipes.
+- `kube_insight_sql`: read-only `SELECT`, `WITH`, and `EXPLAIN` queries.
+- `kube_insight_health`: collector coverage, staleness, and resource errors.
+- `kube_insight_history`: retained versions, observations, and diffs for one
+  object.
+
+MCP prompts:
+
+- `kube_insight_coverage_first`
+- `kube_insight_event_history`
+- `kube_insight_object_history`
+
+## Example: Retained Events Beat Live Memory
 
 The validation case in
-[docs/validation/insight-vs-kubectl-benchmark.md](docs/validation/insight-vs-kubectl-benchmark.md)
+[Insight vs kubectl Benchmark Notes](docs/validation/insight-vs-kubectl-benchmark.md)
 compares current `kubectl` Event queries with retained kube-insight evidence on
-a sanitized GKE workload cluster.
-
-Observed point-in-time results:
+a sanitized workload cluster.
 
 | Query | Result |
 | --- | ---: |
@@ -68,33 +168,45 @@ Observed point-in-time results:
 | insight Event-to-resource edge sample | 28 ms |
 | kubectl current Warning Event count | 3,176 ms |
 
-The product claim is not a universal speedup. The useful difference is that
-kube-insight can answer historical and cross-resource questions from retained
-evidence, while kubectl answers current apiserver state.
+This is not a universal speed claim. The point is evidence shape:
+`kubectl` answers current apiserver state; kube-insight answers historical and
+cross-resource questions from retained proof.
 
-## Agent Workflows
+## Core Tables
 
-kube-insight exposes MCP tools for schema discovery, read-only SQL, collector
-health, and object history:
+```mermaid
+erDiagram
+  clusters ||--o{ objects : owns
+  api_resources ||--o{ object_kinds : maps
+  object_kinds ||--o{ objects : classifies
+  objects ||--o{ versions : retains
+  objects ||--o{ object_observations : observes
+  versions ||--o{ object_facts : extracts
+  versions ||--o{ object_changes : summarizes
+  objects ||--o{ object_edges : source
+  objects ||--o{ object_edges : target
+```
 
-- `kube_insight_schema`
-- `kube_insight_sql`
-- `kube_insight_health`
-- `kube_insight_history`
-
-Start with collector health, list clusters, keep `cluster_id` in follow-up SQL,
-then use facts and edges to find candidates before requesting retained versions
-as proof. The detailed agent guide is in
-[docs/workflows/agent-sql-cookbook.md](docs/workflows/agent-sql-cookbook.md).
+Facts and edges are the candidate path. Versions are the proof.
 
 ## Documentation
 
-- [Documentation index](docs/README.md)
 - [Quickstart](docs/quickstart.md)
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
+- [Insight vs kubectl benchmark](docs/validation/insight-vs-kubectl-benchmark.md)
 - [Development commands](docs/dev/commands.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Release process](RELEASE.md)
+- [Full documentation index](docs/README.md)
+
+## Release Status
+
+kube-insight is a local-first PoC. The current storage backend is SQLite, with
+the storage semantics kept above the backend so Postgres/Cockroach support can
+share the same data model later.
 
 ## Development
 
@@ -104,5 +216,9 @@ make build
 make validate
 ```
 
-The repo keeps Go files under 800 lines; `make test` enforces that rule before
-running `go test ./...`.
+The repository keeps Go files at or below 800 lines. `make test` enforces that
+rule before running `go test ./...`.
+
+## License
+
+License selection is pending project owner confirmation before public release.

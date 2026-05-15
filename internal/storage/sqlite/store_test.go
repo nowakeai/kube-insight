@@ -713,6 +713,9 @@ func TestStorePersistsOnlyUsefulFilterDecisions(t *testing.T) {
 	decisions := []filter.Decision{
 		{Outcome: filter.Keep, Reason: "not_secret", Meta: map[string]any{"filter": "secret_redaction_filter"}},
 		{Outcome: filter.KeepModified, Reason: "managed_fields_removed", Meta: map[string]any{"filter": "metadata_normalization_filter"}},
+		{Outcome: filter.KeepModified, Reason: "resource_version_removed", Meta: map[string]any{"filter": "resource_version", "removedFields": 1}},
+		{Outcome: filter.KeepModified, Reason: "condition_timestamps_removed", Meta: map[string]any{"filter": "status_condition_timestamps", "removedFields": 2}},
+		{Outcome: filter.KeepModified, Reason: "leader_annotation_removed", Meta: map[string]any{"filter": "leader_election_configmap", "removedFields": 1}},
 		{Outcome: filter.KeepModified, Reason: "secret_payload_removed", Meta: map[string]any{"filter": "secret_redaction_filter", "redactedFields": 1}},
 		{Outcome: filter.DiscardResource, Reason: "lease_resource", Meta: map[string]any{"filter": "lease_skip_filter"}},
 	}
@@ -725,6 +728,13 @@ func TestStorePersistsOnlyUsefulFilterDecisions(t *testing.T) {
 	}
 	if rows != 2 {
 		t.Fatalf("filter decision rows = %d, want 2", rows)
+	}
+	var destructive int
+	if err := store.db.QueryRow(`select count(*) from filter_decisions where destructive`).Scan(&destructive); err != nil {
+		t.Fatal(err)
+	}
+	if destructive != 2 {
+		t.Fatalf("destructive filter decision rows = %d, want 2", destructive)
 	}
 }
 

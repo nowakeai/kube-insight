@@ -312,7 +312,15 @@ func TestRunQuerySchemaAndReadOnlySQLWithSQLite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"name": "latest_index"`, `"name": "object_facts"`, "All timestamps are Unix milliseconds"} {
+	for _, want := range []string{
+		`"name": "latest_index"`,
+		`"name": "latest_documents"`,
+		`"name": "object_facts"`,
+		`"relationships":`,
+		`"recipes":`,
+		`"name": "coverage_first"`,
+		"All timestamps are Unix milliseconds",
+	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("schema missing %q: %s", want, stdout.String())
 		}
@@ -405,6 +413,7 @@ func TestRunConfigValidate(t *testing.T) {
 	err := Run(context.Background(), []string{
 		"config", "validate",
 		"--file", filepath.Join("..", "..", "config", "kube-insight.example.yaml"),
+		"--output", "json",
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
@@ -431,6 +440,7 @@ func TestRunConfigValidateEnvAndFlagPrecedence(t *testing.T) {
 	err := Run(context.Background(), []string{
 		"config", "validate",
 		"--file", filepath.Join("..", "..", "config", "kube-insight.example.yaml"),
+		"--output", "json",
 		"--db", "flag.db",
 		"--namespace", "payments",
 	}, &stdout, &stderr)
@@ -602,6 +612,7 @@ func TestRunDBResourcesHealth(t *testing.T) {
 		"db", "resources", "health",
 		"--db", dbPath,
 		"--errors-only",
+		"--output", "json",
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)

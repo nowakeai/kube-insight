@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/extractor"
+	"kube-insight/internal/filter"
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/kubeapi"
 	"kube-insight/internal/resourceprofile"
@@ -33,6 +35,13 @@ type WatchOptions struct {
 	Timeout              time.Duration
 	StartResourceVersion string
 	MaxRetries           int
+	Filters              filter.Chain
+	FilterChains         ingest.FilterChains
+	Extractors           *extractor.Registry
+	DisableHTTP2         bool
+	RetryMinBackoff      time.Duration
+	RetryMaxBackoff      time.Duration
+	ProfileRules         []resourceprofile.Rule
 }
 
 type WatchSummary struct {
@@ -55,44 +64,55 @@ type WatchSummary struct {
 }
 
 type WatchResourcesOptions struct {
-	Context           string
-	ClusterID         string
-	Resources         []Resource
-	DiscoverResources bool
-	Namespace         string
-	Store             storage.Store
-	Logf              WatchLogFunc
-	MaxEvents         int
-	Timeout           time.Duration
-	Concurrency       int
-	MaxRetries        int
+	Context              string
+	ClusterID            string
+	Resources            []Resource
+	DiscoverResources    bool
+	Namespace            string
+	Store                storage.Store
+	Logf                 WatchLogFunc
+	MaxEvents            int
+	Timeout              time.Duration
+	Concurrency          int
+	MaxRetries           int
+	Filters              filter.Chain
+	FilterChains         ingest.FilterChains
+	Extractors           *extractor.Registry
+	DisableHTTP2         bool
+	MaxConcurrentStreams int
+	RetryMinBackoff      time.Duration
+	RetryMaxBackoff      time.Duration
+	StreamStartStagger   time.Duration
+	ProfileRules         []resourceprofile.Rule
 }
 
 type WatchLogFunc func(message string, args ...any)
 
 type WatchResourcesSummary struct {
-	Context            string               `json:"context"`
-	ClusterID          string               `json:"clusterId,omitempty"`
-	Resources          int                  `json:"resources"`
-	Completed          int                  `json:"completed"`
-	Errors             int                  `json:"errors"`
-	Listed             int                  `json:"listed"`
-	Events             int                  `json:"events"`
-	Stored             int                  `json:"stored"`
-	Bookmarks          int                  `json:"bookmarks"`
-	Deleted            int                  `json:"deleted"`
-	ReconciledDeleted  int                  `json:"reconciledDeleted"`
-	UnknownVisibility  int                  `json:"unknownVisibility"`
-	Relists            int                  `json:"relists"`
-	Retries            int                  `json:"retries"`
-	WatchErrors        int                  `json:"watchErrors"`
-	Ingest             ingest.Summary       `json:"ingest"`
-	Workers            []WatchWorkerSummary `json:"workers"`
-	ResourceQueue      []WatchResourceQueue `json:"resourceQueue,omitempty"`
-	Concurrency        int                  `json:"concurrency"`
-	MaxQueueDepth      int                  `json:"maxQueueDepth"`
-	BackpressureEvents int                  `json:"backpressureEvents"`
-	QueueWaitMS        float64              `json:"queueWaitMs"`
+	Context              string                 `json:"context"`
+	ClusterID            string                 `json:"clusterId,omitempty"`
+	Resources            int                    `json:"resources"`
+	Completed            int                    `json:"completed"`
+	Errors               int                    `json:"errors"`
+	Listed               int                    `json:"listed"`
+	Events               int                    `json:"events"`
+	Stored               int                    `json:"stored"`
+	Bookmarks            int                    `json:"bookmarks"`
+	Deleted              int                    `json:"deleted"`
+	ReconciledDeleted    int                    `json:"reconciledDeleted"`
+	UnknownVisibility    int                    `json:"unknownVisibility"`
+	Relists              int                    `json:"relists"`
+	Retries              int                    `json:"retries"`
+	WatchErrors          int                    `json:"watchErrors"`
+	Ingest               ingest.Summary         `json:"ingest"`
+	Workers              []WatchWorkerSummary   `json:"workers"`
+	ResourceQueue        []WatchResourceQueue   `json:"resourceQueue,omitempty"`
+	Concurrency          int                    `json:"concurrency"`
+	MaxConcurrentStreams int                    `json:"maxConcurrentStreams,omitempty"`
+	MaxQueueDepth        int                    `json:"maxQueueDepth"`
+	BackpressureEvents   int                    `json:"backpressureEvents"`
+	QueueWaitMS          float64                `json:"queueWaitMs"`
+	ProfileRules         []resourceprofile.Rule `json:"-"`
 }
 
 type WatchWorkerSummary struct {
@@ -151,6 +171,10 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 	if opts.MaxRetries < 0 {
 		opts.MaxRetries = -1
 	}
+	opts.RetryMinBackoff, opts.RetryMaxBackoff = normalizedBackoff(opts.RetryMinBackoff, opts.RetryMaxBackoff)
+	if opts.StreamStartStagger < 0 {
+		opts.StreamStartStagger = 0
+	}
 	resources := opts.Resources
 	if opts.DiscoverResources || len(resources) == 0 || needsResourceDiscovery(resources) {
 		watchLog(opts.Logf, "discovering watchable resources", "context", opts.Context)
@@ -166,6 +190,7 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 		}
 	}
 	resources = watchableResources(resources)
+	sortWatchResources(resources, opts.ProfileRules)
 	if len(resources) == 0 {
 		return WatchResourcesSummary{}, fmt.Errorf("no watchable resources found")
 	}
@@ -179,15 +204,17 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 		}
 		watchLog(opts.Logf, "registered api resources", "resources", len(infos), "context", opts.Context)
 	}
-	watchLog(opts.Logf, "starting watch", "context", opts.Context, "namespace", watchNamespaceLabel(opts.Namespace), "resources", len(resources), "concurrency", opts.Concurrency, "maxEvents", opts.MaxEvents, "timeout", watchTimeoutLabel(opts.Timeout))
+	watchLog(opts.Logf, "starting watch", "context", opts.Context, "namespace", watchNamespaceLabel(opts.Namespace), "resources", len(resources), "concurrency", opts.Concurrency, "maxConcurrentStreams", opts.MaxConcurrentStreams, "maxEvents", opts.MaxEvents, "timeout", watchTimeoutLabel(opts.Timeout))
 
 	summary := WatchResourcesSummary{
-		Context:       opts.Context,
-		ClusterID:     opts.ClusterID,
-		Resources:     len(resources),
-		Concurrency:   opts.Concurrency,
-		MaxQueueDepth: max(0, len(resources)-opts.Concurrency),
-		Workers:       make([]WatchWorkerSummary, len(resources)),
+		Context:              opts.Context,
+		ClusterID:            opts.ClusterID,
+		Resources:            len(resources),
+		Concurrency:          opts.Concurrency,
+		MaxConcurrentStreams: opts.MaxConcurrentStreams,
+		MaxQueueDepth:        max(0, len(resources)-opts.Concurrency),
+		Workers:              make([]WatchWorkerSummary, len(resources)),
+		ProfileRules:         resourceprofile.CloneRules(opts.ProfileRules),
 	}
 	deadline := time.Time{}
 	if opts.Timeout > 0 {
@@ -210,7 +237,7 @@ func durationMillis(start time.Time) float64 {
 	return float64(time.Since(start).Microseconds()) / 1000
 }
 
-func resourceQueueMetrics(workers []WatchWorkerSummary, concurrency int) []WatchResourceQueue {
+func resourceQueueMetrics(workers []WatchWorkerSummary, concurrency int, rules []resourceprofile.Rule) []WatchResourceQueue {
 	if len(workers) == 0 {
 		return nil
 	}
@@ -221,7 +248,7 @@ func resourceQueueMetrics(workers []WatchWorkerSummary, concurrency int) []Watch
 	for i, worker := range workers {
 		out = append(out, WatchResourceQueue{
 			Resource:    worker.Resource,
-			Priority:    resourceQueuePriority(worker.Resource),
+			Priority:    resourceQueuePriority(worker.Resource, rules),
 			Queued:      worker.Queued,
 			QueueDepth:  max(0, i-concurrency+1),
 			QueueWaitMS: worker.QueueWaitMS,
@@ -230,8 +257,8 @@ func resourceQueueMetrics(workers []WatchWorkerSummary, concurrency int) []Watch
 	return out
 }
 
-func resourceQueuePriority(resource Resource) string {
-	profile := resourceprofile.ForResource(resourceInfo(resource))
+func resourceQueuePriority(resource Resource, rules []resourceprofile.Rule) string {
+	profile := profileForResource(resourceInfo(resource), rules)
 	return profile.Priority
 }
 
@@ -239,6 +266,7 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 	if opts.MaxRetries < 0 {
 		opts.MaxRetries = -1
 	}
+	opts.RetryMinBackoff, opts.RetryMaxBackoff = normalizedBackoff(opts.RetryMinBackoff, opts.RetryMaxBackoff)
 	prepared, err := prepareWatchResourceClientGo(ctx, opts)
 	if err != nil {
 		return WatchSummary{}, err
@@ -290,7 +318,7 @@ func WatchResourceClientGo(ctx context.Context, opts WatchOptions) (WatchSummary
 			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 			watchLog(opts.Logf, "retry watch", "resource", resourceLabel(prepared.Resource), "retries", summary.Retries, "resourceVersion", emptyLabel(resourceVersion), "error", err)
 		}
-		if err := sleepBeforeRetry(ctx, deadline, attempts); err != nil {
+		if err := sleepBeforeRetry(ctx, deadline, attempts, opts.RetryMinBackoff, opts.RetryMaxBackoff); err != nil {
 			return summary, err
 		}
 	}
@@ -318,14 +346,14 @@ func listResourceOnce(ctx context.Context, resourceClient dynamic.ResourceInterf
 	if listData, err := json.Marshal(list); err != nil {
 		return err
 	} else {
-		ingested, err := ingestList(ctx, opts.Store, opts.ClusterID, listData)
+		ingested, err := ingestList(ctx, opts.Store, opts.ClusterID, listData, opts.Filters, opts.FilterChains, opts.Extractors, opts.ProfileRules)
 		if err != nil {
 			return err
 		}
 		summary.Ingest = addIngest(summary.Ingest, ingested)
 		summary.Stored += ingested.StoredObservations
 	}
-	reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, previousRefs, list)
+	reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, previousRefs, list, opts.Filters, opts.FilterChains, opts.Extractors, opts.ProfileRules)
 	if err != nil {
 		return err
 	}
@@ -369,14 +397,14 @@ func watchResourceStream(ctx context.Context, resourceClient dynamic.ResourceInt
 			if !ok {
 				return errWatchClosed
 			}
-			if err := handleWatchEvent(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, event, summary, opts.Logf); err != nil {
+			if err := handleWatchEvent(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, event, summary, opts.Logf, opts.Filters, opts.FilterChains, opts.Extractors, opts.ProfileRules); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace string, event watch.Event, summary *WatchSummary, logf WatchLogFunc) error {
+func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace string, event watch.Event, summary *WatchSummary, logf WatchLogFunc, filters filter.Chain, filterChains ingest.FilterChains, extractors *extractor.Registry, profileRules []resourceprofile.Rule) error {
 	if event.Type == watch.Error {
 		err := apierrors.FromObject(event.Object)
 		if err == nil {
@@ -406,7 +434,7 @@ func handleWatchEvent(ctx context.Context, store storage.Store, clusterID string
 	if err != nil {
 		return err
 	}
-	ingested, err := ingestList(ctx, store, clusterID, data)
+	ingested, err := ingestList(ctx, store, clusterID, data, filters, filterChains, extractors, profileRules)
 	if err != nil {
 		return err
 	}
@@ -428,9 +456,22 @@ func watchEventJSON(eventType watch.EventType, obj *unstructured.Unstructured) (
 	return json.Marshal(payload)
 }
 
-func ingestList(ctx context.Context, store storage.Store, clusterID string, data []byte) (ingest.Summary, error) {
+func ingestList(ctx context.Context, store storage.Store, clusterID string, data []byte, filters filter.Chain, filterChains ingest.FilterChains, extractors *extractor.Registry, profileRules []resourceprofile.Rule) (ingest.Summary, error) {
 	pipeline := ingest.DefaultPipeline(store)
 	pipeline.ClusterID = clusterID
+	if filters != nil {
+		pipeline.Filters = filters
+	}
+	if filterChains.Default != nil || len(filterChains.ByName) > 0 {
+		pipeline.FilterChains = filterChains
+		pipeline.Filters = filterChains.Default
+	}
+	if extractors != nil {
+		pipeline.Extractors = extractors
+	}
+	if len(profileRules) > 0 {
+		pipeline.ProfileRules = profileRules
+	}
 	return pipeline.IngestJSON(ctx, data)
 }
 
@@ -448,7 +489,7 @@ func latestResourceRefs(ctx context.Context, store storage.Store, clusterID stri
 	return refStore.LatestResourceRefs(ctx, clusterID, info, namespace)
 }
 
-func reconcileDeletedFromList(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace, resourceVersion string, previous []core.ResourceRef, list *unstructured.UnstructuredList) (reconciliationSummary, error) {
+func reconcileDeletedFromList(ctx context.Context, store storage.Store, clusterID string, info kubeapi.ResourceInfo, namespace, resourceVersion string, previous []core.ResourceRef, list *unstructured.UnstructuredList, filters filter.Chain, filterChains ingest.FilterChains, extractors *extractor.Registry, profileRules []resourceprofile.Rule) (reconciliationSummary, error) {
 	if len(previous) == 0 {
 		return reconciliationSummary{}, nil
 	}
@@ -471,7 +512,7 @@ func reconcileDeletedFromList(ctx context.Context, store storage.Store, clusterI
 		if err != nil {
 			return out, err
 		}
-		summary, err := ingestList(ctx, store, clusterID, data)
+		summary, err := ingestList(ctx, store, clusterID, data, filters, filterChains, extractors, profileRules)
 		if err != nil {
 			return out, err
 		}
@@ -638,30 +679,6 @@ func isTransientWatchStreamError(err error) bool {
 		}
 	}
 	return false
-}
-
-func sleepBeforeRetry(ctx context.Context, deadline time.Time, attempt int) error {
-	if !deadline.IsZero() && time.Now().After(deadline) {
-		return errWatchClosed
-	}
-	delay := time.Duration(attempt) * 100 * time.Millisecond
-	if delay > time.Second {
-		delay = time.Second
-	}
-	if !deadline.IsZero() && time.Now().Add(delay).After(deadline) {
-		delay = time.Until(deadline)
-		if delay <= 0 {
-			return errWatchClosed
-		}
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func watchableResources(resources []Resource) []Resource {

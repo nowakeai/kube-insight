@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -256,11 +257,15 @@ func sqlQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 	var sqlText string
 	var maxRows int
 	var readStdin bool
+	var output string
 	cmd := &cobra.Command{
 		Use:   "sql [SQL]",
 		Short: "Run read-only SQL for agents.",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateOutputFormat(output); err != nil {
+				return err
+			}
 			rt, err := loadRuntimeConfig(cmd, state, "", false)
 			if err != nil {
 				return err
@@ -292,13 +297,57 @@ func sqlQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 			if err != nil {
 				return err
 			}
+			if output == outputTable {
+				return writeSQLQueryTable(stdout, result)
+			}
 			return writeJSON(stdout, result)
 		},
 	}
 	cmd.Flags().StringVar(&sqlText, "sql", "", "Read-only SQL query; defaults to positional SQL")
 	cmd.Flags().IntVar(&maxRows, "max-rows", 1000, "Maximum rows to return")
 	cmd.Flags().BoolVar(&readStdin, "stdin", false, "Read SQL from stdin")
+	addOutputFlag(cmd, &output, outputJSON)
 	return cmd
+}
+
+func writeSQLQueryTable(stdout io.Writer, result sqlite.SQLQueryResult) error {
+	rows := make([][]string, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		values := make([]string, 0, len(result.Columns))
+		for _, column := range result.Columns {
+			values = append(values, shortText(sqlCellText(row[column]), 120))
+		}
+		rows = append(rows, values)
+	}
+	if err := writeTable(stdout, result.Columns, rows); err != nil {
+		return err
+	}
+	suffix := ""
+	if result.Truncated {
+		suffix = " truncated"
+	}
+	_, err := fmt.Fprintf(stdout, "%d row(s), %.2f ms%s\n", result.RowCount, result.ElapsedMS, suffix)
+	return err
+}
+
+func sqlCellText(value any) string {
+	if value == nil {
+		return "null"
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case bool:
+		return boolText(typed)
+	case int64, int, int32, float64, float32:
+		return fmt.Sprint(typed)
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
 }
 
 func investigateServiceCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {

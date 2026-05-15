@@ -9,11 +9,13 @@ import (
 	"strings"
 	"time"
 
+	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/core"
 	"kube-insight/internal/extractor"
 	"kube-insight/internal/filter"
 	"kube-insight/internal/kubeapi"
 	"kube-insight/internal/logging"
+	"kube-insight/internal/resourceprofile"
 	"kube-insight/internal/storage"
 )
 
@@ -29,33 +31,31 @@ type Summary struct {
 }
 
 type Pipeline struct {
-	ClusterID  string
-	Filters    filter.Chain
-	Extractors *extractor.Registry
-	Resolver   *kubeapi.Resolver
-	Store      storage.Store
-	Now        func() time.Time
+	ClusterID    string
+	Filters      filter.Chain
+	FilterChains FilterChains
+	Extractors   *extractor.Registry
+	ProfileRules []resourceprofile.Rule
+	Resolver     *kubeapi.Resolver
+	Store        storage.Store
+	Now          func() time.Time
 }
 
 func DefaultPipeline(store storage.Store) Pipeline {
 	resolver := kubeapi.NewResolver()
+	filterChains, err := FilterChainsFromProcessing(appconfig.Default().Processing)
+	if err != nil {
+		panic(err)
+	}
 	return Pipeline{
-		ClusterID: "local",
-		Filters: filter.Chain{
-			filter.LeaseSkipFilter{},
-			filter.SecretRedactionFilter{},
-			filter.ManagedFieldsFilter{},
-		},
-		Extractors: extractor.NewRegistry(
-			extractor.ReferenceExtractor{},
-			extractor.PodExtractor{},
-			extractor.NodeExtractor{},
-			extractor.EventExtractor{},
-			extractor.EndpointSliceExtractor{},
-		),
-		Resolver: resolver,
-		Store:    store,
-		Now:      time.Now,
+		ClusterID:    "local",
+		Filters:      filterChains.Default,
+		FilterChains: filterChains,
+		Extractors:   DefaultExtractorRegistry(),
+		ProfileRules: resourceprofile.DefaultRules(),
+		Resolver:     resolver,
+		Store:        store,
+		Now:          time.Now,
 	}
 }
 
@@ -99,7 +99,9 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 		summary.Observations++
 		obs := observationFromObject(clusterID, input.Type, now(), resolver, input.Object)
 		logger.Debug("ingesting observation", "cluster", obs.Ref.ClusterID, "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name, "type", obs.Type)
-		filtered, decisions, err := p.Filters.Apply(ctx, obs)
+		profile := p.profileForObservation(obs)
+		filterChain := p.filterChainForProfile(profile)
+		filtered, decisions, err := filterChain.Apply(ctx, obs)
 		if err != nil {
 			return summary, err
 		}
@@ -113,6 +115,15 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 			logger.Debug("discarded resource", "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name)
 			continue
 		}
+		if rawStore, ok := p.Store.(storage.RawLatestStore); ok {
+			rawLatest, err := rawLatestObservation(obs)
+			if err != nil {
+				return summary, err
+			}
+			if err := rawStore.PutRawLatest(ctx, rawLatest); err != nil {
+				return summary, err
+			}
+		}
 		if discarded(decisions, filter.DiscardChange) && filtered.Type != core.ObservationDeleted {
 			summary.DiscardedChanges++
 			logger.Debug("discarded change", "resource", obs.Ref.Resource, "namespace", obs.Ref.Namespace, "name", obs.Ref.Name)
@@ -122,7 +133,7 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 			summary.ModifiedObservations++
 		}
 
-		evidence, err := p.Extractors.Extract(extractor.WithResolver(ctx, resolver), filtered)
+		evidence, err := p.Extractors.ExtractSet(extractor.WithResolver(ctx, resolver), filtered, profile.ExtractorSet)
 		if err != nil {
 			return summary, err
 		}
@@ -137,6 +148,23 @@ func (p Pipeline) IngestJSON(ctx context.Context, data []byte) (Summary, error) 
 
 	logIngestSummary(logger, summary)
 	return summary, nil
+}
+
+func (p Pipeline) profileForObservation(obs core.Observation) resourceprofile.Profile {
+	return resourceprofile.Select(kubeapi.ResourceInfo{
+		Group:      obs.Ref.Group,
+		Version:    obs.Ref.Version,
+		Resource:   obs.Ref.Resource,
+		Kind:       obs.Ref.Kind,
+		Namespaced: obs.Ref.Namespace != "",
+	}, p.ProfileRules)
+}
+
+func (p Pipeline) filterChainForProfile(profile resourceprofile.Profile) filter.Chain {
+	if p.FilterChains.Default != nil || len(p.FilterChains.ByName) > 0 {
+		return p.FilterChains.Select(profile.FilterChain)
+	}
+	return p.Filters
 }
 
 func logIngestSummary(logger *slog.Logger, summary Summary) {

@@ -6,6 +6,7 @@ import (
 
 	"kube-insight/internal/core"
 	"kube-insight/internal/logging"
+	"kube-insight/internal/resourcematch"
 )
 
 type Outcome string
@@ -26,6 +27,78 @@ type Decision struct {
 type Filter interface {
 	Name() string
 	Apply(context.Context, core.Observation) (core.Observation, Decision, error)
+}
+
+type StaticDecisionFilter struct {
+	FilterName string
+	Outcome    Outcome
+	Reason     string
+}
+
+func (f StaticDecisionFilter) Name() string {
+	if f.FilterName == "" {
+		return "static_decision_filter"
+	}
+	return f.FilterName
+}
+
+func (f StaticDecisionFilter) Apply(_ context.Context, obs core.Observation) (core.Observation, Decision, error) {
+	outcome := f.Outcome
+	if outcome == "" {
+		outcome = Keep
+	}
+	reason := f.Reason
+	if reason == "" {
+		reason = "static_decision"
+	}
+	return obs, Decision{Outcome: outcome, Reason: reason}, nil
+}
+
+type Scope struct {
+	Resources  []string
+	Kinds      []string
+	Namespaces []string
+	Names      []string
+}
+
+func (s Scope) Empty() bool {
+	return len(s.Resources) == 0 && len(s.Kinds) == 0 && len(s.Namespaces) == 0 && len(s.Names) == 0
+}
+
+func (s Scope) Matches(ref core.ResourceRef) bool {
+	if s.Empty() {
+		return true
+	}
+	if len(s.Namespaces) > 0 && !resourcematch.MatchAnyString(s.Namespaces, ref.Namespace) {
+		return false
+	}
+	if len(s.Names) > 0 && !resourcematch.MatchAnyString(s.Names, ref.Name) {
+		return false
+	}
+	resourceScoped := len(s.Resources) > 0 || len(s.Kinds) > 0
+	if !resourceScoped {
+		return true
+	}
+	for _, kind := range s.Kinds {
+		if resourcematch.MatchAnyString([]string{kind}, ref.Kind) {
+			return true
+		}
+	}
+	return resourcematch.MatchAnyResource(s.Resources, resourcematch.FromCoreRef(ref))
+}
+
+type ScopedFilter struct {
+	Inner Filter
+	Scope Scope
+}
+
+func (f ScopedFilter) Name() string { return f.Inner.Name() }
+
+func (f ScopedFilter) Apply(ctx context.Context, obs core.Observation) (core.Observation, Decision, error) {
+	if !f.Scope.Matches(obs.Ref) {
+		return obs, Decision{Outcome: Keep, Reason: "scope_mismatch"}, nil
+	}
+	return f.Inner.Apply(ctx, obs)
 }
 
 type Chain []Filter
@@ -109,6 +182,123 @@ func (ManagedFieldsFilter) Apply(_ context.Context, obs core.Observation) (core.
 	return obs, Decision{
 		Outcome: KeepModified,
 		Reason:  "managed_fields_removed",
+		Meta: map[string]any{
+			"removedFields": 1,
+		},
+	}, nil
+}
+
+type ResourceVersionFilter struct{}
+
+func (ResourceVersionFilter) Name() string { return "resource_version_normalization_filter" }
+
+func (ResourceVersionFilter) Apply(_ context.Context, obs core.Observation) (core.Observation, Decision, error) {
+	metadata, ok := obs.Object["metadata"].(map[string]any)
+	if !ok {
+		return obs, Decision{Outcome: Keep, Reason: "no_metadata"}, nil
+	}
+	if _, exists := metadata["resourceVersion"]; !exists {
+		return obs, Decision{Outcome: Keep, Reason: "resource_version_absent"}, nil
+	}
+	next := cloneMap(obs.Object)
+	nextMetadata := cloneMap(metadata)
+	delete(nextMetadata, "resourceVersion")
+	next["metadata"] = nextMetadata
+	obs.Object = next
+	return obs, Decision{
+		Outcome: KeepModified,
+		Reason:  "resource_version_removed",
+		Meta: map[string]any{
+			"removedFields": 1,
+		},
+	}, nil
+}
+
+type StatusConditionTimestampFilter struct{}
+
+func (StatusConditionTimestampFilter) Name() string {
+	return "status_condition_timestamp_normalization_filter"
+}
+
+func (StatusConditionTimestampFilter) Apply(_ context.Context, obs core.Observation) (core.Observation, Decision, error) {
+	status, ok := obs.Object["status"].(map[string]any)
+	if !ok {
+		return obs, Decision{Outcome: Keep, Reason: "no_status"}, nil
+	}
+	conditions, ok := status["conditions"].([]any)
+	if !ok {
+		return obs, Decision{Outcome: Keep, Reason: "conditions_absent"}, nil
+	}
+	nextConditions := make([]any, len(conditions))
+	removed := 0
+	for i, condition := range conditions {
+		conditionMap, ok := condition.(map[string]any)
+		if !ok {
+			nextConditions[i] = condition
+			continue
+		}
+		nextCondition := cloneMap(conditionMap)
+		for _, field := range []string{"lastHeartbeatTime", "lastTransitionTime"} {
+			if _, exists := nextCondition[field]; exists {
+				delete(nextCondition, field)
+				removed++
+			}
+		}
+		nextConditions[i] = nextCondition
+	}
+	if removed == 0 {
+		return obs, Decision{Outcome: Keep, Reason: "condition_timestamps_absent"}, nil
+	}
+	next := cloneMap(obs.Object)
+	nextStatus := cloneMap(status)
+	nextStatus["conditions"] = nextConditions
+	next["status"] = nextStatus
+	obs.Object = next
+	return obs, Decision{
+		Outcome: KeepModified,
+		Reason:  "condition_timestamps_removed",
+		Meta: map[string]any{
+			"removedFields": removed,
+		},
+	}, nil
+}
+
+type LeaderElectionConfigMapFilter struct{}
+
+func (LeaderElectionConfigMapFilter) Name() string {
+	return "leader_election_configmap_normalization_filter"
+}
+
+func (LeaderElectionConfigMapFilter) Apply(_ context.Context, obs core.Observation) (core.Observation, Decision, error) {
+	if obs.Ref.Group != "" || !strings.EqualFold(obs.Ref.Resource, "configmaps") {
+		return obs, Decision{Outcome: Keep, Reason: "not_configmap"}, nil
+	}
+	metadata, ok := obs.Object["metadata"].(map[string]any)
+	if !ok {
+		return obs, Decision{Outcome: Keep, Reason: "no_metadata"}, nil
+	}
+	annotations, ok := metadata["annotations"].(map[string]any)
+	if !ok {
+		return obs, Decision{Outcome: Keep, Reason: "annotations_absent"}, nil
+	}
+	const leaderAnnotation = "control-plane.alpha.kubernetes.io/leader"
+	if _, exists := annotations[leaderAnnotation]; !exists {
+		return obs, Decision{Outcome: Keep, Reason: "leader_annotation_absent"}, nil
+	}
+	nextAnnotations := cloneMap(annotations)
+	delete(nextAnnotations, leaderAnnotation)
+	nextMetadata := cloneMap(metadata)
+	if len(nextAnnotations) == 0 {
+		delete(nextMetadata, "annotations")
+	} else {
+		nextMetadata["annotations"] = nextAnnotations
+	}
+	next := cloneMap(obs.Object)
+	next["metadata"] = nextMetadata
+	obs.Object = next
+	return obs, Decision{
+		Outcome: KeepModified,
+		Reason:  "leader_annotation_removed",
 		Meta: map[string]any{
 			"removedFields": 1,
 		},

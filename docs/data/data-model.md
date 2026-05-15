@@ -7,6 +7,7 @@ clusters / dimensions
 api_resources
 objects
 versions + blobs
+latest_raw_index
 latest_index
 object_edges
 object_facts
@@ -225,11 +226,35 @@ blobs(
 The blob layer should be content-addressed. It can later move from SQL storage
 to object storage without changing the logical model.
 
-## Latest Index
+## Latest Snapshots
 
-`latest_index` is a current-state query table.
+Latest data is split into two query surfaces:
+
+- `latest_raw_index` / `latest_raw_documents`: latest observed sanitized
+  cluster snapshot. This preserves runtime fields such as `resourceVersion`,
+  `generation`, Event counters, and controller heartbeat values. Secret payload
+  values are still redacted; key names can be retained.
+- `latest_index` / `latest_documents`: latest retained history proof. This
+  points at the newest normalized `versions` row and can intentionally omit
+  high-churn fields filtered before retained hashing.
 
 ```sql
+latest_raw_index(
+  object_id,
+  cluster_id,
+  kind_id,
+  namespace,
+  name,
+  uid,
+  observed_at,
+  observation_type,
+  resource_version,
+  generation,
+  doc_hash,
+  raw_size,
+  doc
+)
+
 latest_index(
   object_id,
   cluster_id,
@@ -238,12 +263,15 @@ latest_index(
   name,
   uid,
   latest_version_id,
-  observed_at,
-  doc
+  observed_at
 )
 ```
 
-Do not use this as the source of truth. It is rebuildable from `versions`.
+Use `latest_raw_documents` when a human or agent needs the current observed
+cluster shape. Use `latest_documents` when the question needs the latest
+retained proof document. `latest_index` remains rebuildable from `versions`;
+`latest_raw_index` is overwritten by future observations and is not historical
+proof.
 
 ## Historical Topology
 

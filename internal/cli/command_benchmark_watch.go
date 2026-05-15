@@ -7,9 +7,13 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"time"
 
 	"kube-insight/internal/benchmark"
 	"kube-insight/internal/collector"
+	appconfig "kube-insight/internal/config"
+	"kube-insight/internal/ingest"
+	"kube-insight/internal/resourcematch"
 	"kube-insight/internal/storage/sqlite"
 
 	"github.com/spf13/cobra"
@@ -152,6 +156,7 @@ func validateCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 
 func watchCommand(ctx context.Context, stdout, stderr io.Writer, state *cliState) *cobra.Command {
 	var opts collector.WatchResourcesOptions
+	var output string
 	cmd := &cobra.Command{
 		Use:   "watch [RESOURCE_PATTERN ...]",
 		Short: "Watch Kubernetes resources into storage.",
@@ -176,6 +181,7 @@ interrupted. Use --all-contexts to watch every configured context.
 	cmd.Flags().IntVar(&opts.MaxEvents, "max-events", 0, "Stop after N events")
 	cmd.Flags().IntVar(&opts.MaxRetries, "retries", -1, "Maximum watch retries; -1 retries forever")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 0, "Watch timeout; 0 runs until interrupted")
+	addOutputFlag(cmd, &output, outputTable)
 	cmd.AddCommand(watchResourceCommand(ctx, stdout, stderr, state))
 	cmd.AddCommand(watchResourcesCommand(ctx, stdout, stderr, state))
 	return cmd
@@ -194,6 +200,14 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 				return err
 			}
 			if err := requireWriteRole(rt.Config, "watch resource"); err != nil {
+				return err
+			}
+			filterChains, err := ingest.FilterChainsFromProcessing(rt.Config.Processing)
+			if err != nil {
+				return err
+			}
+			extractors, err := ingest.ExtractorRegistryFromProcessing(rt.Config.Processing)
+			if err != nil {
 				return err
 			}
 			selection := collectionFromRuntime(cmd, state, rt)
@@ -217,7 +231,7 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 			}
 			opts.Logf = newWatchLogf(logger)
 			opts.Logf("using db", "db", dbPath)
-			sqliteStore, err := sqlite.Open(dbPath)
+			sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 			if err != nil {
 				return err
 			}
@@ -226,6 +240,11 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 			opts.Namespace = selection.Namespace
 			opts.Resource = resources[0]
 			opts.Store = sqliteStore
+			opts.Filters = filterChains.Default
+			opts.FilterChains = filterChains
+			opts.Extractors = extractors
+			opts.ProfileRules = rt.Config.ProfileRules()
+			applyWatchTuning(selection.Watch, &opts)
 			var summary collector.WatchSummary
 			err = withKubeconfig(rt.Kubeconfig, func() error {
 				var watchErr error
@@ -248,6 +267,7 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 func watchResourcesCommand(ctx context.Context, stdout, stderr io.Writer, state *cliState) *cobra.Command {
 	var opts collector.WatchResourcesOptions
 	var resources []string
+	var output string
 	cmd := &cobra.Command{
 		Use:    "resources",
 		Short:  "Watch several resources.",
@@ -261,6 +281,7 @@ func watchResourcesCommand(ctx context.Context, stdout, stderr io.Writer, state 
 	cmd.Flags().IntVar(&opts.MaxEvents, "max-events", 0, "Stop after N events")
 	cmd.Flags().IntVar(&opts.MaxRetries, "retries", -1, "Maximum watch retries; -1 retries forever")
 	cmd.Flags().DurationVar(&opts.Timeout, "timeout", 0, "Watch timeout; 0 runs until interrupted")
+	addOutputFlag(cmd, &output, outputTable)
 	return cmd
 }
 
@@ -279,6 +300,10 @@ type watchContextsSummary struct {
 }
 
 func runWatchResourcesCommand(ctx context.Context, stdout, stderr io.Writer, state *cliState, cmd *cobra.Command, resourceArgs []string, opts collector.WatchResourcesOptions, commandName string) error {
+	output, err := outputFormatForCommand(cmd, outputTable)
+	if err != nil {
+		return err
+	}
 	rt, err := loadRuntimeConfig(cmd, state, "", false)
 	if err != nil {
 		return err
@@ -286,10 +311,23 @@ func runWatchResourcesCommand(ctx context.Context, stdout, stderr io.Writer, sta
 	if err := requireWriteRole(rt.Config, commandName); err != nil {
 		return err
 	}
+	filterChains, err := ingest.FilterChainsFromProcessing(rt.Config.Processing)
+	if err != nil {
+		return err
+	}
+	extractors, err := ingest.ExtractorRegistryFromProcessing(rt.Config.Processing)
+	if err != nil {
+		return err
+	}
+	opts.Filters = filterChains.Default
+	opts.FilterChains = filterChains
+	opts.Extractors = extractors
+	opts.ProfileRules = rt.Config.ProfileRules()
 	selection := collectionFromRuntime(cmd, state, rt)
 	selection.UseClientGo = true
 	opts.Namespace = selection.Namespace
 	opts.Concurrency = selection.Concurrency
+	applyWatchResourcesTuning(selection.Watch, &opts)
 	runCtx, logger, err := runtimeContext(ctx, stderr, rt)
 	if err != nil {
 		return err
@@ -313,10 +351,10 @@ func runWatchResourcesCommand(ctx context.Context, stdout, stderr io.Writer, sta
 			if err != nil {
 				return err
 			}
-			return writeJSON(stdout, summary)
+			return writeWatchResourcesSummary(stdout, output, summary)
 		}
 		summary, err := runWatchContexts(runCtx, cmd, state, rt, selection, contexts, resourceArgs, opts)
-		if writeErr := writeJSON(stdout, summary); writeErr != nil {
+		if writeErr := writeWatchContextsSummary(stdout, output, summary); writeErr != nil {
 			return writeErr
 		}
 		if err != nil && ctx.Err() == nil {
@@ -337,12 +375,12 @@ func runWatchContexts(ctx context.Context, cmd *cobra.Command, state *cliState, 
 		sharedDBPath = defaultSQLiteDBPath
 	}
 	var err error
-	sharedStore, err = sqlite.Open(sharedDBPath)
+	sharedStore, err = sqlite.OpenWithOptions(sharedDBPath, sqliteOptionsFromConfig(rt.Config))
 	if err != nil {
 		return out, err
 	}
 	defer sharedStore.Close()
-	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sharedStore, rt.Config.Storage.Maintenance)
+	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sharedStore, rt.Config.Storage)
 	defer stopMaintenance()
 	opts.Logf("using shared db", "db", sharedDBPath)
 
@@ -382,17 +420,28 @@ func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, r
 	selection.Contexts = []string{kubeContext}
 	selection.AllContexts = false
 	opts.Context = kubeContext
+	opts.ProfileRules = rt.Config.ProfileRules()
+	resourceArgs = effectiveWatchResourceArgs(resourceArgs, rt.Config)
 	if len(resourceArgs) == 0 {
 		opts.Logf("no resource patterns supplied; discovering all watchable resources", "context", kubeContext)
 	} else {
 		opts.Logf("resolving resource patterns", "context", kubeContext, "patterns", strings.Join(normalizeResourceArgs(resourceArgs), ","))
 	}
-	resources, discoverResources, err := watchResourcesFromArgs(ctx, selection, resourceArgs)
+	resources, shouldDiscoverResources, err := watchResourcesFromArgs(ctx, selection, resourceArgs)
 	if err != nil {
 		return collector.WatchResourcesSummary{}, "", err
 	}
-	opts.Resources = applyResourceExcludes(resources, rt.Config.Collection.Resources.Exclude)
-	opts.DiscoverResources = discoverResources
+	excludes := watchResourceExcludes(rt.Config.Collection.Resources.Exclude, resourceArgs)
+	if shouldDiscoverResources && len(excludes) > 0 {
+		discovered, err := discoverResources(ctx, kubeContext, selection.UseClientGo)
+		if err != nil {
+			return collector.WatchResourcesSummary{}, "", err
+		}
+		resources = discovered
+		shouldDiscoverResources = false
+	}
+	opts.Resources = applyResourceExcludes(resources, excludes)
+	opts.DiscoverResources = shouldDiscoverResources
 
 	dbPath := sharedDBPath
 	if dbPath == "" {
@@ -405,16 +454,128 @@ func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, r
 		return summary, dbPath, err
 	}
 
-	sqliteStore, err := sqlite.Open(dbPath)
+	sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 	if err != nil {
 		return collector.WatchResourcesSummary{}, dbPath, err
 	}
 	defer sqliteStore.Close()
-	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage.Maintenance)
+	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage)
 	defer stopMaintenance()
 	opts.Store = sqliteStore
 	summary, err := collector.WatchResourcesClientGo(ctx, opts)
 	return summary, dbPath, err
+}
+
+func applyWatchResourcesTuning(cfg appconfig.WatchConfig, opts *collector.WatchResourcesOptions) {
+	opts.DisableHTTP2 = cfg.DisableHTTP2
+	opts.MaxConcurrentStreams = cfg.MaxConcurrentStreams
+	opts.RetryMinBackoff = millisDuration(cfg.MinBackoffMillis)
+	opts.RetryMaxBackoff = millisDuration(cfg.MaxBackoffMillis)
+	opts.StreamStartStagger = millisDuration(cfg.StreamStartStaggerMS)
+}
+
+func applyWatchTuning(cfg appconfig.WatchConfig, opts *collector.WatchOptions) {
+	opts.DisableHTTP2 = cfg.DisableHTTP2
+	opts.RetryMinBackoff = millisDuration(cfg.MinBackoffMillis)
+	opts.RetryMaxBackoff = millisDuration(cfg.MaxBackoffMillis)
+}
+
+func millisDuration(value int) time.Duration {
+	if value <= 0 {
+		return 0
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func watchResourceExcludes(excludes []string, explicitArgs []string) []string {
+	if len(normalizeResourceArgs(explicitArgs)) > 0 {
+		return nil
+	}
+	return excludes
+}
+
+func effectiveWatchResourceArgs(args []string, cfg appconfig.Config) []string {
+	if len(normalizeResourceArgs(args)) > 0 {
+		return args
+	}
+	return cfg.Collection.Resources.Include
+}
+
+func writeWatchResourcesSummary(stdout io.Writer, output string, summary collector.WatchResourcesSummary) error {
+	if output == outputJSON {
+		return writeJSON(stdout, summary)
+	}
+	if err := writeSection(stdout, "Watch summary", []string{"Context", "Resources", "Streams", "Completed", "Errors", "Listed", "Events", "Stored", "Retries"}, [][]string{{
+		shortText(summary.Context, 32),
+		humanCount(int64(summary.Resources)),
+		humanCount(int64(summary.MaxConcurrentStreams)),
+		humanCount(int64(summary.Completed)),
+		humanCount(int64(summary.Errors)),
+		humanCount(int64(summary.Listed)),
+		humanCount(int64(summary.Events)),
+		humanCount(int64(summary.Stored)),
+		humanCount(int64(summary.Retries)),
+	}}); err != nil {
+		return err
+	}
+	if len(summary.Workers) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(stdout); err != nil {
+		return err
+	}
+	rows := make([][]string, 0, len(summary.Workers))
+	for _, worker := range summary.Workers {
+		row := []string{
+			compactResourceName(worker.Resource.Group, worker.Resource.Version, worker.Resource.Resource),
+			"done",
+			"",
+			"",
+			"",
+			shortText(worker.Error, 80),
+		}
+		if worker.Error != "" {
+			row[1] = "error"
+		}
+		if worker.Summary != nil {
+			row[2] = humanCount(int64(worker.Summary.Listed))
+			row[3] = humanCount(int64(worker.Summary.Events))
+			row[4] = humanCount(int64(worker.Summary.Stored))
+		}
+		rows = append(rows, row)
+	}
+	return writeSection(stdout, "Resources", []string{"Resource", "Status", "Listed", "Events", "Stored", "Error"}, rows)
+}
+
+func writeWatchContextsSummary(stdout io.Writer, output string, summary watchContextsSummary) error {
+	if output == outputJSON {
+		return writeJSON(stdout, summary)
+	}
+	rows := make([][]string, 0, len(summary.Results))
+	for _, result := range summary.Results {
+		status := "completed"
+		if result.Error != "" {
+			status = "error"
+		}
+		listed := ""
+		events := ""
+		stored := ""
+		if result.Summary != nil {
+			listed = humanCount(int64(result.Summary.Listed))
+			events = humanCount(int64(result.Summary.Events))
+			stored = humanCount(int64(result.Summary.Stored))
+		}
+		rows = append(rows, []string{
+			shortText(result.Context, 32),
+			status,
+			result.DBPath,
+			listed,
+			events,
+			stored,
+			shortText(result.Error, 80),
+		})
+	}
+	return writeSection(stdout, "Watch contexts", []string{"Context", "Status", "DB", "Listed", "Events", "Stored", "Error"}, rows)
 }
 
 func newWatchLogf(logger *slog.Logger) collector.WatchLogFunc {
@@ -536,7 +697,7 @@ func normalizeResourceArgs(values []string) []string {
 }
 
 func isResourcePattern(value string) bool {
-	return strings.Contains(value, "/") || strings.Contains(value, "*")
+	return resourcematch.IsPattern(value)
 }
 
 func matchResourcePatterns(resources []collector.Resource, patterns []string) []collector.Resource {
@@ -553,25 +714,5 @@ func matchResourcePatterns(resources []collector.Resource, patterns []string) []
 }
 
 func resourceMatchesPattern(resource collector.Resource, pattern string) bool {
-	parts := strings.Split(pattern, "/")
-	var groupPattern, versionPattern, resourcePattern string
-	switch len(parts) {
-	case 2:
-		groupPattern = ""
-		versionPattern = parts[0]
-		resourcePattern = parts[1]
-	case 3:
-		groupPattern = parts[0]
-		versionPattern = parts[1]
-		resourcePattern = parts[2]
-	default:
-		return false
-	}
-	return segmentMatches(groupPattern, resource.Group) &&
-		segmentMatches(versionPattern, resource.Version) &&
-		(segmentMatches(resourcePattern, resource.Resource) || segmentMatches(resourcePattern, resource.Name))
-}
-
-func segmentMatches(pattern, value string) bool {
-	return pattern == "*" || pattern == value
+	return resourcematch.MatchResource(pattern, collectorResourceMatch(resource))
 }

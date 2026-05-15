@@ -14,6 +14,7 @@ import (
 	"kube-insight/internal/collector"
 	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/logging"
+	"kube-insight/internal/resourcematch"
 
 	"github.com/spf13/cobra"
 )
@@ -123,6 +124,7 @@ func collectionFromRuntime(cmd *cobra.Command, state *cliState, rt runtimeSettin
 		Namespace:   namespaceForCommand(cmd, state, rt, ""),
 		Concurrency: effectiveConcurrency(cmd, state, rt),
 		UseClientGo: effectiveClientGo(cmd, state, rt),
+		Watch:       rt.Config.Collection.Watch,
 	}
 }
 
@@ -130,10 +132,7 @@ func configPathForValidation(cmd *cobra.Command, state *cliState, localFile stri
 	if flagChanged(cmd, "file") && localFile != "" {
 		return localFile
 	}
-	if state.configFile != "" {
-		return state.configFile
-	}
-	return "config/kube-insight.example.yaml"
+	return state.configFile
 }
 
 func optionalDBPath(cmd *cobra.Command, state *cliState, rt runtimeSettings) string {
@@ -279,18 +278,24 @@ func applyResourceExcludes(resources []collector.Resource, excludes []string) []
 	if len(resources) == 0 || len(excludes) == 0 {
 		return resources
 	}
-	blocked := map[string]bool{}
-	for _, exclude := range excludes {
-		blocked[exclude] = true
-	}
 	out := resources[:0]
 	for _, resource := range resources {
-		if blocked[resource.Name] {
+		if resourcematch.MatchAnyResource(excludes, collectorResourceMatch(resource)) {
 			continue
 		}
 		out = append(out, resource)
 	}
 	return out
+}
+
+func collectorResourceMatch(resource collector.Resource) resourcematch.Resource {
+	return resourcematch.Resource{
+		Group:    resource.Group,
+		Version:  resource.Version,
+		Resource: resource.Resource,
+		Kind:     resource.Kind,
+		Name:     resource.Name,
+	}
 }
 
 func resourcesFromMap(in map[string]collector.Resource) []collector.Resource {

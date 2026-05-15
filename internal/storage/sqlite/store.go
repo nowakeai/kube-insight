@@ -24,11 +24,20 @@ import (
 )
 
 type Store struct {
-	db   *sql.DB
-	path string
+	db           *sql.DB
+	path         string
+	profileRules []resourceprofile.Rule
+}
+
+type Options struct {
+	ProfileRules []resourceprofile.Rule
 }
 
 func Open(path string) (*Store, error) {
+	return OpenWithOptions(path, Options{})
+}
+
+func OpenWithOptions(path string, opts Options) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("sqlite path is required")
 	}
@@ -37,7 +46,13 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db, path: path}
+	profileRules := opts.ProfileRules
+	if len(profileRules) == 0 {
+		profileRules = resourceprofile.DefaultRules()
+	} else {
+		profileRules = resourceprofile.CloneRules(profileRules)
+	}
+	s := &Store{db: db, path: path, profileRules: profileRules}
 	if err := s.bootstrap(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -47,6 +62,10 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func (s *Store) profileForResource(info kubeapi.ResourceInfo) resourceprofile.Profile {
+	return resourceprofile.Select(info, s.profileRules)
 }
 
 func (s *Store) bootstrap(ctx context.Context) error {
@@ -92,7 +111,7 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 	if err != nil {
 		return err
 	}
-	apiResourceID, kindID, err := ensureKind(ctx, tx, obs.Ref, observedAt)
+	apiResourceID, kindID, err := ensureKind(ctx, tx, obs.Ref, observedAt, s.profileForResource)
 	if err != nil {
 		return err
 	}
@@ -143,7 +162,7 @@ func (s *Store) PutObservation(ctx context.Context, obs core.Observation, eviden
 	if err := putChanges(ctx, tx, clusterID, objectID, versionID, evidence.Changes); err != nil {
 		return err
 	}
-	if err := putEdges(ctx, tx, clusterID, objectID, versionID, obs, evidence.Edges); err != nil {
+	if err := s.putEdges(ctx, tx, clusterID, objectID, versionID, obs, evidence.Edges); err != nil {
 		return err
 	}
 
@@ -312,7 +331,7 @@ on conflict(name) do nothing`, name, now); err != nil {
 	return id, tx.QueryRowContext(ctx, `select id from clusters where name = ?`, name).Scan(&id)
 }
 
-func ensureKind(ctx context.Context, tx *sql.Tx, ref core.ResourceRef, now int64) (int64, int64, error) {
+func ensureKind(ctx context.Context, tx *sql.Tx, ref core.ResourceRef, now int64, profileFor func(kubeapi.ResourceInfo) resourceprofile.Profile) (int64, int64, error) {
 	namespaced := ref.Namespace != ""
 	if _, err := tx.ExecContext(ctx, `
 insert into api_resources(api_group, api_version, resource, kind, namespaced, verbs, last_discovered_at)
@@ -332,13 +351,18 @@ where api_group = ? and api_version = ? and resource = ?`,
 		ref.Group, ref.Version, ref.Resource).Scan(&apiResourceID); err != nil {
 		return 0, 0, err
 	}
-	if err := upsertProcessingProfile(ctx, tx, apiResourceID, resourceprofile.ForResource(kubeapi.ResourceInfo{
+	info := kubeapi.ResourceInfo{
 		Group:      ref.Group,
 		Version:    ref.Version,
 		Resource:   ref.Resource,
 		Kind:       ref.Kind,
 		Namespaced: namespaced,
-	})); err != nil {
+	}
+	profile := resourceprofile.ForResource(info)
+	if profileFor != nil {
+		profile = profileFor(info)
+	}
+	if err := upsertProcessingProfile(ctx, tx, apiResourceID, profile); err != nil {
 		return 0, 0, err
 	}
 
@@ -577,9 +601,9 @@ values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return nil
 }
 
-func putEdges(ctx context.Context, tx *sql.Tx, clusterID, sourceObjectID, versionID int64, obs core.Observation, edges []core.Edge) error {
+func (s *Store) putEdges(ctx context.Context, tx *sql.Tx, clusterID, sourceObjectID, versionID int64, obs core.Observation, edges []core.Edge) error {
 	for _, e := range edges {
-		targetID, err := ensureEdgeTarget(ctx, tx, clusterID, obs, e.TargetID)
+		targetID, err := s.ensureEdgeTarget(ctx, tx, clusterID, obs, e.TargetID)
 		if err != nil {
 			return err
 		}
@@ -601,7 +625,7 @@ values(?, ?, ?, ?, ?, ?, ?, 100, ?)`,
 	return nil
 }
 
-func ensureEdgeTarget(ctx context.Context, tx *sql.Tx, clusterID int64, obs core.Observation, targetID string) (int64, error) {
+func (s *Store) ensureEdgeTarget(ctx context.Context, tx *sql.Tx, clusterID int64, obs core.Observation, targetID string) (int64, error) {
 	clusterName, rest, ok := splitObjectID(targetID)
 	if ok && clusterName != obs.Ref.ClusterID {
 		return 0, fmt.Errorf("cross-cluster edge target %q is not supported", targetID)
@@ -614,7 +638,7 @@ func ensureEdgeTarget(ctx context.Context, tx *sql.Tx, clusterID int64, obs core
 	if err != nil {
 		return 0, err
 	}
-	if _, kindID, err := ensureKind(ctx, tx, ref, millis(obs.ObservedAt)); err != nil {
+	if _, kindID, err := ensureKind(ctx, tx, ref, millis(obs.ObservedAt), s.profileForResource); err != nil {
 		return 0, err
 	} else {
 		return ensureObject(ctx, tx, clusterID, kindID, ref, millis(obs.ObservedAt), sql.NullInt64{})

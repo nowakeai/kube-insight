@@ -10,10 +10,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !hasDoc {
-		return s.backfillObjectObservations(ctx)
+	if hasDoc {
+		if err := s.migrateLatestIndexWithoutDoc(ctx); err != nil {
+			return err
+		}
 	}
-	if err := s.migrateLatestIndexWithoutDoc(ctx); err != nil {
+	if err := s.backfillLatestRawIndex(ctx); err != nil {
 		return err
 	}
 	return s.backfillObjectObservations(ctx)
@@ -154,5 +156,40 @@ select
 from versions v
 join objects o on o.id = v.object_id
 order by v.object_id, v.seq`)
+	return err
+}
+
+func (s *Store) backfillLatestRawIndex(ctx context.Context) error {
+	var rawRows int64
+	if err := s.db.QueryRowContext(ctx, `select count(*) from latest_raw_index`).Scan(&rawRows); err != nil {
+		return err
+	}
+	if rawRows > 0 {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, `
+insert into latest_raw_index(
+  object_id, cluster_id, kind_id, namespace, name, uid, observed_at,
+  observation_type, resource_version, generation, doc_hash, raw_size, doc
+)
+select
+  li.object_id,
+  li.cluster_id,
+  li.kind_id,
+  li.namespace,
+  li.name,
+  li.uid,
+  li.observed_at,
+  case when o.deleted_at is not null then 'DELETED' else 'MODIFIED' end,
+  v.resource_version,
+  v.generation,
+  v.doc_hash,
+  v.raw_size,
+  b.data
+from latest_index li
+join objects o on o.id = li.object_id
+join versions v on v.id = li.latest_version_id
+join blobs b on b.digest = v.blob_ref
+where b.codec = 'identity'`)
 	return err
 }

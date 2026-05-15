@@ -27,7 +27,7 @@ func (s *Store) UpsertAPIResources(ctx context.Context, resources []kubeapi.Reso
 			return err
 		}
 		if apiResourceID > 0 {
-			if err := upsertProcessingProfile(ctx, tx, apiResourceID, resourceprofile.ForResource(resource)); err != nil {
+			if err := upsertProcessingProfile(ctx, tx, apiResourceID, s.profileForResource(resource)); err != nil {
 				return err
 			}
 		}
@@ -133,7 +133,7 @@ on conflict(api_resource_id) do update set
   enabled = excluded.enabled`,
 		apiResourceID,
 		profile.Name,
-		profile.RetentionClass,
+		profile.RetentionPolicy,
 		profile.FilterChain,
 		profile.ExtractorSet,
 		profile.CompactionStrategy,

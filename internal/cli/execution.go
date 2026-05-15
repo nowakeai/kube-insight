@@ -11,18 +11,22 @@ import (
 	"time"
 
 	"kube-insight/internal/collector"
+	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/kubeapi"
 	"kube-insight/internal/storage"
 )
 
-func ingestInputs(ctx context.Context, store storage.Store, file, dir string) (ingest.Summary, error) {
+func ingestInputs(ctx context.Context, store storage.Store, file, dir string, cfg appconfig.Config) (ingest.Summary, error) {
 	if file != "" {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			return ingest.Summary{}, err
 		}
-		pipeline := ingest.DefaultPipeline(store)
+		pipeline, err := ingest.PipelineForAppConfig(store, cfg)
+		if err != nil {
+			return ingest.Summary{}, err
+		}
 		return pipeline.IngestJSON(ctx, data)
 	}
 
@@ -36,7 +40,10 @@ func ingestInputs(ctx context.Context, store storage.Store, file, dir string) (i
 		if err != nil {
 			return total, err
 		}
-		pipeline := ingest.DefaultPipeline(store)
+		pipeline, err := ingest.PipelineForAppConfig(store, cfg)
+		if err != nil {
+			return total, err
+		}
 		pipeline.ClusterID = clusterIDForPath(dir, path)
 		summary, err := pipeline.IngestJSON(ctx, data)
 		if err != nil {

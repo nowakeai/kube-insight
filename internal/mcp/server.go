@@ -55,11 +55,13 @@ type sqlArguments struct {
 }
 
 type healthArguments struct {
-	ClusterID  string `json:"cluster,omitempty"`
-	Status     string `json:"status,omitempty"`
-	ErrorsOnly bool   `json:"errorsOnly,omitempty"`
-	StaleAfter string `json:"staleAfter,omitempty"`
-	Limit      int    `json:"limit,omitempty"`
+	ClusterID        string   `json:"cluster,omitempty"`
+	Status           string   `json:"status,omitempty"`
+	ErrorsOnly       bool     `json:"errorsOnly,omitempty"`
+	StaleAfter       string   `json:"staleAfter,omitempty"`
+	Limit            int      `json:"limit,omitempty"`
+	ExcludeResources []string `json:"exclude,omitempty"`
+	IncludeSkipped   bool     `json:"includeSkipped,omitempty"`
 }
 
 type historyArguments struct {
@@ -301,10 +303,12 @@ func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
 
 func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, error) {
 	opts := sqlite.ResourceHealthOptions{
-		ClusterID:  args.ClusterID,
-		Status:     args.Status,
-		ErrorsOnly: args.ErrorsOnly,
-		Limit:      args.Limit,
+		ClusterID:        args.ClusterID,
+		Status:           args.Status,
+		ErrorsOnly:       args.ErrorsOnly,
+		Limit:            args.Limit,
+		ExcludeResources: args.ExcludeResources,
+		IncludeExcluded:  args.IncludeSkipped,
 	}
 	if args.StaleAfter != "" {
 		value, err := time.ParseDuration(args.StaleAfter)
@@ -429,6 +433,15 @@ func tools() []map[string]any {
 						"description": "Duration such as 10m or 1h.",
 					},
 					"limit": map[string]any{"type": "integer"},
+					"exclude": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Resource names to mark as skipped, such as events or leases.coordination.k8s.io.",
+					},
+					"includeSkipped": map[string]any{
+						"type":        "boolean",
+						"description": "Include skipped resources in the returned rows.",
+					},
 				},
 			},
 		},

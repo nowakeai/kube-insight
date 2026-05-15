@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/core"
 	"kube-insight/internal/filter"
 	"kube-insight/internal/kubeapi"
@@ -52,8 +53,8 @@ func TestPipelineIngestsListJSON(t *testing.T) {
 	if summary.StoredObservations != 2 {
 		t.Fatalf("stored observations = %d, want 2", summary.StoredObservations)
 	}
-	if summary.ModifiedObservations != 1 {
-		t.Fatalf("modified observations = %d, want 1", summary.ModifiedObservations)
+	if summary.ModifiedObservations != 2 {
+		t.Fatalf("modified observations = %d, want 2", summary.ModifiedObservations)
 	}
 	if summary.DiscardedResources != 1 {
 		t.Fatalf("discarded resources = %d, want 1", summary.DiscardedResources)
@@ -67,15 +68,34 @@ func TestPipelineIngestsListJSON(t *testing.T) {
 	if _, ok := store.Observations[1].Object["data"]; ok {
 		t.Fatal("secret payload was stored")
 	}
-	if len(store.FilterDecisions) != 7 {
-		t.Fatalf("filter decisions = %d, want 7", len(store.FilterDecisions))
+	if len(store.RawLatest) != 2 {
+		t.Fatalf("raw latest observations = %d, want 2", len(store.RawLatest))
 	}
-	if store.FilterDecisions[4].Decision.Outcome != filter.KeepModified {
-		t.Fatalf("secret decision = %#v", store.FilterDecisions[4].Decision)
+	rawSecret := store.RawLatest[1].Object
+	if rawSecret["data"].(map[string]any)["password"] != "<redacted>" {
+		t.Fatalf("raw latest secret should keep key with redacted value: %#v", rawSecret)
 	}
-	if store.FilterDecisions[6].Decision.Outcome != filter.DiscardResource {
-		t.Fatalf("lease decision = %#v", store.FilterDecisions[6].Decision)
+	if len(store.FilterDecisions) != 11 {
+		t.Fatalf("filter decisions = %d, want 11", len(store.FilterDecisions))
 	}
+	if !hasFilterDecision(store.FilterDecisions, "resource_version_removed", filter.KeepModified) {
+		t.Fatalf("resourceVersion normalization decision missing: %#v", store.FilterDecisions)
+	}
+	if !hasFilterDecision(store.FilterDecisions, "secret_payload_removed", filter.KeepModified) {
+		t.Fatalf("secret decision missing: %#v", store.FilterDecisions)
+	}
+	if !hasFilterDecision(store.FilterDecisions, "lease_skipped", filter.DiscardResource) {
+		t.Fatalf("lease decision missing: %#v", store.FilterDecisions)
+	}
+}
+
+func hasFilterDecision(decisions []storage.FilterDecisionRecord, reason string, outcome filter.Outcome) bool {
+	for _, decision := range decisions {
+		if decision.Decision.Reason == reason && decision.Decision.Outcome == outcome {
+			return true
+		}
+	}
+	return false
 }
 
 func TestPipelineKeepsDeletedObservationsDespiteDiscardChangeFilter(t *testing.T) {
@@ -91,6 +111,7 @@ func TestPipelineKeepsDeletedObservationsDespiteDiscardChangeFilter(t *testing.T
 	store := storage.NewMemoryStore()
 	pipeline := DefaultPipeline(store)
 	pipeline.Filters = filter.Chain{discardChangeFilter{}}
+	pipeline.FilterChains = FilterChains{}
 	pipeline.Now = func() time.Time { return time.Unix(100, 0) }
 
 	summary, err := pipeline.IngestJSON(context.Background(), []byte(input))
@@ -111,6 +132,258 @@ func TestPipelineKeepsDeletedObservationsDespiteDiscardChangeFilter(t *testing.T
 	}
 	if summary.Changes != 1 {
 		t.Fatalf("changes = %d, want 1", summary.Changes)
+	}
+}
+
+func TestPipelineUsesConfiguredFilters(t *testing.T) {
+	on := true
+	off := false
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "Pod",
+	  "metadata": {"name": "api-1", "namespace": "default", "uid": "pod-uid", "resourceVersion": "10"},
+	  "status": {"phase": "Running"}
+	}`
+	store := storage.NewMemoryStore()
+	cfg := appconfig.Default()
+	cfg.Processing.FilterChains = map[string][]string{"default": {"resource_version", "managed_fields"}}
+	cfg.Processing.Filters = map[string]appconfig.ProcessingFilterConfig{
+		"resource_version": {Type: "builtin", Enabled: &off, Action: "keep_modified", RemovePaths: []string{"/metadata/resourceVersion"}},
+		"managed_fields":   {Type: "builtin", Enabled: &on, Action: "keep_modified", RemovePaths: []string{"/metadata/managedFields"}},
+	}
+	pipeline, err := PipelineForAppConfig(store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	metadata := store.Observations[0].Object["metadata"].(map[string]any)
+	if metadata["resourceVersion"] != "10" {
+		t.Fatalf("resourceVersion should be retained when filter is disabled: %#v", metadata)
+	}
+}
+
+func TestPipelineUsesConfiguredRemovePaths(t *testing.T) {
+	on := true
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "Pod",
+	  "metadata": {"name": "api-1", "namespace": "default", "uid": "pod-uid"},
+	  "status": {"conditions": [{"type": "Ready", "status": "True", "lastHeartbeatTime": "2026-05-14T00:00:00Z"}]}
+	}`
+	store := storage.NewMemoryStore()
+	cfg := appconfig.Default()
+	cfg.Processing.FilterChains = map[string][]string{"default": {"status_condition_timestamps"}}
+	cfg.Processing.Filters = map[string]appconfig.ProcessingFilterConfig{
+		"status_condition_timestamps": {Type: "builtin", Enabled: &on, Action: "keep_modified", RemovePaths: []string{"/status/conditions/*/lastHeartbeatTime"}},
+	}
+	pipeline, err := PipelineForAppConfig(store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	condition := store.Observations[0].Object["status"].(map[string]any)["conditions"].([]any)[0].(map[string]any)
+	if _, ok := condition["lastHeartbeatTime"]; ok {
+		t.Fatalf("configured remove path did not run: %#v", condition)
+	}
+}
+
+func TestPipelineForAppConfigUsesProfileFilterChain(t *testing.T) {
+	input := `{
+	  "apiVersion": "wgpolicyk8s.io/v1alpha2",
+	  "kind": "PolicyReport",
+	  "metadata": {"name": "policy", "namespace": "default", "uid": "policy-uid", "resourceVersion": "10"}
+	}`
+	cfg := appconfig.Default()
+	cfg.ResourceProfiles.Rules = []appconfig.ResourceProfileRuleConfig{
+		{Name: "policy_keep", Resources: []string{"policyreports.wgpolicyk8s.io"}, FilterChain: "none", ExtractorSet: "none"},
+	}
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline.Now = func() time.Time { return time.Unix(100, 0) }
+
+	summary, err := pipeline.IngestJSON(context.Background(), []byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.StoredObservations != 1 || summary.DiscardedResources != 0 {
+		t.Fatalf("summary = %#v", summary)
+	}
+	if len(store.FilterDecisions) != 0 {
+		t.Fatalf("filter decisions = %#v", store.FilterDecisions)
+	}
+}
+
+func TestDefaultEventProfileRemovesSeriesChurn(t *testing.T) {
+	input := `{
+	  "apiVersion": "events.k8s.io/v1",
+	  "kind": "Event",
+	  "metadata": {"name": "pod-warning.123", "namespace": "default", "uid": "event-uid", "resourceVersion": "10"},
+	  "deprecatedCount": 3,
+	  "deprecatedLastTimestamp": "2026-05-15T00:00:00Z",
+	  "eventTime": "2026-05-15T00:00:00Z",
+	  "series": {"count": 3, "lastObservedTime": "2026-05-15T00:00:00Z"},
+	  "reason": "PolicyViolation",
+	  "type": "Warning",
+	  "note": "policy violation"
+	}`
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, appconfig.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	event := store.Observations[0].Object
+	for _, key := range []string{"deprecatedCount", "deprecatedLastTimestamp", "eventTime", "series"} {
+		if _, ok := event[key]; ok {
+			t.Fatalf("event churn field %q should be removed: %#v", key, event)
+		}
+	}
+}
+
+func TestDefaultProfileNormalizesConditionSetChurn(t *testing.T) {
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "Node",
+	  "metadata": {"name": "node-a", "uid": "node-uid", "resourceVersion": "10", "generation": 3},
+	  "status": {"conditions": [
+	    {"type": "Ready", "status": "True", "lastHeartbeatTime": "2026-05-15T00:00:00Z", "lastTransitionTime": "2026-05-15T00:00:00Z"},
+	    {"type": "DiskPressure", "status": "False", "lastUpdateTime": "2026-05-15T00:00:00Z"}
+	  ]}
+	}`
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, appconfig.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	obj := store.Observations[0].Object
+	metadata := obj["metadata"].(map[string]any)
+	if _, ok := metadata["generation"]; ok {
+		t.Fatalf("metadata.generation should be removed: %#v", metadata)
+	}
+	conditions := obj["status"].(map[string]any)["conditions"].([]any)
+	first := conditions[0].(map[string]any)
+	second := conditions[1].(map[string]any)
+	if first["type"] != "DiskPressure" || second["type"] != "Ready" {
+		t.Fatalf("conditions should be sorted by type: %#v", conditions)
+	}
+	for _, condition := range []map[string]any{first, second} {
+		for _, field := range []string{"lastHeartbeatTime", "lastTransitionTime", "lastUpdateTime"} {
+			if _, ok := condition[field]; ok {
+				t.Fatalf("condition timestamp %q should be removed: %#v", field, condition)
+			}
+		}
+	}
+}
+
+func TestDefaultProfileNormalizesClusterAutoscalerStatusConfigMap(t *testing.T) {
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "ConfigMap",
+	  "metadata": {
+	    "name": "cluster-autoscaler-status",
+	    "namespace": "kube-system",
+	    "uid": "ca-status",
+	    "resourceVersion": "10",
+	    "annotations": {"cluster-autoscaler.kubernetes.io/last-updated": "2026-05-15 00:00:00 +0000 UTC"}
+	  },
+	  "data": {
+	    "status": "time: 2026-05-15 00:00:00 +0000 UTC\nautoscalerStatus: Running\nnodeGroups:\n- name: z\n  health:\n    status: Healthy\n    lastProbeTime: \"2026-05-15T00:00:00Z\"\n- name: a\n  health:\n    status: Healthy\n    lastProbeTime: \"2026-05-15T00:00:00Z\"\n"
+	  }
+	}`
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, appconfig.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	obj := store.Observations[0].Object
+	metadata := obj["metadata"].(map[string]any)
+	if _, ok := metadata["annotations"]; ok {
+		t.Fatalf("autoscaler last-updated annotation should be removed: %#v", metadata)
+	}
+	status := obj["data"].(map[string]any)["status"].(string)
+	if strings.Contains(status, "lastProbeTime") || strings.Contains(status, "time:") {
+		t.Fatalf("autoscaler probe timestamps should be removed: %s", status)
+	}
+	if strings.Index(status, "name: a") > strings.Index(status, "name: z") {
+		t.Fatalf("nodeGroups should be sorted by name: %s", status)
+	}
+}
+
+func TestDefaultProfileNormalizesGKEWebhookHeartbeatConfigMap(t *testing.T) {
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "ConfigMap",
+	  "metadata": {
+	    "name": "gke-common-webhook-heartbeat",
+	    "namespace": "kube-system",
+	    "uid": "gke-heartbeat",
+	    "resourceVersion": "10"
+	  },
+	  "data": {
+	    "1778818667837367803": "{\"hostname\":\"node-b\",\"version\":\"34.45.0-gke.3\"}",
+	    "1778818686612998534": "{\"hostname\":\"node-a\",\"version\":\"34.45.0-gke.3\"}"
+	  }
+	}`
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, appconfig.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.IngestJSON(context.Background(), []byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	data := store.Observations[0].Object["data"].(map[string]any)
+	if _, ok := data["1778818667837367803"]; ok {
+		t.Fatalf("timestamp heartbeat key should be removed: %#v", data)
+	}
+	if data["node-a"] != "34.45.0-gke.3" || data["node-b"] != "34.45.0-gke.3" {
+		t.Fatalf("hostname/version heartbeat evidence should be retained: %#v", data)
+	}
+}
+
+func TestPipelineForAppConfigUsesExtractorResourceScope(t *testing.T) {
+	input := `{
+	  "apiVersion": "v1",
+	  "kind": "Event",
+	  "metadata": {"name": "event", "namespace": "default", "uid": "event-uid", "resourceVersion": "10"},
+	  "reason": "Scheduled",
+	  "message": "pod scheduled"
+	}`
+	cfg := appconfig.Default()
+
+	store := storage.NewMemoryStore()
+	pipeline, err := PipelineForAppConfig(store, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline.Now = func() time.Time { return time.Unix(100, 0) }
+
+	summary, err := pipeline.IngestJSON(context.Background(), []byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Facts != 0 || len(store.Facts) != 0 {
+		t.Fatalf("facts = %#v summary=%#v", store.Facts, summary)
 	}
 }
 

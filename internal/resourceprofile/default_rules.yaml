@@ -1,0 +1,144 @@
+rules:
+  - name: pod_fast_path
+    groups: [""]
+    resources: [pods]
+    retentionPolicy: hot
+    extractorSet: pod
+    compactionStrategy: status_aware
+    priority: high
+    maxEventBuffer: 1024
+
+  - name: node_summary
+    groups: [""]
+    resources: [nodes]
+    retentionPolicy: large_status
+    extractorSet: node
+    compactionStrategy: status_summary
+    priority: high
+
+  - name: event_rollup
+    resources: [events]
+    kinds: [event]
+    retentionPolicy: events_short_window
+    filterChain: event_rollup
+    extractorSet: event
+    compactionStrategy: rollup
+    priority: high
+    maxEventBuffer: 2048
+
+  - name: endpointslice_topology
+    groups: [discovery.k8s.io]
+    resources: [endpointslices]
+    retentionPolicy: topology
+    extractorSet: endpointslice
+    compactionStrategy: membership_delta
+    priority: high
+
+  - name: lease_skip_or_downsample
+    enabled: false
+    groups: [coordination.k8s.io]
+    resources: [leases]
+    retentionPolicy: derived_short_window
+    filterChain: lease_skip
+    extractorSet: none
+    compactionStrategy: downsample
+    priority: low
+    maxEventBuffer: 64
+
+  - name: low_signal_report
+    enabled: false
+    groups: [wgpolicyk8s.io]
+    resources: [policyreports, clusterpolicyreports]
+    retentionPolicy: derived_short_window
+    filterChain: report_skip
+    extractorSet: none
+    compactionStrategy: skip_or_downsample
+    priority: low
+    maxEventBuffer: 64
+
+  - name: low_signal_report
+    enabled: false
+    groups: [reports.kyverno.io]
+    resources: [ephemeralreports, clusterephemeralreports]
+    retentionPolicy: derived_short_window
+    filterChain: report_skip
+    extractorSet: none
+    compactionStrategy: skip_or_downsample
+    priority: low
+    maxEventBuffer: 64
+
+  - name: secret_metadata_only
+    groups: [""]
+    resources: [secrets]
+    retentionPolicy: sensitive_metadata
+    filterChain: secret_metadata_only
+    extractorSet: secret_metadata
+
+  - name: workload_rollout
+    groups: [apps]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    retentionPolicy: workload
+    extractorSet: workload
+    compactionStrategy: spec_status_delta
+    priority: high
+
+  - name: workload_rollout
+    groups: [batch]
+    resources: [jobs, cronjobs]
+    retentionPolicy: workload
+    extractorSet: workload
+    compactionStrategy: spec_status_delta
+    priority: high
+
+  - name: service_topology
+    groups: [""]
+    resources: [services, endpoints, persistentvolumeclaims, persistentvolumes]
+    retentionPolicy: topology
+    extractorSet: service_topology
+
+  - name: service_topology
+    groups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    retentionPolicy: topology
+    extractorSet: service_topology
+
+  - name: service_topology
+    groups: [gateway.networking.k8s.io]
+    resources:
+      - gatewayclasses
+      - gateways
+      - httproutes
+      - grpcroutes
+      - tcproutes
+      - tlsroutes
+      - udproutes
+      - referencegrants
+    retentionPolicy: topology
+    extractorSet: service_topology
+
+  - name: admission_webhook
+    groups: [admissionregistration.k8s.io]
+    resources:
+      - mutatingwebhookconfigurations
+      - validatingwebhookconfigurations
+      - validatingadmissionpolicies
+      - validatingadmissionpolicybindings
+    retentionPolicy: control_plane
+    extractorSet: webhook
+
+  - name: rbac
+    groups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    retentionPolicy: security
+    extractorSet: rbac
+
+  - name: certmanager
+    groups: [cert-manager.io, acme.cert-manager.io]
+    retentionPolicy: certificate_lifecycle
+    extractorSet: certmanager
+
+  - name: crd_definition
+    groups: [apiextensions.k8s.io]
+    resources: [customresourcedefinitions]
+    retentionPolicy: crd_long_window
+    extractorSet: crd

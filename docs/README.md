@@ -32,16 +32,17 @@ Read these in order:
 12. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
 13. [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
 14. [Configuration](configuration/configuration.md)
-15. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
-16. [Security, Privacy, And Retention](security/security-retention.md)
-17. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
-18. [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
-19. [Backend Strategy](research/backend-strategy.md)
-20. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
-21. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
-22. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
-23. [Test Acceptance Plan](validation/test-acceptance-plan.md)
-24. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+15. [Development Commands](development/commands.md)
+16. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
+17. [Security, Privacy, And Retention](security/security-retention.md)
+18. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
+19. [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
+20. [Backend Strategy](research/backend-strategy.md)
+21. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
+22. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
+23. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
+24. [Test Acceptance Plan](validation/test-acceptance-plan.md)
+25. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
 
 ## Categories
 
@@ -51,6 +52,7 @@ Read these in order:
 | `architecture/` | System-level components, deployment shape, and technology stack. |
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
+| `development/` | Development commands and local verification workflow. |
 | `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |

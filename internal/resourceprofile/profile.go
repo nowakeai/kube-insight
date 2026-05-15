@@ -4,11 +4,12 @@ import (
 	"strings"
 
 	"kube-insight/internal/kubeapi"
+	"kube-insight/internal/resourcematch"
 )
 
 type Profile struct {
 	Name               string
-	RetentionClass     string
+	RetentionPolicy    string
 	FilterChain        string
 	ExtractorSet       string
 	CompactionStrategy string
@@ -17,13 +18,65 @@ type Profile struct {
 	Enabled            bool
 }
 
+type Resource struct {
+	Group    string
+	Version  string
+	Resource string
+	Kind     string
+}
+
+type Rule struct {
+	Name      string
+	Groups    []string
+	Resources []string
+	Kinds     []string
+	Disabled  bool
+	Base      Profile
+	Profile   Profile
+}
+
 func ForResource(info kubeapi.ResourceInfo) Profile {
-	resource := strings.ToLower(info.Resource)
-	group := strings.ToLower(info.Group)
-	kind := strings.ToLower(info.Kind)
-	profile := Profile{
+	return Select(info, DefaultRules())
+}
+
+func Select(info kubeapi.ResourceInfo, rules []Rule) Profile {
+	resource := normalize(info)
+	base := DefaultProfile()
+	for _, rule := range rules {
+		if rule.matches(resource) {
+			return rule.apply(base)
+		}
+	}
+	return base
+}
+
+func DefaultRules() []Rule {
+	return CloneRules(defaultRules)
+}
+
+func DefaultRulesWithBase(base Profile) []Rule {
+	rules := CloneRules(defaultRules)
+	for i := range rules {
+		rules[i].Base = base
+	}
+	return rules
+}
+
+func CloneRules(rules []Rule) []Rule {
+	out := make([]Rule, len(rules))
+	for i, rule := range rules {
+		out[i] = rule
+		out[i].Groups = cloneStrings(rule.Groups)
+		out[i].Resources = cloneStrings(rule.Resources)
+		out[i].Kinds = cloneStrings(rule.Kinds)
+	}
+	return out
+}
+
+func DefaultProfile() Profile {
+	return Profile{
 		Name:               "generic",
-		RetentionClass:     "standard",
+		RetentionPolicy:    "standard",
 		FilterChain:        "default",
 		ExtractorSet:       "generic",
 		CompactionStrategy: "full_json",
@@ -31,110 +84,95 @@ func ForResource(info kubeapi.ResourceInfo) Profile {
 		MaxEventBuffer:     256,
 		Enabled:            true,
 	}
-
-	switch {
-	case resource == "pods" && group == "":
-		profile.Name = "pod_fast_path"
-		profile.RetentionClass = "hot"
-		profile.ExtractorSet = "pod"
-		profile.CompactionStrategy = "status_aware"
-		profile.Priority = "high"
-		profile.MaxEventBuffer = 1024
-	case resource == "nodes" && group == "":
-		profile.Name = "node_summary"
-		profile.RetentionClass = "large_status"
-		profile.ExtractorSet = "node"
-		profile.CompactionStrategy = "status_summary"
-		profile.Priority = "high"
-	case kind == "event" || resource == "events":
-		profile.Name = "event_rollup"
-		profile.RetentionClass = "churn"
-		profile.ExtractorSet = "event"
-		profile.CompactionStrategy = "rollup"
-		profile.Priority = "high"
-		profile.MaxEventBuffer = 2048
-	case resource == "endpointslices" && group == "discovery.k8s.io":
-		profile.Name = "endpointslice_topology"
-		profile.RetentionClass = "topology"
-		profile.ExtractorSet = "endpointslice"
-		profile.CompactionStrategy = "membership_delta"
-		profile.Priority = "high"
-	case resource == "leases" && group == "coordination.k8s.io":
-		profile.Name = "lease_skip_or_downsample"
-		profile.RetentionClass = "ephemeral"
-		profile.FilterChain = "lease_skip"
-		profile.ExtractorSet = "none"
-		profile.CompactionStrategy = "downsample"
-		profile.Priority = "low"
-		profile.MaxEventBuffer = 64
-		profile.Enabled = false
-	case resource == "secrets" && group == "":
-		profile.Name = "secret_metadata_only"
-		profile.RetentionClass = "sensitive_metadata"
-		profile.FilterChain = "secret_metadata_only"
-		profile.ExtractorSet = "secret_metadata"
-	case isWorkloadResource(group, resource):
-		profile.Name = "workload_rollout"
-		profile.RetentionClass = "workload"
-		profile.ExtractorSet = "workload"
-		profile.CompactionStrategy = "spec_status_delta"
-		profile.Priority = "high"
-	case isServiceTopologyResource(group, resource):
-		profile.Name = "service_topology"
-		profile.RetentionClass = "topology"
-		profile.ExtractorSet = "service_topology"
-	case isAdmissionWebhookResource(group, resource):
-		profile.Name = "admission_webhook"
-		profile.RetentionClass = "control_plane"
-		profile.ExtractorSet = "webhook"
-	case isRBACResource(group, resource):
-		profile.Name = "rbac"
-		profile.RetentionClass = "security"
-		profile.ExtractorSet = "rbac"
-	case group == "cert-manager.io" || group == "acme.cert-manager.io":
-		profile.Name = "certmanager"
-		profile.RetentionClass = "certificate_lifecycle"
-		profile.ExtractorSet = "certmanager"
-	case resource == "customresourcedefinitions" && group == "apiextensions.k8s.io":
-		profile.Name = "crd_definition"
-		profile.RetentionClass = "api_definition"
-		profile.ExtractorSet = "crd"
-	}
-	return profile
 }
 
-func isWorkloadResource(group, resource string) bool {
-	if group == "apps" {
-		switch resource {
-		case "deployments", "replicasets", "statefulsets", "daemonsets":
-			return true
-		}
+func normalize(info kubeapi.ResourceInfo) Resource {
+	return Resource{
+		Group:    strings.ToLower(strings.TrimSpace(info.Group)),
+		Version:  strings.ToLower(strings.TrimSpace(info.Version)),
+		Resource: strings.ToLower(strings.TrimSpace(info.Resource)),
+		Kind:     strings.ToLower(strings.TrimSpace(info.Kind)),
 	}
-	if group == "batch" {
-		return resource == "jobs" || resource == "cronjobs"
-	}
-	return false
 }
 
-func isServiceTopologyResource(group, resource string) bool {
-	if group == "" {
-		return resource == "services" || resource == "endpoints" || resource == "persistentvolumeclaims" || resource == "persistentvolumes"
+func (rule Rule) matches(resource Resource) bool {
+	matchResource := resource.matchResource()
+	if len(rule.Groups) > 0 && !resourcematch.MatchAnyString(rule.Groups, resource.Group) {
+		return false
 	}
-	if group == "networking.k8s.io" {
-		return resource == "ingresses" || resource == "networkpolicies"
+	if len(rule.Resources) > 0 && !resourcematch.MatchAnyResource(rule.Resources, matchResource) {
+		return false
 	}
-	if group == "gateway.networking.k8s.io" {
-		return strings.Contains(resource, "gateway") || strings.Contains(resource, "route")
+	if len(rule.Kinds) > 0 && !resourcematch.MatchAnyString(rule.Kinds, resource.Kind) {
+		return false
 	}
-	return false
+	return true
 }
 
-func isAdmissionWebhookResource(group, resource string) bool {
-	return group == "admissionregistration.k8s.io" &&
-		(resource == "mutatingwebhookconfigurations" || resource == "validatingwebhookconfigurations" || resource == "validatingadmissionpolicies" || resource == "validatingadmissionpolicybindings")
+func (resource Resource) matchResource() resourcematch.Resource {
+	return resourcematch.Resource{
+		Group:    resource.Group,
+		Version:  resource.Version,
+		Resource: resource.Resource,
+		Kind:     resource.Kind,
+	}
 }
 
-func isRBACResource(group, resource string) bool {
-	return group == "rbac.authorization.k8s.io" &&
-		(resource == "roles" || resource == "rolebindings" || resource == "clusterroles" || resource == "clusterrolebindings")
+func (rule Rule) apply(base Profile) Profile {
+	if rule.Base.Name != "" {
+		base = rule.Base
+	}
+	out := base
+	if rule.Name != "" {
+		out.Name = rule.Name
+	}
+	out = mergeProfile(out, rule.Profile)
+	if rule.Disabled {
+		out.Enabled = false
+	}
+	return out
+}
+
+// EffectiveProfile returns the profile selected by this rule after applying
+// defaults, rule overrides, and disabled state.
+func (rule Rule) EffectiveProfile(base Profile) Profile {
+	return rule.apply(base)
+}
+
+func mergeProfile(base, override Profile) Profile {
+	out := base
+	if override.Name != "" {
+		out.Name = override.Name
+	}
+	if override.RetentionPolicy != "" {
+		out.RetentionPolicy = override.RetentionPolicy
+	}
+	if override.FilterChain != "" {
+		out.FilterChain = override.FilterChain
+	}
+	if override.ExtractorSet != "" {
+		out.ExtractorSet = override.ExtractorSet
+	}
+	if override.CompactionStrategy != "" {
+		out.CompactionStrategy = override.CompactionStrategy
+	}
+	if override.Priority != "" {
+		out.Priority = override.Priority
+	}
+	if override.MaxEventBuffer != 0 {
+		out.MaxEventBuffer = override.MaxEventBuffer
+	}
+	if override.Enabled {
+		out.Enabled = true
+	}
+	return out
+}
+
+func cloneStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, len(values))
+	copy(out, values)
+	return out
 }

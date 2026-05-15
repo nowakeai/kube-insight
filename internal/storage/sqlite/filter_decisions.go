@@ -51,7 +51,7 @@ insert into filter_decisions(
 			filterName,
 			string(decision.Outcome),
 			decision.Reason,
-			decision.Outcome == filter.KeepModified || decision.Outcome == filter.DiscardChange || decision.Outcome == filter.DiscardResource,
+			isDestructiveFilterDecision(decision),
 			sql.NullString{String: string(meta), Valid: string(meta) != "null"},
 		); err != nil {
 			return err
@@ -76,8 +76,48 @@ func shouldPersistFilterDecision(filterName string, decision filter.Decision) bo
 	case filter.DiscardChange, filter.DiscardResource:
 		return true
 	case filter.KeepModified:
-		return filterName != "metadata_normalization_filter"
+		return isSecretPayloadRemoval(filterName, decision)
 	default:
 		return false
+	}
+}
+
+func isDestructiveFilterDecision(decision filter.Decision) bool {
+	switch decision.Outcome {
+	case filter.DiscardChange, filter.DiscardResource:
+		return true
+	case filter.KeepModified:
+		filterName, _ := decision.Meta["filter"].(string)
+		return isSecretPayloadRemoval(filterName, decision)
+	default:
+		return false
+	}
+}
+
+func isSecretPayloadRemoval(filterName string, decision filter.Decision) bool {
+	if decision.Reason == "secret_payload_removed" {
+		return true
+	}
+	if filterName == "secret_redaction_filter" || filterName == "secret_metadata_only" {
+		if value, _ := decision.Meta["secretPayloadRemoved"].(bool); value {
+			return true
+		}
+		if count, ok := numericMeta(decision.Meta["redactedFields"]); ok && count > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func numericMeta(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	default:
+		return 0, false
 	}
 }

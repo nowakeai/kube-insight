@@ -30,19 +30,35 @@ on conflict(name) do update set
 
 func (s *Store) ListClusters(ctx context.Context) ([]storage.ClusterRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
+with
+object_counts as (
+  select cluster_id, count(*) as objects
+  from objects
+  group by cluster_id
+),
+version_counts as (
+  select o.cluster_id, count(*) as versions
+  from versions v
+  join objects o on o.id = v.object_id
+  group by o.cluster_id
+),
+latest_counts as (
+  select cluster_id, count(*) as latest
+  from latest_index
+  group by cluster_id
+)
 select
   c.name,
   coalesce(c.uid, ''),
   coalesce(c.source, ''),
   c.created_at,
-  count(distinct o.id) as objects,
-  count(distinct v.id) as versions,
-  count(distinct li.object_id) as latest
+  coalesce(oc.objects, 0) as objects,
+  coalesce(vc.versions, 0) as versions,
+  coalesce(lc.latest, 0) as latest
 from clusters c
-left join objects o on o.cluster_id = c.id
-left join versions v on v.object_id = o.id
-left join latest_index li on li.cluster_id = c.id
-group by c.id
+left join object_counts oc on oc.cluster_id = c.id
+left join version_counts vc on vc.cluster_id = c.id
+left join latest_counts lc on lc.cluster_id = c.id
 order by c.name`)
 	if err != nil {
 		return nil, err

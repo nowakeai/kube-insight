@@ -12,17 +12,17 @@ import (
 )
 
 type Config struct {
-	Version    string            `yaml:"version" json:"version"`
-	Instance   InstanceConfig    `yaml:"instance" json:"instance"`
-	Logging    LoggingConfig     `yaml:"logging" json:"logging"`
-	Storage    StorageConfig     `yaml:"storage" json:"storage"`
-	Collection CollectionConfig  `yaml:"collection" json:"collection"`
-	Filters    []FilterConfig    `yaml:"filters" json:"filters"`
-	Extractors []ExtractorConfig `yaml:"extractors" json:"extractors"`
-	Plugins    PluginConfig      `yaml:"plugins" json:"plugins"`
-	Server     ServerConfig      `yaml:"server" json:"server"`
-	MCP        MCPConfig         `yaml:"mcp" json:"mcp"`
-	Validation ValidationConfig  `yaml:"validation" json:"validation"`
+	Version          string                 `yaml:"version" json:"version"`
+	Instance         InstanceConfig         `yaml:"instance" json:"instance"`
+	Logging          LoggingConfig          `yaml:"logging" json:"logging"`
+	Storage          StorageConfig          `yaml:"storage" json:"storage"`
+	Collection       CollectionConfig       `yaml:"collection" json:"collection"`
+	ResourceProfiles ResourceProfilesConfig `yaml:"resourceProfiles" json:"resourceProfiles"`
+	Processing       ProcessingConfig       `yaml:"processing" json:"processing"`
+	Plugins          PluginConfig           `yaml:"plugins" json:"plugins"`
+	Server           ServerConfig           `yaml:"server" json:"server"`
+	MCP              MCPConfig              `yaml:"mcp" json:"mcp"`
+	Validation       ValidationConfig       `yaml:"validation" json:"validation"`
 }
 
 type InstanceConfig struct {
@@ -40,6 +40,7 @@ type StorageConfig struct {
 	Postgres    SQLDatabaseConfig `yaml:"postgres" json:"postgres"`
 	Cockroach   SQLDatabaseConfig `yaml:"cockroach" json:"cockroach"`
 	Maintenance MaintenanceConfig `yaml:"maintenance" json:"maintenance"`
+	Retention   RetentionConfig   `yaml:"retention" json:"retention"`
 }
 
 type SQLiteConfig struct {
@@ -57,6 +58,19 @@ type MaintenanceConfig struct {
 	LogUnchangedMaintenanceRuns bool  `yaml:"logUnchangedMaintenanceRuns" json:"logUnchangedMaintenanceRuns"`
 }
 
+type RetentionConfig struct {
+	Enabled                     bool                             `yaml:"enabled" json:"enabled"`
+	MaxAgeSeconds               int                              `yaml:"maxAgeSeconds" json:"maxAgeSeconds"`
+	MinVersionsPerObject        int                              `yaml:"minVersionsPerObject" json:"minVersionsPerObject"`
+	FilterDecisionMaxAgeSeconds int                              `yaml:"filterDecisionMaxAgeSeconds" json:"filterDecisionMaxAgeSeconds"`
+	Policies                    map[string]RetentionPolicyConfig `yaml:"policies" json:"policies"`
+}
+
+type RetentionPolicyConfig struct {
+	MaxAgeSeconds        int `yaml:"maxAgeSeconds" json:"maxAgeSeconds"`
+	MinVersionsPerObject int `yaml:"minVersionsPerObject" json:"minVersionsPerObject"`
+}
+
 type SQLDatabaseConfig struct {
 	DSNEnv string `yaml:"dsnEnv" json:"dsnEnv"`
 }
@@ -69,7 +83,16 @@ type CollectionConfig struct {
 	AllContexts bool           `yaml:"allContexts" json:"allContexts"`
 	Namespace   string         `yaml:"namespace" json:"namespace"`
 	Concurrency int            `yaml:"concurrency" json:"concurrency"`
+	Watch       WatchConfig    `yaml:"watch" json:"watch"`
 	Resources   ResourcePolicy `yaml:"resources" json:"resources"`
+}
+
+type WatchConfig struct {
+	DisableHTTP2         bool `yaml:"disableHttp2" json:"disableHttp2"`
+	MaxConcurrentStreams int  `yaml:"maxConcurrentStreams" json:"maxConcurrentStreams"`
+	MinBackoffMillis     int  `yaml:"minBackoffMillis" json:"minBackoffMillis"`
+	MaxBackoffMillis     int  `yaml:"maxBackoffMillis" json:"maxBackoffMillis"`
+	StreamStartStaggerMS int  `yaml:"streamStartStaggerMillis" json:"streamStartStaggerMillis"`
 }
 
 type ResourcePolicy struct {
@@ -78,23 +101,65 @@ type ResourcePolicy struct {
 	Exclude []string `yaml:"exclude" json:"exclude"`
 }
 
-type FilterConfig struct {
-	Name           string   `yaml:"name" json:"name"`
-	Enabled        *bool    `yaml:"enabled" json:"enabled,omitempty"`
-	Action         string   `yaml:"action" json:"action"`
-	Kinds          []string `yaml:"kinds" json:"kinds"`
-	Resources      []string `yaml:"resources" json:"resources"`
-	RemovePaths    []string `yaml:"removePaths" json:"removePaths"`
-	KeepSecretKeys bool     `yaml:"keepSecretKeys" json:"keepSecretKeys"`
-	Script         string   `yaml:"script" json:"script,omitempty"`
+type ResourceProfilesConfig struct {
+	Defaults        ResourceProfileDefaultsConfig `yaml:"defaults" json:"defaults"`
+	ReplaceDefaults bool                          `yaml:"replaceDefaults" json:"replaceDefaults"`
+	Rules           []ResourceProfileRuleConfig   `yaml:"rules" json:"rules"`
 }
 
-type ExtractorConfig struct {
-	Name      string   `yaml:"name" json:"name"`
-	Enabled   *bool    `yaml:"enabled" json:"enabled,omitempty"`
-	Kinds     []string `yaml:"kinds" json:"kinds"`
-	Resources []string `yaml:"resources" json:"resources"`
-	Script    string   `yaml:"script" json:"script,omitempty"`
+type ResourceProfileDefaultsConfig struct {
+	Enabled            *bool  `yaml:"enabled" json:"enabled,omitempty"`
+	RetentionPolicy    string `yaml:"retentionPolicy" json:"retentionPolicy"`
+	FilterChain        string `yaml:"filterChain" json:"filterChain"`
+	ExtractorSet       string `yaml:"extractorSet" json:"extractorSet"`
+	CompactionStrategy string `yaml:"compactionStrategy" json:"compactionStrategy"`
+	Priority           string `yaml:"priority" json:"priority"`
+	MaxEventBuffer     int    `yaml:"maxEventBuffer" json:"maxEventBuffer"`
+}
+
+type ResourceProfileRuleConfig struct {
+	Name               string   `yaml:"name" json:"name"`
+	Enabled            *bool    `yaml:"enabled" json:"enabled,omitempty"`
+	Groups             []string `yaml:"groups" json:"groups"`
+	Resources          []string `yaml:"resources" json:"resources"`
+	Kinds              []string `yaml:"kinds" json:"kinds"`
+	RetentionPolicy    string   `yaml:"retentionPolicy" json:"retentionPolicy"`
+	FilterChain        string   `yaml:"filterChain" json:"filterChain"`
+	ExtractorSet       string   `yaml:"extractorSet" json:"extractorSet"`
+	CompactionStrategy string   `yaml:"compactionStrategy" json:"compactionStrategy"`
+	Priority           string   `yaml:"priority" json:"priority"`
+	MaxEventBuffer     int      `yaml:"maxEventBuffer" json:"maxEventBuffer"`
+}
+
+type ProcessingConfig struct {
+	FilterChains  map[string][]string                  `yaml:"filterChains" json:"filterChains"`
+	Filters       map[string]ProcessingFilterConfig    `yaml:"filters" json:"filters"`
+	ExtractorSets map[string][]string                  `yaml:"extractorSets" json:"extractorSets"`
+	Extractors    map[string]ProcessingExtractorConfig `yaml:"extractors" json:"extractors"`
+}
+
+type ProcessingFilterConfig struct {
+	Type           string              `yaml:"type" json:"type"`
+	Enabled        *bool               `yaml:"enabled" json:"enabled,omitempty"`
+	Action         string              `yaml:"action" json:"action"`
+	RemovePaths    []string            `yaml:"removePaths" json:"removePaths"`
+	KeepSecretKeys bool                `yaml:"keepSecretKeys" json:"keepSecretKeys"`
+	Guard          ResourceGuardConfig `yaml:"guard" json:"guard"`
+	Script         string              `yaml:"script" json:"script,omitempty"`
+}
+
+type ProcessingExtractorConfig struct {
+	Type    string              `yaml:"type" json:"type"`
+	Enabled *bool               `yaml:"enabled" json:"enabled,omitempty"`
+	Guard   ResourceGuardConfig `yaml:"guard" json:"guard"`
+	Script  string              `yaml:"script" json:"script,omitempty"`
+}
+
+type ResourceGuardConfig struct {
+	Resources  []string `yaml:"resources" json:"resources"`
+	Kinds      []string `yaml:"kinds" json:"kinds"`
+	Namespaces []string `yaml:"namespaces" json:"namespaces"`
+	Names      []string `yaml:"names" json:"names"`
 }
 
 type PluginConfig struct {
@@ -107,9 +172,10 @@ type GojaConfig struct {
 }
 
 type ServerConfig struct {
-	API  ListenerConfig `yaml:"api" json:"api"`
-	Web  ListenerConfig `yaml:"web" json:"web"`
-	Chat ChatConfig     `yaml:"chat" json:"chat"`
+	API     ListenerConfig `yaml:"api" json:"api"`
+	Metrics ListenerConfig `yaml:"metrics" json:"metrics"`
+	Web     ListenerConfig `yaml:"web" json:"web"`
+	Chat    ChatConfig     `yaml:"chat" json:"chat"`
 }
 
 type ListenerConfig struct {
@@ -153,8 +219,16 @@ func ReadFile(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	return Read(data)
+}
+
+func Read(data []byte) (Config, error) {
+	merged, err := overlayDefaultYAML(data)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg, err := decodeConfigStrict(merged)
+	if err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -187,62 +261,6 @@ func LoadEffective(path string, envPrefix string, overrides map[string]string) (
 	return cfg, nil
 }
 
-func Default() Config {
-	on := true
-	return Config{
-		Version:  "v1alpha1",
-		Instance: InstanceConfig{Role: "all"},
-		Logging:  LoggingConfig{Level: "info", Format: "text"},
-		Storage: StorageConfig{
-			Driver: "sqlite",
-			SQLite: SQLiteConfig{Path: "kubeinsight.db"},
-			Maintenance: MaintenanceConfig{
-				Enabled:                true,
-				IntervalSeconds:        300,
-				MinWalBytes:            16 * 1024 * 1024,
-				IncrementalVacuumPages: 256,
-				JournalSizeLimitBytes:  64 * 1024 * 1024,
-				RunOnStart:             false,
-				SkipWhenDatabaseBusy:   true,
-			},
-		},
-		Collection: CollectionConfig{
-			Enabled:     true,
-			Concurrency: 4,
-			Resources:   ResourcePolicy{All: true},
-		},
-		Filters: []FilterConfig{
-			{Name: "secret_metadata_only", Enabled: &on, Action: "keep_modified", Resources: []string{"secrets"}, RemovePaths: []string{"/data", "/stringData"}, KeepSecretKeys: true},
-			{Name: "managed_fields", Enabled: &on, Action: "keep_modified", RemovePaths: []string{"/metadata/managedFields"}},
-			{Name: "lease_skip", Enabled: &on, Action: "discard_resource", Resources: []string{"leases.coordination.k8s.io"}},
-		},
-		Extractors: []ExtractorConfig{
-			{Name: "reference", Enabled: &on},
-			{Name: "pod", Enabled: &on, Resources: []string{"pods"}},
-			{Name: "node", Enabled: &on, Resources: []string{"nodes"}},
-			{Name: "event", Enabled: &on, Resources: []string{"events", "events.events.k8s.io"}},
-			{Name: "endpointslice", Enabled: &on, Resources: []string{"endpointslices.discovery.k8s.io"}},
-		},
-		Plugins: PluginConfig{
-			Goja: GojaConfig{Directories: []string{"./plugins"}},
-		},
-		Server: ServerConfig{
-			API:  ListenerConfig{Listen: "127.0.0.1:8080"},
-			Web:  ListenerConfig{Listen: "127.0.0.1:8081"},
-			Chat: ChatConfig{OpenAIAPIKeyEnv: "OPENAI_API_KEY", Model: "gpt-5.2"},
-		},
-		MCP: MCPConfig{Listen: "127.0.0.1:8090"},
-		Validation: ValidationConfig{
-			MaxStoredToRawRatio:          20,
-			MaxLatestLookupP95MS:         250,
-			MaxHistoricalGetP95MS:        250,
-			MaxServiceInvestigationP95MS: 5000,
-			MinServiceVersions:           3,
-			MinServiceDiffs:              1,
-		},
-	}
-}
-
 func (c *Config) ApplyEnv(prefix string, lookup func(string) (string, bool)) error {
 	return applyEnvValue(reflect.ValueOf(c).Elem(), []string{prefix}, lookup)
 }
@@ -252,80 +270,6 @@ func (c *Config) ApplyOverrides(overrides map[string]string) error {
 		if err := setByPath(reflect.ValueOf(c).Elem(), strings.Split(path, "."), value); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func (c Config) Validate() error {
-	if c.Version == "" {
-		return errors.New("version is required")
-	}
-	role := c.Instance.Role
-	if role == "" {
-		role = "all"
-	}
-	switch role {
-	case "all", "writer", "api":
-	default:
-		return fmt.Errorf("unsupported instance.role %q", c.Instance.Role)
-	}
-	switch strings.ToLower(c.Logging.Level) {
-	case "", "debug", "info", "warn", "warning", "error":
-	default:
-		return fmt.Errorf("unsupported logging.level %q", c.Logging.Level)
-	}
-	switch strings.ToLower(c.Logging.Format) {
-	case "", "text", "json", "logfmt":
-	default:
-		return fmt.Errorf("unsupported logging.format %q", c.Logging.Format)
-	}
-	switch c.Storage.Driver {
-	case "sqlite":
-		if c.Storage.SQLite.Path == "" {
-			return errors.New("storage.sqlite.path is required when driver is sqlite")
-		}
-	case "postgres":
-		if c.Storage.Postgres.DSNEnv == "" {
-			return errors.New("postgres dsnEnv is required")
-		}
-	case "cockroach":
-		if c.Storage.Cockroach.DSNEnv == "" {
-			return errors.New("cockroach dsnEnv is required")
-		}
-	default:
-		return fmt.Errorf("unsupported storage.driver %q", c.Storage.Driver)
-	}
-	if role == "api" && c.Collection.Enabled {
-		return errors.New("collection.enabled must be false when instance.role is api")
-	}
-	if role == "writer" && (c.Server.API.Enabled || c.Server.Web.Enabled || c.Server.Chat.Enabled || c.MCP.Enabled) {
-		return errors.New("api/web/chat/mcp listeners must be disabled when instance.role is writer")
-	}
-	if c.Collection.Concurrency < 0 {
-		return errors.New("collection.concurrency must be non-negative")
-	}
-	if c.Storage.Maintenance.Enabled {
-		if c.Storage.Maintenance.IntervalSeconds <= 0 {
-			return errors.New("storage.maintenance.intervalSeconds must be positive when maintenance is enabled")
-		}
-		if c.Storage.Maintenance.MinWalBytes < 0 {
-			return errors.New("storage.maintenance.minWalBytes must be non-negative")
-		}
-		if c.Storage.Maintenance.IncrementalVacuumPages < 0 {
-			return errors.New("storage.maintenance.incrementalVacuumPages must be non-negative")
-		}
-		if c.Storage.Maintenance.JournalSizeLimitBytes < 0 {
-			return errors.New("storage.maintenance.journalSizeLimitBytes must be non-negative")
-		}
-	}
-	if err := validateFilters(c.Filters); err != nil {
-		return err
-	}
-	if err := validateExtractors(c.Extractors); err != nil {
-		return err
-	}
-	if c.Server.Chat.Enabled && c.Server.Chat.OpenAIAPIKeyEnv == "" {
-		return errors.New("server.chat.openaiApiKeyEnv is required when chat is enabled")
 	}
 	return nil
 }
@@ -428,6 +372,12 @@ func setReflectValue(v reflect.Value, value string) error {
 			out = reflect.Append(out, reflect.ValueOf(part))
 		}
 		v.Set(out)
+	case reflect.Map:
+		parsed := reflect.New(v.Type())
+		if err := yaml.Unmarshal([]byte(value), parsed.Interface()); err != nil {
+			return err
+		}
+		v.Set(parsed.Elem())
 	default:
 		return fmt.Errorf("unsupported config type %s", v.Kind())
 	}
@@ -451,37 +401,4 @@ func envNamePart(name string) string {
 		b.WriteRune(r)
 	}
 	return strings.ToUpper(b.String())
-}
-
-func validateFilters(filters []FilterConfig) error {
-	seen := map[string]bool{}
-	for _, filter := range filters {
-		if filter.Name == "" {
-			return errors.New("filters[].name is required")
-		}
-		if seen[filter.Name] {
-			return fmt.Errorf("duplicate filter %q", filter.Name)
-		}
-		seen[filter.Name] = true
-		switch filter.Action {
-		case "", "keep", "keep_modified", "discard_change", "discard_resource":
-		default:
-			return fmt.Errorf("filter %q has unsupported action %q", filter.Name, filter.Action)
-		}
-	}
-	return nil
-}
-
-func validateExtractors(extractors []ExtractorConfig) error {
-	seen := map[string]bool{}
-	for _, extractor := range extractors {
-		if extractor.Name == "" {
-			return errors.New("extractors[].name is required")
-		}
-		if seen[extractor.Name] {
-			return fmt.Errorf("duplicate extractor %q", extractor.Name)
-		}
-		seen[extractor.Name] = true
-	}
-	return nil
 }

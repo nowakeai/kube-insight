@@ -19,6 +19,7 @@ type FilterDecisionRecord struct {
 type MemoryStore struct {
 	mu              sync.Mutex
 	Observations    []core.Observation
+	RawLatest       []core.Observation
 	Facts           []core.Fact
 	Edges           []core.Edge
 	Changes         []core.Change
@@ -29,6 +30,14 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{}
+}
+
+func (s *MemoryStore) PutRawLatest(_ context.Context, obs core.Observation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.RawLatest = append(s.RawLatest, obs)
+	return nil
 }
 
 func (s *MemoryStore) PutObservation(_ context.Context, obs core.Observation, evidence extractor.Evidence) error {

@@ -16,6 +16,10 @@ type Store interface {
 	GetEdges(context.Context, string) ([]core.Edge, error)
 }
 
+type RawLatestStore interface {
+	PutRawLatest(context.Context, core.Observation) error
+}
+
 type APIResourceStore interface {
 	UpsertAPIResources(context.Context, []kubeapi.ResourceInfo, time.Time) error
 	APIResources(context.Context) ([]kubeapi.ResourceInfo, error)

@@ -4,18 +4,20 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
-	"kube-insight/internal/resourceprofile"
 	"kube-insight/internal/storage"
 )
 
 type ResourceHealthOptions struct {
-	ClusterID  string
-	Status     string
-	ErrorsOnly bool
-	StaleAfter time.Duration
-	Limit      int
+	ClusterID        string
+	Status           string
+	ErrorsOnly       bool
+	StaleAfter       time.Duration
+	Limit            int
+	ExcludeResources []string
+	IncludeExcluded  bool
 }
 
 type ResourceHealthReport struct {
@@ -28,9 +30,12 @@ type ResourceHealthReport struct {
 type ResourceHealthSummary struct {
 	Resources  int      `json:"resources"`
 	Healthy    int      `json:"healthy"`
+	Unstable   int      `json:"unstable"`
 	Errors     int      `json:"errors"`
 	Stale      int      `json:"stale"`
 	NotStarted int      `json:"notStarted"`
+	Queued     int      `json:"queued"`
+	Skipped    int      `json:"skipped"`
 	Complete   bool     `json:"complete"`
 	Warnings   []string `json:"warnings,omitempty"`
 }
@@ -52,6 +57,7 @@ type ResourceHealthRecord struct {
 	UpdatedAt       *time.Time `json:"updatedAt,omitempty"`
 	AgeSeconds      int64      `json:"ageSeconds,omitempty"`
 	Stale           bool       `json:"stale,omitempty"`
+	Skipped         bool       `json:"skipped,omitempty"`
 	LatestObjects   int        `json:"latestObjects"`
 }
 
@@ -84,7 +90,7 @@ func (s *Store) UpsertIngestionOffset(ctx context.Context, offset storage.Ingest
 	if apiResourceID == 0 {
 		return nil
 	}
-	if err := upsertProcessingProfile(ctx, tx, apiResourceID, resourceprofile.ForResource(offset.Resource)); err != nil {
+	if err := upsertProcessingProfile(ctx, tx, apiResourceID, s.profileForResource(offset.Resource)); err != nil {
 		return err
 	}
 
@@ -148,6 +154,8 @@ from clusters c
 join api_resources ar on ar.removed_at is null
 left join ingestion_offsets io on io.cluster_id = c.id and io.api_resource_id = ar.id
 where (? = '' or c.name = ?)
+  and ar.verbs like '%"list"%'
+  and ar.verbs like '%"watch"%'
 order by
   case coalesce(io.status, 'not_started')
     when 'watch_error' then 0
@@ -155,9 +163,10 @@ order by
     when 'retrying' then 2
     when 'not_started' then 3
     when 'listed' then 4
-    when 'watching' then 5
-    when 'bookmark' then 6
-    else 7
+    when 'queued' then 5
+    when 'watching' then 6
+    when 'bookmark' then 7
+    else 8
   end,
   c.name,
   ar.api_group,
@@ -178,6 +187,15 @@ order by
 		if err != nil {
 			return ResourceHealthReport{}, err
 		}
+		if resourceHealthExcluded(record, opts.ExcludeResources) {
+			report.Summary.Skipped++
+			if !opts.IncludeExcluded {
+				continue
+			}
+			record.Status = "skipped"
+			record.Error = ""
+			record.Skipped = true
+		}
 		if !resourceHealthMatches(record, opts) {
 			continue
 		}
@@ -189,8 +207,13 @@ order by
 		switch {
 		case record.Status == "not_started":
 			report.Summary.NotStarted++
+		case record.Status == "queued":
+			report.Summary.Queued++
+		case record.Status == "skipped":
 		case isResourceHealthError(record):
 			report.Summary.Errors++
+		case isResourceHealthUnstable(record):
+			report.Summary.Unstable++
 		case record.Stale:
 			report.Summary.Stale++
 		default:
@@ -205,13 +228,16 @@ order by
 }
 
 func finalizeResourceHealthSummary(summary ResourceHealthSummary, opts ResourceHealthOptions) ResourceHealthSummary {
-	summary.Complete = summary.Errors == 0 && summary.Stale == 0 && summary.NotStarted == 0
-	if summary.Resources == 0 && opts.Status == "" && !opts.ErrorsOnly {
+	summary.Complete = summary.Errors == 0 && summary.Unstable == 0 && summary.Stale == 0 && summary.NotStarted == 0
+	if summary.Resources == 0 && summary.Skipped == 0 && opts.Status == "" && !opts.ErrorsOnly {
 		summary.Complete = false
 		summary.Warnings = append(summary.Warnings, "no discovered resources in health report")
 	}
 	if summary.Errors > 0 {
 		summary.Warnings = append(summary.Warnings, fmt.Sprintf("%d resource stream(s) have errors", summary.Errors))
+	}
+	if summary.Unstable > 0 {
+		summary.Warnings = append(summary.Warnings, fmt.Sprintf("%d resource stream(s) are retrying", summary.Unstable))
 	}
 	if summary.Stale > 0 {
 		summary.Warnings = append(summary.Warnings, fmt.Sprintf("%d resource stream(s) are stale", summary.Stale))
@@ -220,6 +246,45 @@ func finalizeResourceHealthSummary(summary ResourceHealthSummary, opts ResourceH
 		summary.Warnings = append(summary.Warnings, fmt.Sprintf("%d resource stream(s) have not started", summary.NotStarted))
 	}
 	return summary
+}
+
+func resourceHealthExcluded(record ResourceHealthRecord, excludes []string) bool {
+	if len(excludes) == 0 {
+		return false
+	}
+	candidates := resourceHealthCandidates(record)
+	for _, exclude := range excludes {
+		exclude = strings.ToLower(strings.TrimSpace(exclude))
+		if exclude == "" {
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate == exclude {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resourceHealthCandidates(record ResourceHealthRecord) []string {
+	resource := strings.ToLower(strings.TrimSpace(record.Resource))
+	group := strings.ToLower(strings.TrimSpace(record.Group))
+	version := strings.ToLower(strings.TrimSpace(record.Version))
+	var candidates []string
+	if group != "" {
+		candidates = append(candidates, resource+"."+group)
+	} else {
+		candidates = append(candidates, resource)
+	}
+	if version != "" {
+		if group == "" {
+			candidates = append(candidates, version+"/"+resource)
+		} else {
+			candidates = append(candidates, group+"/"+version+"/"+resource)
+		}
+	}
+	return candidates
 }
 
 type resourceHealthScanner interface {
@@ -285,6 +350,10 @@ func resourceHealthMatches(record ResourceHealthRecord, opts ResourceHealthOptio
 
 func isResourceHealthError(record ResourceHealthRecord) bool {
 	return record.Status == "watch_error" || record.Status == "list_error"
+}
+
+func isResourceHealthUnstable(record ResourceHealthRecord) bool {
+	return record.Status == "retrying"
 }
 
 func offsetTimes(event storage.OffsetEvent, now int64) (sql.NullInt64, sql.NullInt64, sql.NullInt64) {

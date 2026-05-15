@@ -42,6 +42,7 @@ type collectionSettings struct {
 	Namespace   string
 	Concurrency int
 	UseClientGo bool
+	Watch       appconfig.WatchConfig
 }
 
 type collectFlags struct {

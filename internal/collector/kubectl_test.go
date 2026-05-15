@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/ingest"
 	"kube-insight/internal/storage"
 )
 
@@ -151,7 +152,7 @@ func TestReconcileDeletedFromListWritesDeletedObservation(t *testing.T) {
 			},
 		}},
 	}}
-	summary, err := reconcileDeletedFromList(context.Background(), store, "c1", info, "", "20", previous, list)
+	summary, err := reconcileDeletedFromList(context.Background(), store, "c1", info, "", "20", previous, list, nil, ingest.FilterChains{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +172,7 @@ func TestReconcileDeletedFromListCountsOutOfScopeAsUnknownVisibility(t *testing.
 	}
 	list := &unstructured.UnstructuredList{}
 
-	summary, err := reconcileDeletedFromList(context.Background(), store, "c1", info, "default", "20", previous, list)
+	summary, err := reconcileDeletedFromList(context.Background(), store, "c1", info, "default", "20", previous, list, nil, ingest.FilterChains{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

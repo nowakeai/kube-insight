@@ -65,3 +65,50 @@ func TestRunQueryHistoryWithSQLite(t *testing.T) {
 		}
 	}
 }
+
+func TestRunQuerySQLTableOutput(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "kube-insight.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := core.ResourceRef{ClusterID: "c1", Version: "v1", Resource: "pods", Kind: "Pod", Namespace: "default", Name: "api-1", UID: "pod-uid"}
+	obj := map[string]any{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]any{
+			"name":      "api-1",
+			"namespace": "default",
+			"uid":       "pod-uid",
+		},
+		"status": map[string]any{"phase": "Running"},
+	}
+	if err := store.PutObservation(ctx, core.Observation{Type: core.ObservationModified, ObservedAt: time.Unix(10, 0), ResourceVersion: "10", Ref: ref, Object: obj}, extractor.Evidence{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = Run(context.Background(), []string{
+		"query", "sql",
+		"--db", dbPath,
+		"--output", "table",
+		"--sql", "select ok.kind, li.namespace, li.name from latest_index li join object_kinds ok on ok.id = li.kind_id",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"kind",
+		"namespace",
+		"api-1",
+		"1 row(s)",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("sql table missing %q: %s", want, stdout.String())
+		}
+	}
+}

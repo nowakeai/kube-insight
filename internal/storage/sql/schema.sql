@@ -104,6 +104,22 @@ create table if not exists latest_index (
   observed_at integer not null
 );
 
+create table if not exists latest_raw_index (
+  object_id integer primary key references objects(id),
+  cluster_id integer not null references clusters(id),
+  kind_id integer not null references object_kinds(id),
+  namespace text,
+  name text not null,
+  uid text,
+  observed_at integer not null,
+  observation_type text not null,
+  resource_version text,
+  generation integer,
+  doc_hash text not null,
+  raw_size integer not null,
+  doc blob not null
+);
+
 create view if not exists latest_documents as
 select
   li.object_id,
@@ -119,6 +135,23 @@ from latest_index li
 join versions v on v.id = li.latest_version_id
 join blobs b on b.digest = v.blob_ref
 where b.codec = 'identity';
+
+create view if not exists latest_raw_documents as
+select
+  object_id,
+  cluster_id,
+  kind_id,
+  namespace,
+  name,
+  uid,
+  observed_at,
+  observation_type,
+  resource_version,
+  generation,
+  doc_hash,
+  raw_size,
+  cast(doc as text) as doc
+from latest_raw_index;
 
 create table if not exists object_edges (
   id integer primary key,
@@ -218,6 +251,9 @@ create table if not exists maintenance_runs (
 
 create index if not exists latest_kind_ns_name_idx
 on latest_index(cluster_id, kind_id, namespace, name);
+
+create index if not exists latest_raw_kind_ns_name_idx
+on latest_raw_index(cluster_id, kind_id, namespace, name);
 
 create index if not exists versions_object_seq_idx
 on versions(object_id, seq desc);

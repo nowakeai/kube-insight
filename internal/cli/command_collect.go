@@ -36,14 +36,14 @@ func ingestCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobr
 			}
 			store := storage.Store(storage.NewMemoryStore())
 			if dbPath := optionalDBPath(cmd, state, rt); dbPath != "" {
-				sqliteStore, err := sqlite.Open(dbPath)
+				sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 				if err != nil {
 					return err
 				}
 				defer sqliteStore.Close()
 				store = sqliteStore
 			}
-			summary, err := ingestInputs(runCtx, store, file, dir)
+			summary, err := ingestInputs(runCtx, store, file, dir, rt.Config)
 			if err != nil {
 				return err
 			}
@@ -127,7 +127,7 @@ func collectIngestCommand(ctx context.Context, stdout io.Writer, state *cliState
 			if opts.OutputDir == "" {
 				opts.OutputDir = "testdata/generated/collect-ingest"
 			}
-			sqliteStore, err := sqlite.Open(dbPath)
+			sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 			if err != nil {
 				return err
 			}
@@ -142,7 +142,7 @@ func collectIngestCommand(ctx context.Context, stdout io.Writer, state *cliState
 			if err != nil {
 				return err
 			}
-			summary, err := ingestInputs(runCtx, sqliteStore, "", opts.OutputDir)
+			summary, err := ingestInputs(runCtx, sqliteStore, "", opts.OutputDir, rt.Config)
 			if err != nil {
 				return err
 			}
@@ -182,7 +182,7 @@ func discoverCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 			if err != nil {
 				return err
 			}
-			store, err := sqlite.Open(dbPath)
+			store, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 			if err != nil {
 				return err
 			}
@@ -299,7 +299,7 @@ func buildSampleOptions(ctx context.Context, cmd *cobra.Command, state *cliState
 	if dbPath == "" {
 		return opts, dbPath, nil
 	}
-	sqliteStore, err := sqlite.Open(dbPath)
+	sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
 	if err != nil {
 		return opts, "", err
 	}

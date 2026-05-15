@@ -21,9 +21,11 @@ func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
 		"--api",
 		"--mcp",
 		"--webui",
+		"--metrics",
 		"--api-listen",
 		"--mcp-listen",
 		"--webui-listen",
+		"--metrics-listen",
 		"kube-insight serve mcp",
 	} {
 		if !strings.Contains(out, want) {

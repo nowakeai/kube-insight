@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"kube-insight/internal/storage/sqlite"
@@ -183,6 +184,16 @@ func parseResourceHealthOptions(r *http.Request) (sqlite.ResourceHealthOptions, 
 		}
 		opts.ErrorsOnly = value
 	}
+	if query.Get("includeSkipped") != "" {
+		value, err := strconv.ParseBool(query.Get("includeSkipped"))
+		if err != nil {
+			return opts, fmt.Errorf("includeSkipped: %w", err)
+		}
+		opts.IncludeExcluded = value
+	}
+	for _, value := range query["exclude"] {
+		opts.ExcludeResources = append(opts.ExcludeResources, splitCommaValues(value)...)
+	}
 	if query.Get("limit") != "" {
 		value, err := strconv.Atoi(query.Get("limit"))
 		if err != nil {
@@ -198,6 +209,18 @@ func parseResourceHealthOptions(r *http.Request) (sqlite.ResourceHealthOptions, 
 		opts.StaleAfter = value
 	}
 	return opts, nil
+}
+
+func splitCommaValues(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func parseHistoryRequest(r *http.Request) (sqlite.ObjectTarget, sqlite.ObjectHistoryOptions, error) {

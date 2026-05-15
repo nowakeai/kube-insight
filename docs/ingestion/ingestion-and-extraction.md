@@ -86,8 +86,10 @@ Default filter chain:
 ```text
 resource_policy_filter
   -> secret_redaction_filter
-  -> token_redaction_filter
   -> metadata_normalization_filter
+  -> resource_version_normalization_filter
+  -> status_condition_timestamp_normalization_filter
+  -> leader_election_configmap_normalization_filter
   -> high_churn_field_filter
   -> change_discard_filter
 ```
@@ -132,11 +134,15 @@ Default ignored or normalized fields:
 ```text
 metadata.resourceVersion
 metadata.managedFields
+status.conditions[*].lastHeartbeatTime
+status.conditions[*].lastTransitionTime
+metadata.annotations["control-plane.alpha.kubernetes.io/leader"] on ConfigMaps
 metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"]
 ```
 
 Do not blindly drop status. Status contains most incident evidence. Instead,
-extract useful status facts and let storage compression handle the retained JSON.
+extract useful status facts and normalize timestamp-only condition churn so the
+retained document hash tracks state changes rather than heartbeat updates.
 
 ### Change Discard Filters
 
@@ -159,7 +165,7 @@ observation continues to storage.
 
 The global watcher provides coverage, but some resources need specialized
 processing profiles for performance and signal quality. A profile can choose a
-filter chain, extractor set, retention class, compaction strategy, and queue
+filter chain, extractor set, retention policy, compaction strategy, and queue
 priority for one GVR.
 
 Default rule:

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/ingest"
 	"kube-insight/internal/kubeapi"
 	"kube-insight/internal/storage"
 
@@ -72,7 +73,7 @@ func RunFakeWatchReconciliation(ctx context.Context, opts FakeWatchReconciliatio
 		}
 		list := &unstructured.UnstructuredList{Items: tc.current}
 		list.SetResourceVersion(fmt.Sprintf("fake-%d", i+1))
-		reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.Context, info, opts.Namespace, list.GetResourceVersion(), tc.previous, list)
+		reconciled, err := reconcileDeletedFromList(ctx, opts.Store, opts.Context, info, opts.Namespace, list.GetResourceVersion(), tc.previous, list, nil, ingest.FilterChains{}, nil, nil)
 		summary := WatchSummary{
 			Context:           opts.Context,
 			ClusterID:         opts.Context,
@@ -107,7 +108,7 @@ func RunFakeWatchReconciliation(ctx context.Context, opts FakeWatchReconciliatio
 		out.Stored += summary.Stored
 		out.Ingest = addIngest(out.Ingest, summary.Ingest)
 	}
-	out.ResourceQueue = resourceQueueMetrics(out.Workers, out.Concurrency)
+	out.ResourceQueue = resourceQueueMetrics(out.Workers, out.Concurrency, nil)
 	for _, metric := range out.ResourceQueue {
 		out.QueueWaitMS += metric.QueueWaitMS
 		if metric.Queued {

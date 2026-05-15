@@ -21,11 +21,24 @@ curl http://127.0.0.1:8080/api/v1/health
 curl 'http://127.0.0.1:8080/api/v1/history?kind=Pod&namespace=default&name=api-1&maxVersions=5&maxObservations=20'
 ```
 
+`schema` returns more than raw columns:
+
+- `tables`: tables/views, descriptions, columns, and indexes,
+- `relationships`: stable join hints such as latest object -> kind, object ->
+  versions/blobs, edge source/target, and collector health,
+- `recipes`: small read-only SQL templates agents can adapt instead of calling
+  scenario-specific tools,
+- `notes`: global rules such as timestamp format and proof/index guidance.
+
 All timestamps are Unix milliseconds. The examples below intentionally use
 tables that are stable across SQLite, Postgres, and Cockroach-oriented designs:
-`clusters`, `api_resources`, `object_kinds`, `objects`, `latest_index`,
-`object_facts`, `object_changes`, `object_edges`, `versions`,
-`object_observations`, and `blobs`.
+`clusters`, `api_resources`, `object_kinds`, `objects`, `latest_raw_index`,
+`latest_raw_documents`, `latest_index`, `latest_documents`, `object_facts`,
+`object_changes`, `object_edges`, `versions`, `object_observations`, and
+`blobs`.
+
+Use `latest_raw_documents` for the latest observed sanitized cluster snapshot.
+Use `latest_documents` for the latest retained/normalized proof document.
 
 ## Coverage First
 
@@ -49,6 +62,11 @@ where coalesce(io.status, 'not_started') in ('not_started', 'retrying', 'list_er
 order by status, ar.api_group, ar.resource
 limit 50;
 ```
+
+Treat `queued` as healthy progress: the resource completed its initial LIST and
+is waiting for a watch stream slot. Treat `retrying` as degraded coverage: the
+resource has listed/watched before, but the stream is reconnecting and may lag
+until a bookmark or watch event lands.
 
 ## Webhook Broke GitOps
 

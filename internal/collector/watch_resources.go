@@ -47,14 +47,21 @@ func runInitialListPhase(ctx context.Context, opts WatchResourcesOptions, resour
 			}
 			watchLog(opts.Logf, "initial list worker start", "resource", resourceLabel(resource), "queueWaitMs", waitMS)
 			workerSummary, err := WatchResourceInitialListClientGo(ctx, WatchOptions{
-				Context:    opts.Context,
-				ClusterID:  opts.ClusterID,
-				Resource:   resource,
-				Namespace:  opts.Namespace,
-				Store:      opts.Store,
-				Logf:       opts.Logf,
-				Timeout:    remainingTimeout(deadline),
-				MaxRetries: opts.MaxRetries,
+				Context:         opts.Context,
+				ClusterID:       opts.ClusterID,
+				Resource:        resource,
+				Namespace:       opts.Namespace,
+				Store:           opts.Store,
+				Logf:            opts.Logf,
+				Timeout:         remainingTimeout(deadline),
+				MaxRetries:      opts.MaxRetries,
+				Filters:         opts.Filters,
+				FilterChains:    opts.FilterChains,
+				Extractors:      opts.Extractors,
+				DisableHTTP2:    opts.DisableHTTP2,
+				RetryMinBackoff: opts.RetryMinBackoff,
+				RetryMaxBackoff: opts.RetryMaxBackoff,
+				ProfileRules:    opts.ProfileRules,
 			})
 			summary.Workers[i].Summary = &workerSummary
 			if err != nil {
@@ -70,15 +77,39 @@ func runInitialListPhase(ctx context.Context, opts WatchResourcesOptions, resour
 
 func runWatchStreamPhase(ctx context.Context, opts WatchResourcesOptions, deadline time.Time, summary *WatchResourcesSummary) {
 	var wg sync.WaitGroup
+	streamSem := newWatchStreamSemaphore(opts.MaxConcurrentStreams)
+	started := 0
 	for i := range summary.Workers {
 		i := i
 		worker := summary.Workers[i]
 		if worker.Error != "" || worker.Summary == nil {
 			continue
 		}
+		startDelay := time.Duration(started) * opts.StreamStartStagger
+		started++
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			if startDelay > 0 {
+				timer := time.NewTimer(startDelay)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					summary.Workers[i].Error = ctx.Err().Error()
+					return
+				case <-timer.C:
+				}
+			}
+			release, ok := acquireWatchStreamSlot(ctx, streamSem, func() {
+				info := resourceInfo(worker.Resource)
+				_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, worker.Summary.ResourceVersion, storage.OffsetEventList, "queued", "")
+				watchLog(opts.Logf, "watch stream worker queued", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(worker.Summary.ResourceVersion), "maxConcurrentStreams", opts.MaxConcurrentStreams)
+			})
+			if !ok {
+				summary.Workers[i].Error = ctx.Err().Error()
+				return
+			}
+			defer release()
 			resourceVersion := worker.Summary.ResourceVersion
 			watchLog(opts.Logf, "watch stream worker start", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(resourceVersion))
 			streamSummary, err := WatchResourceStreamClientGo(ctx, WatchOptions{
@@ -92,6 +123,13 @@ func runWatchStreamPhase(ctx context.Context, opts WatchResourcesOptions, deadli
 				Timeout:              remainingTimeout(deadline),
 				StartResourceVersion: resourceVersion,
 				MaxRetries:           opts.MaxRetries,
+				Filters:              opts.Filters,
+				FilterChains:         opts.FilterChains,
+				Extractors:           opts.Extractors,
+				DisableHTTP2:         opts.DisableHTTP2,
+				RetryMinBackoff:      opts.RetryMinBackoff,
+				RetryMaxBackoff:      opts.RetryMaxBackoff,
+				ProfileRules:         opts.ProfileRules,
 			})
 			mergeWatchSummary(worker.Summary, streamSummary)
 			if err != nil {
@@ -109,6 +147,7 @@ func WatchResourceInitialListClientGo(ctx context.Context, opts WatchOptions) (W
 	if opts.MaxRetries < 0 {
 		opts.MaxRetries = -1
 	}
+	opts.RetryMinBackoff, opts.RetryMaxBackoff = normalizedBackoff(opts.RetryMinBackoff, opts.RetryMaxBackoff)
 	prepared, err := prepareWatchResourceClientGo(ctx, opts)
 	if err != nil {
 		return WatchSummary{}, err
@@ -144,7 +183,7 @@ func WatchResourceInitialListClientGo(ctx context.Context, opts WatchOptions) (W
 			resourceVersion = summary.ResourceVersion
 			watchLog(opts.Logf, "retry list", "resource", resourceLabel(prepared.Resource), "retries", summary.Retries, "resourceVersion", emptyLabel(resourceVersion), "error", err)
 		}
-		if err := sleepBeforeRetry(ctx, time.Time{}, attempts); err != nil {
+		if err := sleepBeforeRetry(ctx, time.Time{}, attempts, opts.RetryMinBackoff, opts.RetryMaxBackoff); err != nil {
 			return summary, err
 		}
 	}
@@ -154,6 +193,7 @@ func WatchResourceStreamClientGo(ctx context.Context, opts WatchOptions) (WatchS
 	if opts.MaxRetries < 0 {
 		opts.MaxRetries = -1
 	}
+	opts.RetryMinBackoff, opts.RetryMaxBackoff = normalizedBackoff(opts.RetryMinBackoff, opts.RetryMaxBackoff)
 	prepared, err := prepareWatchResourceClientGo(ctx, opts)
 	if err != nil {
 		return WatchSummary{}, err
@@ -209,7 +249,7 @@ func WatchResourceStreamClientGo(ctx context.Context, opts WatchOptions) (WatchS
 			_ = upsertOffset(ctx, opts.Store, prepared.ClusterID, prepared.Info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watch_error", err.Error())
 			watchLog(opts.Logf, "retry watch", "resource", resourceLabel(prepared.Resource), "retries", summary.Retries, "resourceVersion", emptyLabel(summary.ResourceVersion), "error", err)
 		}
-		if err := sleepBeforeRetry(ctx, deadline, attempts); err != nil {
+		if err := sleepBeforeRetry(ctx, deadline, attempts, opts.RetryMinBackoff, opts.RetryMaxBackoff); err != nil {
 			return summary, err
 		}
 	}
@@ -249,7 +289,7 @@ func prepareWatchResourceClientGo(ctx context.Context, opts WatchOptions) (prepa
 		return preparedWatchResource{}, err
 	}
 	watchLog(opts.Logf, "resolved resource", "resource", resourceLabel(resolved), "apiVersion", resourceAPIVersion(resolved), "namespaced", resolved.Namespaced)
-	config, err := watchRestConfig(opts.Context)
+	config, err := watchRestConfig(opts.Context, opts.DisableHTTP2)
 	if err != nil {
 		return preparedWatchResource{}, err
 	}
@@ -323,7 +363,7 @@ func aggregateWatchResourcesSummary(summary *WatchResourcesSummary) {
 		summary.Completed++
 		addWatchSummaryTotals(summary, *worker.Summary)
 	}
-	summary.ResourceQueue = resourceQueueMetrics(summary.Workers, summary.Concurrency)
+	summary.ResourceQueue = resourceQueueMetrics(summary.Workers, summary.Concurrency, summary.ProfileRules)
 }
 
 func addWatchSummaryTotals(summary *WatchResourcesSummary, worker WatchSummary) {

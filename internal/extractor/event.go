@@ -22,6 +22,8 @@ func (EventExtractor) Extract(ctx context.Context, obs core.Observation) (Eviden
 	}
 	if message, ok := stringAt(obs.Object, "message"); ok {
 		out.Facts = append(out.Facts, fact(obs, "k8s_event.message_fingerprint", fingerprint(message), 20))
+	} else if note, ok := stringAt(obs.Object, "note"); ok {
+		out.Facts = append(out.Facts, fact(obs, "k8s_event.message_fingerprint", fingerprint(note), 20))
 	}
 	if count, ok := numericAt(obs.Object, "count"); ok {
 		value := strconv.FormatFloat(count, 'f', -1, 64)

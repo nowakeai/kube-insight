@@ -188,9 +188,19 @@ Current PoC implementation:
   every selected GVR first, then long-running WATCH streams from each list
   resourceVersion. This prevents early long-lived watch streams from blocking
   coverage of later resources.
+- Watch streams are started in profile-priority order and staggered by default.
+  `collection.watch.maxConcurrentStreams` caps active long-lived WATCH streams;
+  resources beyond the cap wait after their initial LIST has recorded coverage.
+  The watch client keeps Kubernetes' normal HTTP/2 behavior unless
+  `collection.watch.disableHttp2` is explicitly enabled for a problematic
+  proxy. Reconnects use exponential backoff with jitter to avoid amplifying
+  stream resets on clusters with many CRDs or aggregated APIs.
 - Multiple GVR workers record per-resource health, queue, retry, and error
-  summaries. Transient watch stream disconnects are recorded as `retrying`;
-  terminal failures are recorded as `watch_error` or `list_error`.
+  summaries. Resources that completed initial LIST but are waiting for
+  `collection.watch.maxConcurrentStreams` capacity are recorded as `queued`.
+  Transient watch stream disconnects are recorded as `retrying`; `retrying`
+  streams count as unstable rather than healthy. Terminal failures are recorded
+  as `watch_error` or `list_error`.
 - `kube-insight db resources health` reports each GVR's last list/watch/bookmark
   time, current status, last error, resourceVersion, latest object count, and
   stale state.
@@ -313,7 +323,15 @@ configmaps policy:
   store by default, allow path/name-based exclusion
 
 metadata normalization:
-  omit by default unless compliance mode is enabled
+  remove managedFields and redundant resourceVersion before hashing
+
+condition timestamp normalization:
+  keep status/reason/message, remove condition heartbeat and transition
+  timestamps before hashing
+
+leader-election ConfigMap normalization:
+  remove legacy control-plane.alpha.kubernetes.io/leader annotations before
+  hashing
 
 change discard:
   drop unchanged or explicitly ignored changes, but never drop deletes

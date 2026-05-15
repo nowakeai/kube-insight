@@ -3,8 +3,10 @@ package collector
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -230,8 +232,15 @@ func restConfig(kubeContext string) (*rest.Config, error) {
 	return restConfigWithTimeout(kubeContext, 20*time.Second)
 }
 
-func watchRestConfig(kubeContext string) (*rest.Config, error) {
-	return restConfigWithTimeout(kubeContext, 0)
+func watchRestConfig(kubeContext string, disableHTTP2 bool) (*rest.Config, error) {
+	config, err := restConfigWithTimeout(kubeContext, 0)
+	if err != nil {
+		return nil, err
+	}
+	if disableHTTP2 {
+		config.WrapTransport = disableHTTP2Transport
+	}
+	return config, nil
 }
 
 func restConfigWithTimeout(kubeContext string, timeout time.Duration) (*rest.Config, error) {
@@ -248,6 +257,23 @@ func restConfigWithTimeout(kubeContext string, timeout time.Duration) (*rest.Con
 	config.Burst = 40
 	config.Timeout = timeout
 	return config, nil
+}
+
+func disableHTTP2Transport(rt http.RoundTripper) http.RoundTripper {
+	transport, ok := rt.(*http.Transport)
+	if !ok {
+		return rt
+	}
+	clone := transport.Clone()
+	clone.ForceAttemptHTTP2 = false
+	if clone.TLSClientConfig == nil {
+		clone.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
+	} else {
+		clone.TLSClientConfig = clone.TLSClientConfig.Clone()
+		clone.TLSClientConfig.NextProtos = []string{"http/1.1"}
+	}
+	clone.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	return clone
 }
 
 func loadClientConfig() (*clientcmdapi.Config, error) {

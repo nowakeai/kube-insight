@@ -44,6 +44,10 @@ operational notes, and design details in `docs/`.
 
 ## Dependency Preferences
 
+- Prefer current stable versions of tools, GitHub Actions, Go modules, and
+  libraries when they fit the project. Before adding or touching a dependency,
+  check whether a newer compatible version exists instead of copying an older
+  version from memory or stale examples.
 - Kubernetes access: prefer `client-go`.
 - CLI: use Cobra/pflag patterns already in the repo.
 - Logs/TUI styling: stay compatible with the Charm ecosystem.
@@ -67,3 +71,7 @@ Also check the 800-line rule:
 ```bash
 find cmd internal -name '*.go' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800 {print}'
 ```
+
+After publishing a release, review the GitHub release page. Confirm release
+notes, assets, checksums, package/image links, and install instructions render
+correctly before handing off.

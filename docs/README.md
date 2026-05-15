@@ -32,7 +32,7 @@ Read these in order:
 12. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
 13. [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
 14. [Configuration](configuration/configuration.md)
-15. [Development Commands](development/commands.md)
+15. [Development Commands](dev/commands.md)
 16. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
 17. [Security, Privacy, And Retention](security/security-retention.md)
 18. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
@@ -52,7 +52,7 @@ Read these in order:
 | `architecture/` | System-level components, deployment shape, and technology stack. |
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
-| `development/` | Development commands and local verification workflow. |
+| `dev/` | Development commands and local verification workflow. |
 | `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |

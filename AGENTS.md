@@ -12,7 +12,7 @@ operational notes, and design details in `docs/`.
 - Data model and schema intent: `docs/data/data-model.md`
 - Storage efficiency plan: `docs/data/efficient-history-storage-v2.md`
 - Agent SQL usage: `docs/workflows/agent-sql-cookbook.md`
-- Development commands: `docs/development/commands.md`
+- Development commands: `docs/dev/commands.md`
 
 ## Non-Negotiable Design Rules
 

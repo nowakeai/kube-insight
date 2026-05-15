@@ -466,11 +466,16 @@ Mirror Kubernetes Events into `object_facts`:
 - type
 - involved object
 - message fingerprint
+- bounded message preview
+- action
+- reporting controller and instance
 - count
+- series count
 - first/last timestamp
 
-Keep enough message data to search, but avoid unbounded cardinality from raw
-messages.
+Keep enough message data to search quickly, but avoid indexing unbounded raw
+messages. Use `k8s_event.message_preview` for triage and retained JSON for full
+proof text.
 
 ## Change Summary Extraction
 

@@ -171,10 +171,12 @@ func TestEventExtractorFingerprintsMessage(t *testing.T) {
 		ObservedAt: time.Unix(10, 0),
 		Ref:        core.ResourceRef{ClusterID: "c1", Resource: "events", Kind: "Event", Name: "event-a", UID: "event-uid"},
 		Object: map[string]any{
-			"reason":  "BackOff",
-			"type":    "Warning",
-			"message": "Back-off restarting failed container app",
-			"count":   3,
+			"reason":              "BackOff",
+			"type":                "Warning",
+			"message":             "Back-off restarting failed container app",
+			"count":               3,
+			"reportingController": "kubelet",
+			"reportingInstance":   "node-a",
 		},
 	}
 
@@ -182,8 +184,55 @@ func TestEventExtractorFingerprintsMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(evidence.Facts) != 4 {
-		t.Fatalf("facts = %d, want 4", len(evidence.Facts))
+	for _, want := range []struct {
+		key   string
+		value string
+	}{
+		{"k8s_event.message_preview", "Back-off restarting failed container app"},
+		{"k8s_event.reporting_controller", "kubelet"},
+		{"k8s_event.reporting_instance", "node-a"},
+	} {
+		if !hasFact(evidence.Facts, want.key, want.value) {
+			t.Fatalf("missing fact %s=%s in %#v", want.key, want.value, evidence.Facts)
+		}
+	}
+}
+
+func TestEventExtractorCapturesEventsV1Fields(t *testing.T) {
+	obs := core.Observation{
+		ObservedAt: time.Unix(10, 0),
+		Ref:        core.ResourceRef{ClusterID: "c1", Resource: "events", Kind: "Event", Name: "event-a", UID: "event-uid"},
+		Object: map[string]any{
+			"reason":              "PolicyViolation",
+			"type":                "Warning",
+			"note":                "admission denied by validating-node-p4sa-audience",
+			"action":              "ValidatingAdmissionPolicyDenied",
+			"reportingController": "validatingadmissionpolicy",
+			"series": map[string]any{
+				"count": 7,
+			},
+		},
+	}
+
+	evidence, err := EventExtractor{}.Extract(context.Background(), obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		key   string
+		value string
+	}{
+		{"k8s_event.message_preview", "admission denied by validating-node-p4sa-audience"},
+		{"k8s_event.action", "ValidatingAdmissionPolicyDenied"},
+		{"k8s_event.reporting_controller", "validatingadmissionpolicy"},
+		{"k8s_event.series_count", "7"},
+	} {
+		if !hasFact(evidence.Facts, want.key, want.value) {
+			t.Fatalf("missing fact %s=%s in %#v", want.key, want.value, evidence.Facts)
+		}
+	}
+	if !hasChange(evidence.Changes, "series.count", "7") {
+		t.Fatalf("series count change missing: %#v", evidence.Changes)
 	}
 }
 

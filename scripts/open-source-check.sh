@@ -14,6 +14,8 @@ required_files=(
   CODE_OF_CONDUCT.md
   RELEASE.md
   Dockerfile
+  docker/chdb.Dockerfile
+  .dockerignore
   .goreleaser.yaml
   .github/dependabot.yml
   .github/pull_request_template.md

@@ -134,7 +134,7 @@ Purpose:
 ### Single-Cluster Service
 
 ```text
-in-cluster collector + PostgreSQL/TimescaleDB + API + UI
+in-cluster collector + ClickHouse evidence backend + API + UI
 ```
 
 Purpose:

@@ -99,6 +99,7 @@ type configValidationSummary struct {
 	LogFormat     string   `json:"logFormat"`
 	Storage       string   `json:"storage"`
 	SQLitePath    string   `json:"sqlitePath,omitempty"`
+	ChDBPath      string   `json:"chdbPath,omitempty"`
 	Maintenance   bool     `json:"maintenance"`
 	MaintEvery    int      `json:"maintenanceIntervalSeconds"`
 	Retention     bool     `json:"retention"`
@@ -134,6 +135,7 @@ func configValidationSummaryFromRuntime(rt runtimeSettings) configValidationSumm
 		LogFormat:     rt.Config.Logging.Format,
 		Storage:       rt.Config.Storage.Driver,
 		SQLitePath:    rt.Config.Storage.SQLite.Path,
+		ChDBPath:      rt.Config.Storage.ChDB.Path,
 		Maintenance:   rt.Config.Storage.Maintenance.Enabled,
 		MaintEvery:    rt.Config.Storage.Maintenance.IntervalSeconds,
 		Retention:     rt.Config.Storage.Retention.Enabled,
@@ -164,6 +166,7 @@ func writeConfigValidationTable(stdout io.Writer, out configValidationSummary) e
 		{"logging", out.LogLevel + "/" + out.LogFormat},
 		{"storage", out.Storage},
 		{"sqlite", out.SQLitePath},
+		{"chdb", out.ChDBPath},
 		{"maintenance", fmt.Sprintf("%s every %ds", boolText(out.Maintenance), out.MaintEvery)},
 		{"retention", boolText(out.Retention)},
 		{"collection", boolText(out.Collection)},

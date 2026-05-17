@@ -1,0 +1,24 @@
+version: v1alpha1
+
+storage:
+  driver: clickhouse
+  clickhouse:
+    initOnStart: true
+    dsnEnv: KUBE_INSIGHT_CLICKHOUSE_DSN
+    database: kube_insight
+    # Local Docker ClickHouse does not define hot/cold volumes by default.
+    # Set coldVolume and coldAfterSeconds only after configuring a storage policy.
+    hotVolume: ""
+    coldVolume: ""
+    coldAfterSeconds: 0
+    useJsonType: false
+    asyncInsert: true
+    batchSize: 1000
+    flushIntervalMillis: 1000
+
+collection:
+  watch:
+    # Local ClickHouse profiling often discovers more than the production-safe
+    # default stream cap. Raise this only for dev/profile runs so full-resource
+    # watcher health reflects live watch coverage instead of queued streams.
+    maxConcurrentStreams: 256

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"kube-insight/internal/storage"
 	"sort"
 	"strings"
 	"time"
@@ -9,43 +10,11 @@ import (
 	"kube-insight/internal/logging"
 )
 
-type EvidenceSearchOptions struct {
-	Query                string        `json:"query,omitempty"`
-	ClusterID            string        `json:"clusterId,omitempty"`
-	Kind                 string        `json:"kind,omitempty"`
-	Namespace            string        `json:"namespace,omitempty"`
-	From                 time.Time     `json:"from,omitempty"`
-	To                   time.Time     `json:"to,omitempty"`
-	Limit                int           `json:"limit,omitempty"`
-	MaxVersionsPerObject int           `json:"maxVersionsPerObject,omitempty"`
-	IncludeBundles       bool          `json:"includeBundles,omitempty"`
-	IncludeHealth        bool          `json:"includeHealth,omitempty"`
-	HealthStaleAfter     time.Duration `json:"-"`
-}
-
-type EvidenceSearchResult struct {
-	Input    EvidenceSearchOptions   `json:"input"`
-	Matches  []EvidenceSearchMatch   `json:"matches"`
-	Bundles  []EvidenceBundle        `json:"bundles,omitempty"`
-	Summary  EvidenceSearchSummary   `json:"summary"`
-	Coverage *EvidenceSearchCoverage `json:"coverage,omitempty"`
-}
-
-type EvidenceSearchMatch struct {
-	Object  ObjectRecord `json:"object"`
-	Score   int          `json:"score"`
-	Reasons []string     `json:"reasons"`
-}
-
-type EvidenceSearchSummary struct {
-	Matches int `json:"matches"`
-	Bundles int `json:"bundles"`
-}
-
-type EvidenceSearchCoverage struct {
-	Summary  ResourceHealthSummary `json:"summary"`
-	ByStatus map[string]int        `json:"byStatus,omitempty"`
-}
+type EvidenceSearchOptions = storage.EvidenceSearchOptions
+type EvidenceSearchResult = storage.EvidenceSearchResult
+type EvidenceSearchMatch = storage.EvidenceSearchMatch
+type EvidenceSearchSummary = storage.EvidenceSearchSummary
+type EvidenceSearchCoverage = storage.EvidenceSearchCoverage
 
 type evidenceSearchHit struct {
 	objectID int64

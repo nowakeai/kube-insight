@@ -1,0 +1,34 @@
+<clickhouse>
+    <!--
+      Local development only. Keep ClickHouse's own diagnostic tables from
+      dominating the dev volume while leaving kube_insight business tables
+      under product-level retention policy.
+    -->
+    <query_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </query_log>
+    <text_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </text_log>
+    <trace_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </trace_log>
+    <part_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </part_log>
+    <metric_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </metric_log>
+    <asynchronous_metric_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </asynchronous_metric_log>
+    <latency_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </latency_log>
+    <processors_profile_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </processors_profile_log>
+    <asynchronous_insert_log>
+        <ttl>event_date + INTERVAL 1 DAY DELETE</ttl>
+    </asynchronous_insert_log>
+</clickhouse>

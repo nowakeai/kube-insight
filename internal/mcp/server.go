@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
 
@@ -316,7 +317,7 @@ func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
 }
 
 func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, error) {
-	opts := sqlite.ResourceHealthOptions{
+	opts := storage.ResourceHealthOptions{
 		ClusterID:        args.ClusterID,
 		Status:           args.Status,
 		ErrorsOnly:       args.ErrorsOnly,

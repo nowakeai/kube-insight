@@ -34,14 +34,29 @@ func ingestCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobr
 			if (file == "") == (dir == "") {
 				return fmt.Errorf("ingest requires exactly one of --file or --dir")
 			}
-			store := storage.Store(storage.NewMemoryStore())
-			if dbPath := optionalDBPath(cmd, state, rt); dbPath != "" {
-				sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
+			var store storage.Store = storage.NewMemoryStore()
+			switch storageDriver(rt.Config) {
+			case "clickhouse":
+				store, err = newClickHouseStore(runCtx, rt.Config)
 				if err != nil {
 					return err
 				}
-				defer sqliteStore.Close()
-				store = sqliteStore
+			case "chdb":
+				store, err = newChDBStore(runCtx, rt.Config)
+				if err != nil {
+					return err
+				}
+			case "sqlite":
+				if dbPath := optionalDBPath(cmd, state, rt); dbPath != "" {
+					sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
+					if err != nil {
+						return err
+					}
+					defer sqliteStore.Close()
+					store = sqliteStore
+				}
+			default:
+				return fmt.Errorf("ingest does not support storage.driver %q", rt.Config.Storage.Driver)
 			}
 			summary, err := ingestInputs(runCtx, store, file, dir, rt.Config)
 			if err != nil {
@@ -116,9 +131,13 @@ func collectIngestCommand(ctx context.Context, stdout io.Writer, state *cliState
 			if err != nil {
 				return err
 			}
-			dbPath, err := requiredDBPath(cmd, state, rt, "collect ingest")
-			if err != nil {
-				return err
+			dbPath := ""
+			if storageDriver(rt.Config) != "clickhouse" {
+				var pathErr error
+				dbPath, pathErr = requiredDBPath(cmd, state, rt, "collect ingest")
+				if pathErr != nil {
+					return pathErr
+				}
 			}
 			opts, _, err := buildSampleOptions(runCtx, cmd, state, rt, flags)
 			if err != nil {
@@ -127,11 +146,28 @@ func collectIngestCommand(ctx context.Context, stdout io.Writer, state *cliState
 			if opts.OutputDir == "" {
 				opts.OutputDir = "testdata/generated/collect-ingest"
 			}
-			sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
-			if err != nil {
-				return err
+			var store storage.Store
+			switch storageDriver(rt.Config) {
+			case "clickhouse":
+				store, err = newClickHouseStore(runCtx, rt.Config)
+				if err != nil {
+					return err
+				}
+			case "chdb":
+				store, err = newChDBStore(runCtx, rt.Config)
+				if err != nil {
+					return err
+				}
+			case "sqlite":
+				sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
+				if err != nil {
+					return err
+				}
+				defer sqliteStore.Close()
+				store = sqliteStore
+			default:
+				return fmt.Errorf("collect ingest does not support storage.driver %q", rt.Config.Storage.Driver)
 			}
-			defer sqliteStore.Close()
 
 			var manifest collector.SampleManifest
 			err = withKubeconfig(rt.Kubeconfig, func() error {
@@ -142,7 +178,7 @@ func collectIngestCommand(ctx context.Context, stdout io.Writer, state *cliState
 			if err != nil {
 				return err
 			}
-			summary, err := ingestInputs(runCtx, sqliteStore, "", opts.OutputDir, rt.Config)
+			summary, err := ingestInputs(runCtx, store, "", opts.OutputDir, rt.Config)
 			if err != nil {
 				return err
 			}

@@ -5,8 +5,8 @@
 <p align="center">
   <a href="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml/badge.svg"></a>
   <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.26-00ADD8"></a>
-  <img alt="Storage" src="https://img.shields.io/badge/storage-SQLite%20PoC-64748b">
-  <img alt="MVP storage" src="https://img.shields.io/badge/MVP%20storage-Postgres%20%2B%20Cockroach-2563eb">
+  <img alt="Default storage" src="https://img.shields.io/badge/default%20storage-SQLite-64748b">
+  <img alt="MVP central storage" src="https://img.shields.io/badge/MVP%20central%20storage-ClickHouse-2563eb">
   <img alt="Agent ready" src="https://img.shields.io/badge/MCP-agent%20ready-16a34a">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
@@ -75,8 +75,9 @@ database and check collector health before trusting the result.
 | Topology edges | Workload, Service, EndpointSlice, Event, RBAC, cert-manager, and webhook relationships. |
 | Faster agent workflows | SQL recipes, MCP tools, and prompts over pre-extracted evidence instead of repeated live `kubectl` joins. |
 | Safer agent access | Filters run before hashing and storage; destructive filters write audit decisions; read surfaces are designed for read-only, authz-aware service access. |
-| Local PoC mode | One binary, SQLite storage, CLI, HTTP API, and MCP surfaces. |
-| MVP storage path | PostgreSQL for central deployments, with CockroachDB for distributed metadata/query use cases. |
+| Default local mode | One pure-Go binary with SQLite storage, CLI, HTTP API, and MCP surfaces. |
+| Optional local chDB mode | A separate chDB-enabled artifact can use embedded ClickHouse-compatible local storage when `libchdb.so` is installed. |
+| MVP central storage path | ClickHouse for append-heavy evidence history, compression, read-side investigation queries, and cold-tiering experiments. |
 
 ## How It Works
 
@@ -93,11 +94,11 @@ flowchart LR
     E["Evidence extraction<br/>facts, edges, changes"]
   end
 
-  subgraph Store["SQLite PoC / Postgres + Cockroach MVP evidence store"]
+  subgraph Store["SQLite default / ClickHouse MVP evidence store"]
     F["versions"]
-    G["object_facts"]
-    H["object_edges"]
-    I["object_observations"]
+    G["facts"]
+    H["edges"]
+    I["observations"]
   end
 
   subgraph Query["Read surfaces"]
@@ -253,11 +254,14 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Release Status
 
-kube-insight is currently released as a local-first PoC with SQLite. The MVP
-storage target is PostgreSQL for central service deployments, with CockroachDB
-planned for distributed metadata and query deployments. Storage semantics stay
-above the backend so SQLite, PostgreSQL, and CockroachDB can share the same
-product behavior.
+kube-insight is currently released as a local-first tool with a small pure-Go
+SQLite default artifact. The MVP central evidence backend targets ClickHouse for
+append-heavy history, compression, read-side investigation queries, and cold
+object-storage tiering experiments. A separate chDB-enabled artifact provides
+embedded ClickHouse-compatible local storage; it still supports SQLite but
+requires the bundled or otherwise compatible `libchdb.so` runtime. PostgreSQL
+and CockroachDB remain possible future metadata/control-plane backends, not the
+MVP evidence store.
 
 ## Development
 

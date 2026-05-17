@@ -19,20 +19,99 @@ builds:
     goarch:
       - amd64
       - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+  - id: kube-insight-chdb-linux-amd64
+    main: ./cmd/kube-insight
+    binary: kube-insight
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - chdb
+    goos:
+      - linux
+    goarch:
+      - amd64
+  - id: kube-insight-chdb-linux-arm64
+    main: ./cmd/kube-insight
+    binary: kube-insight
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - chdb
+    goos:
+      - linux
+    goarch:
+      - arm64
+  - id: kube-insight-chdb-darwin-amd64
+    main: ./cmd/kube-insight
+    binary: kube-insight
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - chdb
+    goos:
+      - darwin
+    goarch:
+      - amd64
+  - id: kube-insight-chdb-darwin-arm64
+    main: ./cmd/kube-insight
+    binary: kube-insight
+    env:
+      - CGO_ENABLED=0
+    tags:
+      - chdb
+    goos:
+      - darwin
+    goarch:
+      - arm64
 
 archives:
   - id: kube-insight
-    builds:
+    ids:
       - kube-insight
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- .Version }}_
-      {{- .Os }}_
-      {{- .Arch }}
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
-
+        formats:
+          - zip
+  - id: kube-insight-chdb-linux-amd64
+    ids:
+      - kube-insight-chdb-linux-amd64
+    name_template: "{{ .ProjectName }}_{{ .Version }}_chdb_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: build/chdb-runtime/linux-amd64/libchdb.so
+        dst: libchdb.so
+      - src: config/kube-insight.chdb.example.yaml
+        dst: config/kube-insight.chdb.example.yaml
+  - id: kube-insight-chdb-linux-arm64
+    ids:
+      - kube-insight-chdb-linux-arm64
+    name_template: "{{ .ProjectName }}_{{ .Version }}_chdb_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: build/chdb-runtime/linux-arm64/libchdb.so
+        dst: libchdb.so
+      - src: config/kube-insight.chdb.example.yaml
+        dst: config/kube-insight.chdb.example.yaml
+  - id: kube-insight-chdb-darwin-amd64
+    ids:
+      - kube-insight-chdb-darwin-amd64
+    name_template: "{{ .ProjectName }}_{{ .Version }}_chdb_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: build/chdb-runtime/darwin-amd64/libchdb.so
+        dst: libchdb.so
+      - src: config/kube-insight.chdb.example.yaml
+        dst: config/kube-insight.chdb.example.yaml
+  - id: kube-insight-chdb-darwin-arm64
+    ids:
+      - kube-insight-chdb-darwin-arm64
+    name_template: "{{ .ProjectName }}_{{ .Version }}_chdb_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: build/chdb-runtime/darwin-arm64/libchdb.so
+        dst: libchdb.so
+      - src: config/kube-insight.chdb.example.yaml
+        dst: config/kube-insight.chdb.example.yaml
 checksum:
   name_template: checksums.txt
 
@@ -46,36 +125,38 @@ changelog:
       - "^docs:"
       - "^test:"
 
-dockers:
-  - image_templates:
-      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-amd64
-      - ghcr.io/nowakeai/kube-insight:latest-amd64
-    dockerfile: Dockerfile
-    use: buildx
-    goos: linux
-    goarch: amd64
+dockers_v2:
+  - id: kube-insight
     ids:
       - kube-insight
-    build_flag_templates:
-      - --platform=linux/amd64
-  - image_templates:
-      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-arm64
-      - ghcr.io/nowakeai/kube-insight:latest-arm64
     dockerfile: Dockerfile
-    use: buildx
-    goos: linux
-    goarch: arm64
+    images:
+      - ghcr.io/nowakeai/kube-insight
+    tags:
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.source: https://github.com/nowakeai/kube-insight
+      org.opencontainers.image.description: Kubernetes investigation data collector and API
+  - id: kube-insight-chdb
     ids:
-      - kube-insight
-    build_flag_templates:
-      - --platform=linux/arm64
-
-docker_manifests:
-  - name_template: ghcr.io/nowakeai/kube-insight:{{ .Tag }}
-    image_templates:
-      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-amd64
-      - ghcr.io/nowakeai/kube-insight:{{ .Tag }}-arm64
-  - name_template: ghcr.io/nowakeai/kube-insight:latest
-    image_templates:
-      - ghcr.io/nowakeai/kube-insight:latest-amd64
-      - ghcr.io/nowakeai/kube-insight:latest-arm64
+      - kube-insight-chdb-linux-amd64
+      - kube-insight-chdb-linux-arm64
+    dockerfile: docker/chdb.Dockerfile
+    images:
+      - ghcr.io/nowakeai/kube-insight
+    tags:
+      - "{{ .Tag }}-chdb"
+      - latest-chdb
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    extra_files:
+      - build/chdb-runtime/libchdb-linux-amd64.so
+      - build/chdb-runtime/libchdb-linux-arm64.so
+    labels:
+      org.opencontainers.image.source: https://github.com/nowakeai/kube-insight
+      org.opencontainers.image.description: Kubernetes investigation data collector and API with bundled chDB runtime

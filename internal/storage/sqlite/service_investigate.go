@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"kube-insight/internal/storage"
 	"sort"
 	"strings"
 	"time"
@@ -14,32 +15,9 @@ import (
 	"kube-insight/internal/logging"
 )
 
-type ServiceInvestigation struct {
-	Service  EvidenceBundle              `json:"service"`
-	Objects  []EvidenceBundle            `json:"objects"`
-	Topology []TopologyEdge              `json:"topology"`
-	Summary  ServiceInvestigationSummary `json:"summary"`
-}
-
-type ServiceInvestigationSummary struct {
-	Objects        int `json:"objects"`
-	EndpointSlices int `json:"endpointSlices"`
-	Pods           int `json:"pods"`
-	Nodes          int `json:"nodes"`
-	Events         int `json:"events"`
-	Facts          int `json:"facts"`
-	Changes        int `json:"changes"`
-	Edges          int `json:"edges"`
-	Versions       int `json:"versions"`
-	VersionDiffs   int `json:"versionDiffs"`
-}
-
-type InvestigationOptions struct {
-	From                 time.Time
-	To                   time.Time
-	MaxEvidenceObjects   int
-	MaxVersionsPerObject int
-}
+type ServiceInvestigation = storage.ServiceInvestigation
+type ServiceInvestigationSummary = storage.ServiceInvestigationSummary
+type InvestigationOptions = storage.InvestigationOptions
 
 func (s *Store) InvestigateService(ctx context.Context, target ObjectTarget) (ServiceInvestigation, error) {
 	return s.InvestigateServiceWithOptions(ctx, target, InvestigationOptions{})

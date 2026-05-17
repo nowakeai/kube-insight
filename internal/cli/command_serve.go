@@ -15,6 +15,7 @@ import (
 	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/mcp"
 	"kube-insight/internal/metrics"
+	"kube-insight/internal/storage/clickhouse"
 
 	"github.com/spf13/cobra"
 )
@@ -111,7 +112,8 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		return err
 	}
 	dbPath := dbCommandPath(cmd, state, rt)
-	logger.Info("serving", "db", dbPath, "watch", selection.Watch, "api", selection.API, "mcp", selection.MCP, "webui", selection.WebUI, "metrics", selection.Metrics)
+	storageTarget := serviceStorageTarget(rt.Config, dbPath)
+	logger.Info("serving", "db", storageTarget, "watch", selection.Watch, "api", selection.API, "mcp", selection.MCP, "webui", selection.WebUI, "metrics", selection.Metrics)
 
 	serviceCtx, cancel := context.WithCancel(runCtx)
 	defer cancel()
@@ -133,7 +135,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		logger.Info("serving api", "listen", addr)
 		services = append(services, serveStatusRow{"api", "serving", "http://" + addr})
 		start("api", func() error {
-			return api.ListenAndServe(serviceCtx, addr, api.ServerOptions{DBPath: dbPath})
+			return api.ListenAndServe(serviceCtx, addr, apiServerOptions(rt.Config, dbPath))
 		})
 	}
 	if selection.MCP {
@@ -157,7 +159,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		logger.Info("serving metrics", "listen", addr)
 		services = append(services, serveStatusRow{"metrics", "serving", "http://" + addr + "/metrics"})
 		start("metrics", func() error {
-			return metrics.ListenAndServe(serviceCtx, addr, metrics.ServerOptions{DBPath: dbPath})
+			return metrics.ListenAndServe(serviceCtx, addr, metricsServerOptions(rt.Config, dbPath))
 		})
 	}
 	if selection.Watch {
@@ -167,7 +169,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 			return runWatchResourcesCommand(serviceCtx, stdout, stderr, state, cmd, resourceArgs, watchOpts, "serve --watch")
 		})
 	}
-	if err := writeServeStatus(stdout, opts.Output, dbPath, services); err != nil {
+	if err := writeServeStatus(stdout, opts.Output, storageTarget, services); err != nil {
 		return err
 	}
 	go func() {
@@ -205,6 +207,25 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 	out.WebUIListen = firstNonEmpty(opts.WebUIListen, rt.Config.Server.Web.Listen, "127.0.0.1:8081")
 	out.MetricsListen = firstNonEmpty(opts.MetricsListen, rt.Config.Server.Metrics.Listen, "127.0.0.1:9090")
 	return out, out.API || out.MCP || out.WebUI || out.Metrics || out.Watch
+}
+
+func serviceStorageTarget(cfg appconfig.Config, dbPath string) string {
+	switch storageDriver(cfg) {
+	case "clickhouse":
+		database := cfg.Storage.ClickHouse.Database
+		if database == "" {
+			database = "kube_insight"
+		}
+		return "clickhouse:" + database
+	case "chdb":
+		database := cfg.Storage.ChDB.Database
+		if database == "" {
+			database = "kube_insight"
+		}
+		return "chdb:" + database
+	default:
+		return dbPath
+	}
 }
 
 func serveFlagChanged(cmd *cobra.Command) bool {
@@ -338,7 +359,7 @@ func serveAPICommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 			addr := firstNonEmpty(listen, rt.Config.Server.API.Listen, "127.0.0.1:8080")
 			logger.Info("serving api", "listen", addr, "db", dbPath)
 			fmt.Fprintf(stdout, "serving api on http://%s\n", addr)
-			return api.ListenAndServe(runCtx, addr, api.ServerOptions{DBPath: dbPath})
+			return api.ListenAndServe(runCtx, addr, apiServerOptions(rt.Config, dbPath))
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "", "Listen address; defaults to server.api.listen")
@@ -376,4 +397,59 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func metricsServerOptions(cfg appconfig.Config, dbPath string) metrics.ServerOptions {
+	opts := metrics.ServerOptions{DBPath: dbPath, Driver: storageDriver(cfg)}
+	if storageDriver(cfg) == "clickhouse" {
+		ch := cfg.Storage.ClickHouse
+		opts.ClickHouseEndpoint = os.Getenv(ch.DSNEnv)
+		opts.ClickHouseOptions = clickhouse.OptionsFromConfig(ch)
+	}
+	return opts
+}
+
+func apiServerOptions(cfg appconfig.Config, dbPath string) api.ServerOptions {
+	opts := api.ServerOptions{DBPath: dbPath}
+	switch storageDriver(cfg) {
+	case "clickhouse":
+		opts.OpenStore = func(context.Context) (api.ReadStore, error) {
+			return newClickHouseStoreFromConfig(cfg)
+		}
+	case "chdb":
+		var mu sync.Mutex
+		var readStore api.ReadStore
+		opts.KeepStoreOpen = true
+		opts.OpenStore = func(context.Context) (api.ReadStore, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if readStore != nil {
+				return readStore, nil
+			}
+			store, err := newChDBStoreFromConfig(cfg)
+			if err != nil {
+				return nil, err
+			}
+			opened, ok := store.(api.ReadStore)
+			if !ok {
+				if closer, closeOK := store.(interface{ Close() error }); closeOK {
+					_ = closer.Close()
+				}
+				return nil, fmt.Errorf("chdb store does not support API reads")
+			}
+			readStore = opened
+			return readStore, nil
+		}
+		opts.Close = func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			if readStore == nil {
+				return nil
+			}
+			err := readStore.Close()
+			readStore = nil
+			return err
+		}
+	}
+	return opts
 }

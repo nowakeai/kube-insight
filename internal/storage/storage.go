@@ -16,6 +16,10 @@ type Store interface {
 	GetEdges(context.Context, string) ([]core.Edge, error)
 }
 
+type FlushableStore interface {
+	Flush(context.Context) error
+}
+
 type RawLatestStore interface {
 	PutRawLatest(context.Context, core.Observation) error
 }

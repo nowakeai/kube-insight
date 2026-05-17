@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 
 	"github.com/spf13/cobra"
@@ -41,9 +42,9 @@ func queryCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra
 
 func objectQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
 	cmd := &cobra.Command{Use: "object", Short: "Query one object evidence bundle."}
-	var target sqlite.ObjectTarget
+	var target storage.ObjectTarget
 	var from, to string
-	var opts sqlite.InvestigationOptions
+	var opts storage.InvestigationOptions
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		rt, err := loadRuntimeConfig(cmd, state, "", false)
 		if err != nil {
@@ -69,16 +70,16 @@ func objectQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) 
 		if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
 			return fmt.Errorf("--from must be before --to")
 		}
-		dbPath, err := requiredDBPath(cmd, state, rt, "investigate")
-		if err != nil {
-			return err
-		}
-		store, err := sqlite.Open(dbPath)
+		store, err := openCLIReadStore(runCtx, cmd, state, rt, "investigate")
 		if err != nil {
 			return err
 		}
 		defer store.Close()
-		bundle, err := store.InvestigateWithOptions(runCtx, target, opts)
+		investigationStore, ok := store.(storage.ObjectInvestigationStore)
+		if !ok {
+			return fmt.Errorf("%s store does not support object investigation", storageDriver(rt.Config))
+		}
+		bundle, err := investigationStore.InvestigateWithOptions(runCtx, target, opts)
 		if err != nil {
 			return err
 		}
@@ -95,9 +96,9 @@ func objectQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) 
 }
 
 func historyCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
-	var target sqlite.ObjectTarget
+	var target storage.ObjectTarget
 	var from, to string
-	var opts sqlite.ObjectHistoryOptions
+	var opts storage.ObjectHistoryOptions
 	cmd := &cobra.Command{
 		Use:     "history",
 		Aliases: []string{"observations"},
@@ -127,16 +128,16 @@ func historyCommand(ctx context.Context, stdout io.Writer, state *cliState) *cob
 			if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
 				return fmt.Errorf("--from must be before --to")
 			}
-			dbPath, err := requiredDBPath(cmd, state, rt, "query history")
-			if err != nil {
-				return err
-			}
-			store, err := sqlite.OpenReadOnly(dbPath)
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "query history")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			history, err := store.ObjectHistory(runCtx, target, opts)
+			historyStore, ok := store.(storage.ObjectHistoryStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support object history", storageDriver(rt.Config))
+			}
+			history, err := historyStore.ObjectHistory(runCtx, target, opts)
 			if err != nil {
 				return err
 			}
@@ -158,7 +159,7 @@ func historyCommand(ctx context.Context, stdout io.Writer, state *cliState) *cob
 }
 
 func searchEvidenceCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
-	opts := sqlite.EvidenceSearchOptions{
+	opts := storage.EvidenceSearchOptions{
 		IncludeHealth:    true,
 		HealthStaleAfter: 10 * time.Minute,
 	}
@@ -196,16 +197,16 @@ func searchEvidenceCommand(ctx context.Context, stdout io.Writer, state *cliStat
 			if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
 				return fmt.Errorf("--from must be before --to")
 			}
-			dbPath, err := requiredDBPath(cmd, state, rt, "query search")
-			if err != nil {
-				return err
-			}
-			store, err := sqlite.Open(dbPath)
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "query search")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			result, err := store.SearchEvidence(runCtx, opts)
+			searchStore, ok := store.(storage.EvidenceSearchStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support evidence search", storageDriver(rt.Config))
+			}
+			result, err := searchStore.SearchEvidence(runCtx, opts)
 			if err != nil {
 				return err
 			}
@@ -238,12 +239,16 @@ func sqlSchemaCommand(ctx context.Context, stdout io.Writer, state *cliState) *c
 			if err != nil {
 				return err
 			}
-			store, err := sqlite.OpenReadOnly(dbCommandPath(cmd, state, rt))
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "query schema")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			schema, err := store.QuerySchema(runCtx)
+			queryStore, ok := store.(storage.SQLQueryStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support schema queries", storageDriver(rt.Config))
+			}
+			schema, err := queryStore.QuerySchema(runCtx)
 			if err != nil {
 				return err
 			}
@@ -285,12 +290,16 @@ func sqlQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 				}
 				query = string(data)
 			}
-			store, err := sqlite.OpenReadOnly(dbCommandPath(cmd, state, rt))
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "query sql")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			result, err := store.QuerySQL(runCtx, sqlite.SQLQueryOptions{
+			queryStore, ok := store.(storage.SQLQueryStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support SQL queries", storageDriver(rt.Config))
+			}
+			result, err := queryStore.QuerySQL(runCtx, storage.SQLQueryOptions{
 				SQL:     query,
 				MaxRows: maxRows,
 			})
@@ -310,7 +319,7 @@ func sqlQueryCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 	return cmd
 }
 
-func writeSQLQueryTable(stdout io.Writer, result sqlite.SQLQueryResult) error {
+func writeSQLQueryTable(stdout io.Writer, result storage.SQLQueryResult) error {
 	rows := make([][]string, 0, len(result.Rows))
 	for _, row := range result.Rows {
 		values := make([]string, 0, len(result.Columns))
@@ -351,10 +360,10 @@ func sqlCellText(value any) string {
 }
 
 func investigateServiceCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
-	var target sqlite.ObjectTarget
+	var target storage.ObjectTarget
 	target.Kind = "Service"
 	var from, to string
-	var opts sqlite.InvestigationOptions
+	var opts storage.InvestigationOptions
 	cmd := &cobra.Command{
 		Use:   "service NAME",
 		Short: "Investigate a Service and related evidence.",
@@ -390,16 +399,16 @@ func investigateServiceCommand(ctx context.Context, stdout io.Writer, state *cli
 			if !opts.From.IsZero() && !opts.To.IsZero() && opts.From.After(opts.To) {
 				return fmt.Errorf("--from must be before --to")
 			}
-			dbPath, err := requiredDBPath(cmd, state, rt, "investigate service")
-			if err != nil {
-				return err
-			}
-			store, err := sqlite.Open(dbPath)
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "investigate service")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			bundle, err := store.InvestigateServiceWithOptions(runCtx, target, opts)
+			serviceStore, ok := store.(storage.ServiceInvestigationStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support service investigation", storageDriver(rt.Config))
+			}
+			bundle, err := serviceStore.InvestigateServiceWithOptions(runCtx, target, opts)
 			if err != nil {
 				return err
 			}
@@ -416,7 +425,7 @@ func investigateServiceCommand(ctx context.Context, stdout io.Writer, state *cli
 }
 
 func topologyCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
-	var target sqlite.ObjectTarget
+	var target storage.ObjectTarget
 	cmd := &cobra.Command{
 		Use:   "topology",
 		Short: "Query object topology.",
@@ -430,16 +439,16 @@ func topologyCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 				return err
 			}
 			target.Namespace = namespaceForCommand(cmd, state, rt, target.Namespace)
-			dbPath, err := requiredDBPath(cmd, state, rt, "topology")
-			if err != nil {
-				return err
-			}
-			store, err := sqlite.Open(dbPath)
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "topology")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			graph, err := store.Topology(runCtx, target)
+			topologyStore, ok := store.(storage.TopologyStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support topology", storageDriver(rt.Config))
+			}
+			graph, err := topologyStore.Topology(runCtx, target)
 			if err != nil {
 				return err
 			}
@@ -451,4 +460,29 @@ func topologyCommand(ctx context.Context, stdout io.Writer, state *cliState) *co
 	cmd.Flags().StringVar(&target.Kind, "kind", "", "Object kind")
 	cmd.Flags().StringVar(&target.Name, "name", "", "Object name")
 	return cmd
+}
+
+type cliReadStore interface {
+	Close() error
+}
+
+func openCLIReadStore(ctx context.Context, cmd *cobra.Command, state *cliState, rt runtimeSettings, command string) (cliReadStore, error) {
+	switch storageDriver(rt.Config) {
+	case "clickhouse":
+		return newClickHouseStoreFromConfig(rt.Config)
+	case "chdb":
+		store, err := newChDBStoreFromConfig(rt.Config)
+		if err != nil {
+			return nil, err
+		}
+		readStore, ok := store.(cliReadStore)
+		if !ok {
+			return nil, fmt.Errorf("chdb store does not support read close")
+		}
+		return readStore, nil
+	case "sqlite":
+		return sqlite.OpenReadOnly(dbCommandPath(cmd, state, rt))
+	default:
+		return nil, fmt.Errorf("%s does not support storage.driver %q", command, rt.Config.Storage.Driver)
+	}
 }

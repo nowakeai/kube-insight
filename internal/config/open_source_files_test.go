@@ -21,6 +21,8 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 		"SECURITY.md",
 		"RELEASE.md",
 		"Dockerfile",
+		"docker/chdb.Dockerfile",
+		".dockerignore",
 		".github/dependabot.yml",
 		".github/pull_request_template.md",
 		".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -37,7 +39,7 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 	}
 }
 
-func TestGoReleaserPublishesExpectedGHCRImages(t *testing.T) {
+func TestGoReleaserPublishesExpectedArtifactsAndImages(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", ".goreleaser.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -51,10 +53,31 @@ func TestGoReleaserPublishesExpectedGHCRImages(t *testing.T) {
 	}
 	text := string(data)
 	for _, want := range []string{
-		"ghcr.io/nowakeai/kube-insight:{{ .Tag }}",
-		"ghcr.io/nowakeai/kube-insight:latest",
-		"--platform=linux/amd64",
-		"--platform=linux/arm64",
+		"id: kube-insight",
+		"CGO_ENABLED=0",
+		"ignore:",
+		"goos: windows",
+		"goarch: arm64",
+		"id: kube-insight-chdb-linux-amd64",
+		"id: kube-insight-chdb-linux-arm64",
+		"id: kube-insight-chdb-darwin-amd64",
+		"id: kube-insight-chdb-darwin-arm64",
+		"CGO_ENABLED=0",
+		"- chdb",
+		"build/chdb-runtime/linux-amd64/libchdb.so",
+		"build/chdb-runtime/linux-arm64/libchdb.so",
+		"build/chdb-runtime/darwin-amd64/libchdb.so",
+		"build/chdb-runtime/darwin-arm64/libchdb.so",
+		"config/kube-insight.chdb.example.yaml",
+		"dockers_v2:",
+		"ghcr.io/nowakeai/kube-insight",
+		"{{ .Tag }}-chdb",
+		"latest-chdb",
+		"linux/amd64",
+		"linux/arm64",
+		"build/chdb-runtime/libchdb-linux-amd64.so",
+		"build/chdb-runtime/libchdb-linux-arm64.so",
+		"docker/chdb.Dockerfile",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf(".goreleaser.yaml missing %q", want)
@@ -73,6 +96,13 @@ func TestReleaseWorkflowUsesGoReleaserAndGHCR(t *testing.T) {
 		"docker/login-action",
 		"registry: ghcr.io",
 		"packages: write",
+		"CHDB_VERSION",
+		"linux-x86_64-libchdb",
+		"linux-aarch64-libchdb",
+		"macos-x86_64-libchdb",
+		"macos-arm64-libchdb",
+		"build/chdb-runtime/libchdb-linux-amd64.so",
+		"build/chdb-runtime/libchdb-linux-arm64.so",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("release workflow missing %q", want)

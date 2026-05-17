@@ -52,6 +52,21 @@ Runtime configuration is resolved in this order:
 3. Environment variables.
 4. Command-line flags.
 
+## Storage
+
+`storage.driver` selects one active backend. The MVP central evidence backend is
+ClickHouse. The default artifact has no storage-backend suffix, stays small and
+pure Go, and uses SQLite for local single-file runs. A separate chDB-enabled
+artifact can use `storage.driver: chdb` when `libchdb.so` is installed, and it
+still supports the SQLite and ClickHouse drivers. Normal default builds fail at
+runtime with an explicit unavailable-adapter error if `storage.driver: chdb` is
+selected.
+
+Use `storage.driver: clickhouse` with `KUBE_INSIGHT_CLICKHOUSE_DSN` for the
+current compose-backed dev watcher. Use `storage.driver: sqlite` for the default
+local single-file path and compatibility tests. Use `storage.driver: chdb` only
+with the chDB-enabled binary or image.
+
 YAML overlay rules:
 
 - Mapping/object fields are deep-merged.
@@ -567,7 +582,7 @@ edges, changes, and optional summaries. Versions remain proof.
 
 ## Storage
 
-SQLite is the local PoC default:
+SQLite is the default local single-file backend in the default artifact:
 
 ```yaml
 storage:
@@ -576,13 +591,49 @@ storage:
     path: kubeinsight.db
 ```
 
-Postgres and CockroachDB are planned as shared central backends. Application
-role separation is controlled by `instance.role`, not by separate read/write
-DSNs:
+ClickHouse can be selected as the primary append-only evidence backend:
 
 ```yaml
 storage:
-  driver: postgres
-  postgres:
-    dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
+  driver: clickhouse
+  clickhouse:
+    initOnStart: true
+    dsnEnv: KUBE_INSIGHT_CLICKHOUSE_DSN
+    database: kube_insight
 ```
+
+When `storage.driver: clickhouse` is selected, `ingest`, `watch`, and
+`serve --watch` write retained observations, versions, facts, edges, changes,
+and object aliases over the ClickHouse HTTP interface. The HTTP API and
+`serve --metrics` also read from ClickHouse for the MVP read surface: schema,
+read-only SQL, resource health, object history, evidence search, topology, and
+service investigation. `initOnStart` applies the idempotent MVP DDL before
+writes. Writes are client-batched with `batchSize`/`flushIntervalMillis`; pending
+ingestion offsets are coalesced per resource and event before flush because
+they model current watch state rather than proof history. When `asyncInsert` is
+true, HTTP inserts add ClickHouse `async_insert=1` and
+`wait_for_async_insert=1` so the server can merge small inserts without hiding
+write failures from the caller.
+
+Cold tiering is opt-in. The default example leaves `coldVolume` empty and
+`coldAfterSeconds: 0`; set them only after the ClickHouse server has a matching
+storage policy, for example an S3-compatible cold volume.
+
+chDB is the embedded local ClickHouse-compatible backend in the chDB-enabled
+artifact:
+
+```yaml
+storage:
+  driver: chdb
+  chdb:
+    path: kubeinsight.chdb
+    database: kube_insight
+```
+
+Use `config/kube-insight.chdb.example.yaml` with `bin/kube-insight-chdb`, the
+chDB-enabled release artifact, or the chDB-enabled image. The chDB-enabled
+binary needs `libchdb.so` discoverable through the system dynamic linker,
+`LD_LIBRARY_PATH`, or `CHDB_LIB_PATH`. The default binary intentionally keeps the
+unavailable placeholder so normal installs do not carry the large dynamic chDB
+runtime. PostgreSQL and CockroachDB remain possible metadata/control-plane
+candidates, but they are not the MVP evidence-storage path.

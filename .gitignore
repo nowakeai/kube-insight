@@ -8,3 +8,13 @@
 coverage.out
 testdata/generated/
 todos.md
+.env
+compose.dev.local.yaml
+
+/dist/
+/build/
+
+*.chdb
+*.chdb/
+*.chdb-shm
+*.chdb-wal

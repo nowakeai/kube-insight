@@ -25,6 +25,7 @@ func dbCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Co
 		Short: "Manage kube-insight storage.",
 	}
 	cmd.AddCommand(dbBackfillCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClustersCommand(ctx, stdout, state))
 	cmd.AddCommand(dbCompactCommand(ctx, stdout, state))
 	cmd.AddCommand(dbReindexCommand(ctx, stdout, state))
@@ -336,7 +337,7 @@ func dbResourcesCommand(ctx context.Context, stdout io.Writer, state *cliState) 
 }
 
 func dbResourcesHealthCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
-	var opts sqlite.ResourceHealthOptions
+	var opts storage.ResourceHealthOptions
 	var output string
 	var includeSkipped bool
 	cmd := &cobra.Command{
@@ -356,12 +357,16 @@ func dbResourcesHealthCommand(ctx context.Context, stdout io.Writer, state *cliS
 			}
 			opts.ExcludeResources = rt.Config.Collection.Resources.Exclude
 			opts.IncludeExcluded = includeSkipped
-			store, err := sqlite.Open(dbCommandPath(cmd, state, rt))
+			store, err := openCLIReadStore(runCtx, cmd, state, rt, "db resources health")
 			if err != nil {
 				return err
 			}
 			defer store.Close()
-			report, err := store.ResourceHealth(runCtx, opts)
+			healthStore, ok := store.(storage.ResourceHealthStore)
+			if !ok {
+				return fmt.Errorf("%s store does not support resource health", storageDriver(rt.Config))
+			}
+			report, err := healthStore.ResourceHealth(runCtx, opts)
 			if err != nil {
 				return err
 			}
@@ -654,7 +659,7 @@ func writeClustersTable(stdout io.Writer, clusters []storage.ClusterRecord) erro
 	return writeTable(stdout, []string{"Cluster", "Source", "Created", "Objects", "Versions", "Latest"}, rows)
 }
 
-func writeResourceHealthTable(stdout io.Writer, report sqlite.ResourceHealthReport) error {
+func writeResourceHealthTable(stdout io.Writer, report storage.ResourceHealthReport) error {
 	summary := report.Summary
 	if err := writeSection(stdout, "Resource health summary", []string{"Resources", "Healthy", "Queued", "Unstable", "Errors", "Stale", "Not Started", "Skipped", "Complete"}, [][]string{{
 		humanCount(int64(summary.Resources)),

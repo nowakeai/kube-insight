@@ -1,38 +1,69 @@
 # Multi Backend Roadmap
 
-SQLite is the local PoC backend. Production-oriented deployments should support
-Postgres and CockroachDB with multiple kube-insight application instances.
+SQLite is the default local single-file backend in the pure-Go artifact and the
+deterministic test backend. The chDB-enabled local variant gives embedded runs
+the same ClickHouse-compatible table/query contract as the central ClickHouse
+backend without making the default artifact carry the large dynamic runtime.
+ClickHouse remains the production-oriented central evidence backend candidate
+because kube-insight is append-heavy, history-heavy, and storage-cost sensitive.
+PostgreSQL and CockroachDB remain candidates for metadata/control-plane or
+compatibility needs, but they are not the next evidence default.
 
 ## Goals
 
 - Keep `internal/storage.Store` as the core write contract.
-- Add read-only query interfaces for investigation, topology, facts, and
-  version reconstruction.
+- Keep read-only query DTOs and interfaces in `internal/storage` so API/MCP/CLI
+  code is not coupled to a concrete backend.
+- Add backend implementations for investigation, topology, facts, and version
+  reconstruction incrementally behind those interfaces. ClickHouse now covers
+  the MVP read-side surface: generic SQL/schema, resource health, object
+  history, evidence search, service investigation, and topology.
 - Support one writer instance that owns discovery/watch/ingest and multiple
   API instances that only serve reads.
+- Test ClickHouse as the first shared evidence backend before committing to a
+  central OLTP row-store.
 - Keep versions as proof and facts/edges/changes as indexes.
 
 ## Backend Roles
 
-SQLite:
+chDB / SQLite local mode:
 
-- local PoC,
-- desktop/agent cache,
-- support bundles,
-- deterministic tests.
+- chDB is the MVP target for the chDB-enabled local variant so local and central
+  backends share ClickHouse-compatible schema, query behavior, and storage
+  measurements.
+- SQLite remains the default local single-file backend in the pure-Go default
+  artifact and the deterministic test backend.
+- The MVP exposes `storage.driver: chdb` configuration and an unavailable
+  adapter placeholder in normal builds plus an optional `-tags chdb` adapter;
+  keep chDB as a separate artifact until runtime packaging is reliable for
+  normal installs.
+- chDB should reuse the ClickHouse schema/query code where possible and only
+  swap the execution adapter from remote HTTP to embedded `chdb-go`.
+- Do not introduce dual-write for this migration; select one configured driver.
+- Release local-mode artifacts/images in two variants once chDB is promoted:
+  a default build without chDB linkage for users who want the smaller pure-Go
+  binary/image, and a chDB-enabled build for ClickHouse-compatible local storage
+  that still keeps SQLite available.
 
-Postgres:
+ClickHouse:
 
-- central service,
-- stronger concurrent writes,
-- read replicas,
-- JSONB support for optional hot-window ad hoc queries.
+- primary central evidence-backend candidate,
+- append-only observations, versions, facts, edges, and changes,
+- columnar compression and object-storage cold tiering,
+- JSON/search experiments over hot or selected historical payloads,
+- service/time-window investigation queries over large retained history.
+
+PostgreSQL:
+
+- optional compatibility backend,
+- possible small metadata/control-plane store,
+- conventional managed SQL deployments if ClickHouse is operationally too much.
 
 CockroachDB:
 
-- distributed central service,
-- multi-region durability,
-- SQL compatibility with Postgres-oriented schema where practical.
+- optional distributed metadata/control-plane backend,
+- candidate only if multi-region transactional writes matter more than cold
+  evidence storage cost.
 
 ## Storage Cost Strategy
 
@@ -59,44 +90,35 @@ SQLite local mode:
 - Keep historical version JSON plain during the PoC so SQLite JSON functions,
   generated columns, and future FTS/path indexes remain possible.
 - Add FTS only for selected human text such as Event messages, status
-  condition messages, webhook errors, and controller reconcile errors.
+  condition messages, webhook errors, and controller reconciliation messages.
 - Add selected JSON-path indexes for configured fields such as images,
   resources, webhook service references, condition reasons, and owner/template
   references.
 - Avoid compressing all historical blobs until query coverage is proven.
 
-Postgres central mode:
+ClickHouse central evidence mode:
 
-- Use JSONB for latest and recent hot-window versions.
-- Use GIN only for recent/ad-hoc JSON predicates. It is not a replacement for
-  facts, topology, or explicit path indexes.
-- Partition large history/fact tables by time or cluster where needed.
-- Use partial and covering indexes for common incident predicates.
-- Keep cold proof payloads in cheaper partitions or external object storage
-  when version reconstruction can tolerate the extra read.
+- Keep source evidence tables append-only.
+- Batch watcher writes; avoid synchronous tiny inserts and mutation-heavy paths.
+- Use MergeTree-family tables with partitions by month/day and order keys shaped
+  around cluster, kind/resource, namespace, name/object, and observed time.
+- Store proof payloads as compressed strings first, then benchmark the new JSON
+  type for hot/recent documents and selected subcolumn queries.
+- Use hot/cold storage policies so recent parts stay on local SSD and older
+  parts move to S3-compatible object storage by TTL.
+- Build latest/open-edge convenience read models with materialized views,
+  ReplacingMergeTree, or argMax-style queries after source-table correctness is
+  stable.
+- Measure JSONAllPaths/JSONAllValues and targeted skipping indexes before making
+  them defaults.
 
-TimescaleDB mode:
+PostgreSQL/Cockroach compatibility mode:
 
-- Use hypertables for high-volume time-indexed tables such as facts, changes,
-  Events, and optional recent version rows.
-- Use Timescale compression for cold chunks after the fact/path indexes needed
-  for incident queries are materialized.
-- Choose `segmentby` and `orderby` around the actual query shape, usually
-  cluster, resource/kind/object, and observed time.
-- Do not expect compressed chunks to behave like normal JSONB+GIN. Compressed
-  JSON queries can degrade into chunk scans, so cold chunks should be queried
-  through facts/path indexes first.
-
-CockroachDB mode:
-
-- Prefer the Postgres logical schema where possible, but avoid depending on
-  Postgres-only extensions such as Timescale compression or GiST range indexes.
-- Use regional locality and TTL carefully; distributed durability can cost more
-  than the saved storage if all history is replicated everywhere.
-- Consider separating hot indexes from cold proof payloads by table locality or
-  retention policy.
-- Treat CockroachDB as a distributed metadata/query backend first, not as the
-  cheapest cold-history compression engine.
+- Keep facts, edges, changes, and versions semantically portable.
+- Treat row-store backends as metadata/control-plane candidates until evidence
+  storage measurements justify them.
+- Do not require PostgreSQL range/GiST, Timescale compression, or CockroachDB
+  distributed transaction behavior for the core product contract.
 
 Expected storage tiers:
 
@@ -159,9 +181,10 @@ All instances point at the same backend DSN:
 
 ```yaml
 storage:
-  driver: postgres
-  postgres:
-    dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
+  driver: clickhouse
+  clickhouse:
+    dsnEnv: KUBE_INSIGHT_CLICKHOUSE_DSN
+    database: kube_insight
 ```
 
 Write path:
@@ -173,8 +196,13 @@ collect/watch -> filters -> extractors -> write store
 Read path:
 
 ```text
-CLI/API/MCP/Web -> query store -> evidence bundle
+CLI/API/MCP/Web -> storage read interface -> backend query adapter -> evidence bundle
 ```
+
+The read-side DTOs live in `internal/storage`, while SQLite currently aliases
+those types for backward compatibility. This is intentional: remote ClickHouse
+and embedded chDB should expose the same product interfaces, even though one
+executes over HTTP and the other executes in-process through `chdb-go`.
 
 API-only instances must reject collection/watch/admin-write operations. The
 writer instance should normally disable public API/Web/MCP listeners unless

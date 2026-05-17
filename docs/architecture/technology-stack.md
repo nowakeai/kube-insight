@@ -2,7 +2,7 @@
 
 ## Decision
 
-Build the first implementation around Go, SQLite, PostgreSQL, and a React UI.
+Build the first implementation around Go, SQLite default local storage, ClickHouse central evidence storage, optional chDB local storage, and a React UI.
 
 The stack should optimize for Kubernetes correctness, simple PoC iteration,
 single-binary local workflows, and a clean path from local evidence stores to a
@@ -18,9 +18,9 @@ central service.
 | Local storage | SQLite | Simple local PoC, single-file archives, deterministic tests, and easy support bundle workflows. |
 | SQLite driver | `modernc.org/sqlite` | Pure Go driver keeps local PoC builds independent from CGO and system SQLite libraries. |
 | Logging | `charm.land/log/v2` behind `slog` | More readable terminal logs now, while preserving structured logging calls for future Bubble Tea agent UI integration. |
-| Compression | Zstd in the application layer | Keeps version storage portable across SQLite and PostgreSQL. |
-| Central storage | PostgreSQL | Strong concurrency, transactions, JSONB hot queries, range indexes, and operational maturity. |
-| Optional time-series storage | TimescaleDB | Candidate for high-volume facts, retention, and cold compression after the core model is proven. |
+| Compression and tiering | SQLite local storage plus ClickHouse columnar codecs/S3 tiering experiments | Keeps proof storage cheap while preserving portable version semantics. |
+| Central evidence backend candidate | ClickHouse | Append-heavy evidence storage, columnar compression, JSON/search support, and hot/cold S3 tiering fit the storage-cost profile. |
+| Optional metadata/control storage | PostgreSQL or CockroachDB | Consider later for transactional control-plane metadata if ClickHouse owns historical evidence. |
 | UI | TypeScript, React | Fits investigation views, timelines, topology graphs, and resource diffs. |
 | API protocol | REST first | Easy to debug, stable for CLI and UI, and sufficient for MVP query flows. |
 | Observability | OpenTelemetry plus Prometheus metrics | Required for watcher, filter, extractor, storage, and query acceptance. |
@@ -54,7 +54,7 @@ until the evidence model is validated.
 Use:
 
 ```text
-Go API + PostgreSQL + same collector/extractor libraries
+Go API + ClickHouse evidence backend + same collector/extractor libraries
 ```
 
 Build:
@@ -63,7 +63,7 @@ Build:
 - Kubernetes SAR/SSAR authorization,
 - audit log,
 - retention and maintenance jobs,
-- backend adapter for PostgreSQL,
+- ClickHouse append-only evidence tables,
 - UI-facing investigation responses.
 
 ### Phase 3: UI And Operations
@@ -97,9 +97,10 @@ Keep these pieces backend-agnostic:
 Allow backend-specific implementations for:
 
 - SQL schema and indexes,
-- range queries,
+- interval query indexes,
 - JSON hot indexes,
-- vacuum/analyze behavior,
+- batch ingestion behavior,
+- hot/cold storage policies,
 - storage maintenance jobs.
 
 ## Alternatives
@@ -111,9 +112,10 @@ Python is useful for one-off benchmark scripts, but it should not be the main
 watcher or storage engine because long-running watch reliability and deployment
 shape matter.
 
-ClickHouse, Kafka, and stream processors should stay out of the MVP critical
-path. They may become analytics sidecars after the facts, edges, and version
-model are proven.
+Kafka and stream processors should stay out of the MVP critical path.
+ClickHouse is the focused MVP central evidence backend; it stays behind clear
+storage interfaces so the SQLite default local path and chDB-enabled local
+variant remain stable.
 
 ## Selection Criteria
 

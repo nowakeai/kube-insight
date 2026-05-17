@@ -1,7 +1,11 @@
 # Quickstart
 
-This quickstart runs kube-insight as a local PoC with SQLite. PostgreSQL and
-CockroachDB are the planned MVP backends for central service deployments.
+This quickstart uses the default kube-insight artifact. The default artifact has
+no storage-backend suffix, stays small and pure Go, and uses SQLite for local
+single-file runs. A separate chDB-enabled artifact is available for local
+ClickHouse-compatible storage when `libchdb.so` is installed. The current central
+backend MVP targets ClickHouse for append-only evidence history, JSON search,
+storage-efficiency metrics, and low-cost cold object-storage tiering experiments.
 
 ## Install
 
@@ -22,6 +26,28 @@ chmod +x kube-insight
 
 Windows users can download the `.zip` artifact from the
 [release page](https://github.com/nowakeai/kube-insight/releases).
+
+## Local Storage Variants
+
+Use the default `kube-insight` binary for the smallest local install:
+
+```bash
+./kube-insight watch --db kubeinsight.db
+```
+
+Use the chDB-enabled variant when you want the embedded local store to share the
+ClickHouse table/query contract:
+
+```bash
+./kube-insight-chdb --config config/kube-insight.chdb.example.yaml \
+  watch pods services --timeout 30s
+```
+
+The chDB-enabled binary still supports SQLite and ClickHouse. It additionally
+requires a compatible `libchdb.so` discoverable through the system dynamic
+linker, `LD_LIBRARY_PATH`, or `CHDB_LIB_PATH`. The default binary does not link
+chDB; selecting `storage.driver: chdb` with it fails with an explicit setup
+error.
 
 ## Watch Current Cluster
 
@@ -90,7 +116,7 @@ Inspect one object's retained content versions and observation trail:
 unchanged observations keep the time/resourceVersion without duplicating JSON,
 facts, edges, or changes.
 
-## Compact Storage
+## Compact SQLite Storage
 
 Long-running `watch` and `serve --watch` processes run lightweight SQLite
 maintenance automatically. The periodic task checkpoints/truncates WAL and runs

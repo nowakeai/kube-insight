@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"kube-insight/internal/storage"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,62 +20,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type SQLQueryOptions struct {
-	SQL     string `json:"sql"`
-	MaxRows int    `json:"maxRows"`
-}
-
-type SQLQueryResult struct {
-	SQL       string           `json:"sql"`
-	Columns   []string         `json:"columns"`
-	Rows      []map[string]any `json:"rows"`
-	RowCount  int              `json:"rowCount"`
-	MaxRows   int              `json:"maxRows"`
-	Truncated bool             `json:"truncated"`
-	ElapsedMS float64          `json:"elapsedMs"`
-}
-
-type SQLSchema struct {
-	Tables        []SQLSchemaTable        `json:"tables"`
-	Relationships []SQLSchemaRelationship `json:"relationships,omitempty"`
-	Recipes       []SQLSchemaRecipe       `json:"recipes,omitempty"`
-	Notes         []string                `json:"notes,omitempty"`
-}
-
-type SQLSchemaTable struct {
-	Name        string            `json:"name"`
-	Type        string            `json:"type,omitempty"`
-	Description string            `json:"description,omitempty"`
-	Columns     []SQLSchemaColumn `json:"columns"`
-	Indexes     []SQLSchemaIndex  `json:"indexes,omitempty"`
-}
-
-type SQLSchemaColumn struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	NotNull bool   `json:"notNull"`
-	Primary bool   `json:"primary"`
-}
-
-type SQLSchemaIndex struct {
-	Name    string   `json:"name"`
-	Unique  bool     `json:"unique"`
-	Columns []string `json:"columns"`
-}
-
-type SQLSchemaRelationship struct {
-	Name        string `json:"name"`
-	From        string `json:"from"`
-	To          string `json:"to"`
-	SQL         string `json:"sql"`
-	Description string `json:"description,omitempty"`
-}
-
-type SQLSchemaRecipe struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	SQL         string `json:"sql"`
-}
+type SQLQueryOptions = storage.SQLQueryOptions
+type SQLQueryResult = storage.SQLQueryResult
+type SQLSchema = storage.SQLSchema
+type SQLSchemaTable = storage.SQLSchemaTable
+type SQLSchemaColumn = storage.SQLSchemaColumn
+type SQLSchemaIndex = storage.SQLSchemaIndex
+type SQLSchemaRelationship = storage.SQLSchemaRelationship
+type SQLSchemaRecipe = storage.SQLSchemaRecipe
 
 func OpenReadOnly(path string) (*Store, error) {
 	if path == "" {

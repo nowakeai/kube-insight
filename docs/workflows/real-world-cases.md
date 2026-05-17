@@ -104,7 +104,7 @@ limit 100;
 
 Concrete signal seen in the PoC database:
 
-- `PolicyViolation` warning Events in `zot-registry` tied to workload objects.
+- `PolicyViolation` warning Events in an application namespace tied to workload objects.
 
 ## 3. cert-manager Certificate Recovers Before Investigation
 
@@ -147,8 +147,7 @@ limit 100;
 
 Concrete signal seen in the PoC database:
 
-- Certificate `zot-registry/zot-registry-tls` with `Ready=False` and
-  `IncorrectIssuer`.
+- Certificate `app/app-tls` with `Ready=False` and `IncorrectIssuer`.
 
 ## 4. CRD Conversion Webhook Breaks Custom Resources
 

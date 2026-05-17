@@ -44,20 +44,31 @@ Success:
 - reconstruction bounded by `max_delta_chain`,
 - diffs are useful for Deployment/Pod/Node changes.
 
-## Milestone 3: PostgreSQL/Timescale Backend
+## Milestone 3: ClickHouse Evidence Backend MVP
+
+Status: mostly implemented for the local MVP path; keep validating storage
+cost, merge behavior, and cold-tier operations before treating it as production
+ready.
 
 Deliverables:
 
-- PostgreSQL schema,
-- GiST topology interval indexes,
-- JSONB hot latest/recent indexes,
-- optional Timescale fact hypertable,
-- backend comparison report.
+- ClickHouse schema for append-only observations, versions, facts, edges, and
+  changes,
+- batched write path or benchmark importer,
+- service investigation query over ClickHouse tables,
+- API read paths for health, search, history, topology, and service investigation,
+- live profiling and Prometheus storage-efficiency metrics,
+- JSON payload experiment comparing compressed `String` and new `JSON` type,
+- hot/cold storage policy moving old parts to S3-compatible object storage,
+- backend comparison report against SQLite local mode.
 
 Success:
 
-- better central service story than SQLite,
-- facts and topology remain primary query path.
+- storage materially cheaper than retaining equivalent proof payloads in local
+  SQLite or a replicated OLTP row-store,
+- facts and topology remain primary query path,
+- service investigation latency remains interactive,
+- cold S3-tiered proof reconstruction is acceptable for incident workflows.
 
 ## Milestone 4: UI Prototype
 
@@ -107,6 +118,8 @@ Deliverables:
 - Should blobs live in SQL initially or local/object storage?
 - What is the right default snapshot interval?
 - How much generic JSONB GIN should be retained for hot history?
+- Does ClickHouse hot/cold S3 tiering materially reduce cold proof cost without
+  making reconstruction or support bundles too slow?
 
 ### Topology
 

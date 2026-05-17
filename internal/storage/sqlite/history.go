@@ -4,65 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"kube-insight/internal/storage"
 	"time"
 )
 
-type ObjectHistoryOptions struct {
-	From            time.Time
-	To              time.Time
-	MaxVersions     int
-	MaxObservations int
-	IncludeDocs     bool
-	IncludeDiffs    bool
-}
-
-type ObjectHistory struct {
-	Object       ObjectRecord         `json:"object"`
-	Versions     []HistoryVersion     `json:"versions"`
-	Observations []HistoryObservation `json:"observations,omitempty"`
-	VersionDiffs []VersionDiff        `json:"versionDiffs,omitempty"`
-	Summary      ObjectHistorySummary `json:"summary"`
-}
-
-type HistoryVersion struct {
-	ID                         int64          `json:"id"`
-	Sequence                   int64          `json:"sequence"`
-	ObservedAt                 time.Time      `json:"observedAt"`
-	ResourceVersion            string         `json:"resourceVersion,omitempty"`
-	DocumentHash               string         `json:"documentHash"`
-	Materialization            string         `json:"materialization"`
-	Strategy                   string         `json:"strategy"`
-	ReplayDepth                int            `json:"replayDepth"`
-	RawSize                    int64          `json:"rawSize"`
-	StoredSize                 int64          `json:"storedSize"`
-	ObservationCount           int64          `json:"observationCount"`
-	ContentChangedObservations int64          `json:"contentChangedObservations"`
-	UnchangedObservations      int64          `json:"unchangedObservations"`
-	FirstObservedAt            time.Time      `json:"firstObservedAt"`
-	LastObservedAt             time.Time      `json:"lastObservedAt"`
-	LatestResourceVersion      string         `json:"latestResourceVersion,omitempty"`
-	Document                   map[string]any `json:"document,omitempty"`
-}
-
-type HistoryObservation struct {
-	ID              int64     `json:"id"`
-	ObservedAt      time.Time `json:"observedAt"`
-	ObservationType string    `json:"observationType"`
-	ResourceVersion string    `json:"resourceVersion,omitempty"`
-	VersionID       int64     `json:"versionId,omitempty"`
-	VersionSequence int64     `json:"versionSequence,omitempty"`
-	DocumentHash    string    `json:"documentHash,omitempty"`
-	ContentChanged  bool      `json:"contentChanged"`
-}
-
-type ObjectHistorySummary struct {
-	Versions                   int   `json:"versions"`
-	VersionDiffs               int   `json:"versionDiffs,omitempty"`
-	Observations               int64 `json:"observations"`
-	ReturnedObservations       int   `json:"returnedObservations"`
-	ContentChangedObservations int64 `json:"contentChangedObservations"`
-	UnchangedObservations      int64 `json:"unchangedObservations"`
-}
+type ObjectHistoryOptions = storage.ObjectHistoryOptions
+type ObjectHistory = storage.ObjectHistory
+type HistoryVersion = storage.HistoryVersion
+type HistoryObservation = storage.HistoryObservation
+type ObjectHistorySummary = storage.ObjectHistorySummary
 
 func (s *Store) ObjectHistory(ctx context.Context, target ObjectTarget, opts ObjectHistoryOptions) (ObjectHistory, error) {
 	object, dbObjectID, err := s.FindObject(ctx, target)

@@ -1,7 +1,10 @@
 # PoC And Benchmark Plan
 
-This document defines what to measure during the PoC. The broader correctness,
-security, integration, and release gates are defined in
+This document captures the original PoC measurement plan. The current MVP
+validation story is split across this plan,
+[Insight vs kubectl Benchmark](insight-vs-kubectl-benchmark.md),
+[ClickHouse MVP Closeout](clickhouse-mvp-closeout.md), and the broader
+correctness, security, integration, and release gates in
 [Test Acceptance Plan](test-acceptance-plan.md).
 
 ## Goals

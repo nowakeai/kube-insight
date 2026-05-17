@@ -26,27 +26,29 @@ Read these in order:
 6. [Storage, Index, And Query Design](data/storage-index-query.md)
 7. [Efficient History Storage V2](data/efficient-history-storage-v2.md)
 8. [Agent SQL Cookbook](workflows/agent-sql-cookbook.md)
-9. [Real-World Troubleshooting Cases](workflows/real-world-cases.md)
-10. [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
-11. [Global Watcher Design](ingestion/global-watcher-design.md)
-12. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
-13. [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
-14. [Configuration](configuration/configuration.md)
-15. [Development Commands](dev/commands.md)
-16. [ClickHouse Local Workflow](dev/clickhouse-local-workflow.md)
-17. [MVP Dev Checklist](dev/mvp-dev-checklist.md)
-18. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
-19. [Security, Privacy, And Retention](security/security-retention.md)
-20. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
-21. [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
-22. [Open Source Readiness](project/open-source-readiness.md)
-23. [Backend Strategy](research/backend-strategy.md)
-24. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
-25. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
-26. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
-27. [ClickHouse MVP Closeout](validation/clickhouse-mvp-closeout.md)
-28. [Test Acceptance Plan](validation/test-acceptance-plan.md)
-29. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+9. [kube-insight Agent Skill](agent/kube-insight-skill/SKILL.md)
+10. [Insight vs kubectl Benchmark](validation/insight-vs-kubectl-benchmark.md)
+11. [Real-World Troubleshooting Cases](workflows/real-world-cases.md)
+12. [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
+13. [Global Watcher Design](ingestion/global-watcher-design.md)
+14. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
+15. [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
+16. [Configuration](configuration/configuration.md)
+17. [Development Commands](dev/commands.md)
+18. [ClickHouse Local Workflow](dev/clickhouse-local-workflow.md)
+19. [MVP Dev Checklist](dev/mvp-dev-checklist.md)
+20. [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
+21. [Security, Privacy, And Retention](security/security-retention.md)
+22. [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
+23. [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
+24. [Open Source Readiness](project/open-source-readiness.md)
+25. [Backend Strategy](research/backend-strategy.md)
+26. [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
+27. [Multi Backend Roadmap](data/multi-backend-roadmap.md)
+28. [PoC And Benchmark Plan](validation/poc-and-benchmark-plan.md)
+29. [ClickHouse MVP Closeout](validation/clickhouse-mvp-closeout.md)
+30. [Test Acceptance Plan](validation/test-acceptance-plan.md)
+31. [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
 
 ## Community And Release
 
@@ -66,6 +68,7 @@ Read these in order:
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
 | `dev/` | Development commands and local verification workflow. |
+| `agent/` | Agent skill instructions and backend-detection rules for MCP/CLI use. |
 | `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |

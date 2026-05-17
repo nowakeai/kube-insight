@@ -146,10 +146,14 @@ Rebuild derived facts, edges, and changes after extractor/profile changes:
 ./bin/kube-insight db reindex --db kubeinsight.db --yes
 ```
 
-Run the local insight vs kubectl benchmark:
+Run the local agent-vs-kubectl benchmark. Refresh the evidence database first
+when you need freshness-controlled numbers for documentation or release notes:
 
 ```bash
-./scripts/benchmark-insight-vs-kubectl.sh kubeinsight.db <kubectl-context>
+./scripts/benchmark-agent-vs-kubectl.sh \
+  kubeinsight.db \
+  <kubectl-context> \
+  testdata/generated/agent-vs-kubectl-latest
 ```
 
 Run Docker-based ClickHouse smoke test:

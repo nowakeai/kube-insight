@@ -227,6 +227,9 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
 - [x] Keep ClickHouse MVP closeout aligned with the latest live profile numbers.
 - [x] Keep the agent-vs-kubectl benchmark documented with real case mappings,
   reproduction commands, and generated-output hygiene.
+- [x] Re-review user-facing and validation docs so README, quickstart, docs
+  index, agent SQL cookbook, benchmark plans, and acceptance gates match the
+  current SQLite/ClickHouse/chDB positioning.
 - [x] Add a short "known limitations" section for the MVP backend.
 
 Acceptance:

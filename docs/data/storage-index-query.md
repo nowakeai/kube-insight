@@ -167,16 +167,18 @@ Important constraints:
 
 ## SQLite Indexes
 
-The local PoC uses the pure-Go `modernc.org/sqlite` driver. This favors
-portable builds over the smaller dependency graph of CGO-backed SQLite drivers.
+The default local backend uses the pure-Go `modernc.org/sqlite` driver. This
+favors portable builds over the smaller dependency graph of CGO-backed SQLite
+drivers.
 
 The initial implementation stores each retained version as full JSON with an
 identity blob codec. Compression, reverse deltas, and profitable snapshot
 selection remain application-layer work above the storage backend.
 
-Do not compress all SQLite historical blobs by default while SQLite is still the
-primary query-shape PoC. Compressed blobs preserve proof, but they remove direct
-SQL access to body JSON unless every query pays a decompression scan. Prefer:
+Do not compress all SQLite historical blobs by default while SQLite remains the
+default local query shape. Compressed blobs preserve proof, but they remove
+direct SQL access to body JSON unless every query pays a decompression scan.
+Prefer:
 
 - `latest_index` as a compact navigation/projection table,
 - `latest_documents` view for full latest JSON when proof is needed,
@@ -229,14 +231,14 @@ Maintenance rules:
   enabled.
 - Run `ANALYZE` after bulk ingest, purge, or index rebuild.
 
-PostgreSQL maintenance rules:
+Future OLTP metadata backend maintenance rules:
 
-- Keep autovacuum enabled for normal churn.
-- Monitor dead tuples and index bloat on `versions`, `latest_index`,
-  `object_facts`, `object_edges`, and `ingestion_offsets`.
-- Run explicit `VACUUM (ANALYZE)` after large retention purges or derived-index
-  rebuilds.
-- Treat `VACUUM FULL` or heavy reindexing as offline maintenance, not a normal
+- Keep PostgreSQL autovacuum or CockroachDB equivalent maintenance enabled for
+  normal churn if those backends are added.
+- Monitor dead tuples, range/table bloat, and index bloat on metadata tables.
+- Run explicit backend-native maintenance after large retention purges or
+  derived-index rebuilds.
+- Treat heavy reindexing or table rewrites as offline maintenance, not a normal
   ingestion-path operation.
 
 ## Query Recipes

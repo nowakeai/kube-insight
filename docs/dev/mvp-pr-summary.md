@@ -162,6 +162,10 @@ release mode publishes the configured multi-architecture tags.
 - `docs/validation/insight-vs-kubectl-benchmark.md` is the user-facing evidence
   for why agents should query retained kube-insight evidence instead of doing
   repeated broad live `kubectl` calls for historical/topology investigations.
+- The final documentation pass aligned README, quickstart, docs index, agent SQL
+  cookbook, data/query docs, and validation gates with the current default
+  SQLite artifact, ClickHouse service backend, chDB-enabled variant, and
+  benchmark/profile evidence.
 
 
 ## Suggested Commit Slices

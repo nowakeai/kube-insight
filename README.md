@@ -119,7 +119,8 @@ flowchart LR
 
 ## Quick Start
 
-Download the latest `v0.0.1` release binary:
+Download a release binary. Replace `0.0.1` with the version you want from the
+[release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
 KI_VERSION=0.0.1
@@ -245,7 +246,9 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
+- [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
 - [Insight vs kubectl benchmark](docs/validation/insight-vs-kubectl-benchmark.md)
+- [ClickHouse MVP closeout](docs/validation/clickhouse-mvp-closeout.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

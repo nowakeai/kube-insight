@@ -9,6 +9,8 @@ storage-efficiency metrics, and low-cost cold object-storage tiering experiments
 
 ## Install
 
+Use a version from the [release page](https://github.com/nowakeai/kube-insight/releases):
+
 ```bash
 KI_VERSION=0.0.1
 KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -36,10 +38,18 @@ Use the default `kube-insight` binary for the smallest local install:
 ```
 
 Use the chDB-enabled variant when you want the embedded local store to share the
-ClickHouse table/query contract:
+ClickHouse table/query contract. Local development builds write
+`bin/kube-insight-chdb`; release chDB archives are named with `_chdb_` and still
+contain a binary named `kube-insight`:
 
 ```bash
-./kube-insight-chdb --config config/kube-insight.chdb.example.yaml \
+# Source checkout local build
+./bin/kube-insight-chdb --config config/kube-insight.chdb.example.yaml \
+  watch pods services --timeout 30s
+
+# Release chDB archive, after extracting kube-insight and libchdb.so
+CHDB_LIB_PATH=./libchdb.so ./kube-insight \
+  --config config/kube-insight.chdb.example.yaml \
   watch pods services --timeout 30s
 ```
 
@@ -149,8 +159,8 @@ The combined command supports these components:
 - `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP endpoint at `/mcp`.
-- `--webui`: web UI listener. The PoC exposes only a placeholder until the UI
-  is implemented.
+- `--webui`: web UI listener. The current build exposes only a placeholder until
+  the UI is implemented.
 
 Example with all current and planned service surfaces:
 
@@ -211,16 +221,17 @@ It also exposes prompts for common agent workflows:
 - `kube_insight_event_history`
 - `kube_insight_object_history`
 
-## Validate PoC
+## Validate A Checkout
+
+For source checkouts, run the same quick validation used during development:
 
 ```bash
-make check-lines
-go test ./...
-make validate
+make test
+make build
+git diff --check
 ```
 
-Expected PoC validation output should include:
-
-```text
-PASS checks=22/22
-```
+`make validate` runs the generated PoC fixture validation and writes reports
+under `testdata/generated/`; use it when changing ingestion, extraction, storage,
+query, API, or MCP behavior. ClickHouse and chDB validation commands are listed
+in [Development Commands](dev/commands.md).

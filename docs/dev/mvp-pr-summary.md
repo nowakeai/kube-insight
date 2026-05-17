@@ -45,8 +45,11 @@ and release packaging for default and chDB-enabled artifacts.
   needed by API and CLI paths.
 - Moves API service investigation, history, search, topology, and health paths
   toward shared typed store behavior across SQLite, ClickHouse, and chDB.
-- Adds tests around API/CLI backend selection, typed query behavior, and error
-  handling for unavailable optional backends.
+- Makes MCP use the same configured read backend as API/CLI for SQLite,
+  ClickHouse, and chDB-enabled builds; MCP schema and prompts tell agents to
+  detect the active backend before writing SQL.
+- Adds tests around API/CLI/MCP backend selection, typed query behavior, and
+  error handling for unavailable optional backends.
 
 ### Dev Environment And Validation
 
@@ -82,7 +85,8 @@ and release packaging for default and chDB-enabled artifacts.
   `docs/dev/clickhouse-local-workflow.md`.
 - Storage backends: `internal/storage/clickhouse/`, `internal/storage/chdb/`,
   `internal/storage/query.go`, `internal/storage/health.go`.
-- CLI/API integration: `internal/cli/`, `internal/api/`, `internal/metrics/`.
+- CLI/API/MCP integration: `internal/cli/`, `internal/api/`, `internal/mcp/`,
+  `internal/metrics/`.
 - Validation scripts: `scripts/clickhouse-smoke.sh`,
   `scripts/clickhouse-live-profile.sh`, `scripts/clickhouse-api-smoke.sh`,
   `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`,

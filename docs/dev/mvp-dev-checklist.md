@@ -126,6 +126,9 @@ after a larger dataset and a stable retention/cold-tier policy exist.
   objects and caps ClickHouse expansion for MVP safety.
 - [x] Add or document one repeatable API smoke command set for the compose dev
   watcher.
+- [x] MCP uses the same configured read backend as API/CLI for SQLite,
+  ClickHouse, and chDB-enabled builds, and schema output tells agents which SQL
+  shape is active before they run raw SQL.
 - [x] Keep generated profile artifacts under `testdata/generated/` only by default.
 
 Acceptance:

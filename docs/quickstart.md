@@ -187,7 +187,16 @@ curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&
 
 ```bash
 ./kube-insight serve mcp --db kubeinsight.db
+
+# ClickHouse-backed stdio MCP
+KUBE_INSIGHT_CLICKHOUSE_DSN=http://127.0.0.1:8123/?user=kube_insight \
+  ./kube-insight --config config/kube-insight.clickhouse.example.yaml serve mcp
 ```
+
+MCP follows the configured `storage.driver`: SQLite by default, ClickHouse when
+started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
+Agents should call `kube_insight_schema` first because SQLite and
+ClickHouse-compatible backends expose different SQL table names.
 
 MCP stdio currently exposes:
 

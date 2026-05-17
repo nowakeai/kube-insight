@@ -188,8 +188,11 @@ sequenceDiagram
 
 MCP tools:
 
-- `kube_insight_schema`: tables, indexes, relationships, and SQL recipes.
-- `kube_insight_sql`: read-only `SELECT`, `WITH`, and `EXPLAIN` queries.
+- `kube_insight_schema`: active backend notes, tables, indexes, relationships,
+  and SQL recipes. Call this first because SQLite and ClickHouse-compatible SQL
+  use different evidence table names.
+- `kube_insight_sql`: read-only `SELECT`, `WITH`, and `EXPLAIN` queries for the
+  configured backend.
 - `kube_insight_health`: collector coverage, staleness, and resource errors.
 - `kube_insight_history`: retained versions, observations, and diffs for one
   object.

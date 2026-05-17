@@ -143,7 +143,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		logger.Info("serving mcp http", "listen", addr)
 		services = append(services, serveStatusRow{"mcp", "serving", "http://" + addr + "/mcp"})
 		start("mcp", func() error {
-			return mcp.ListenAndServe(serviceCtx, addr, mcp.ServerOptions{DBPath: dbPath})
+			return mcp.ListenAndServe(serviceCtx, addr, mcpServerOptions(rt.Config, dbPath))
 		})
 	}
 	if selection.WebUI {
@@ -383,8 +383,8 @@ func serveMCPCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 				return err
 			}
 			dbPath := dbCommandPath(cmd, state, rt)
-			logger.Info("serving mcp stdio", "db", dbPath)
-			return mcp.ServeStdio(runCtx, cmd.InOrStdin(), stdout, mcp.ServerOptions{DBPath: dbPath})
+			logger.Info("serving mcp stdio", "db", serviceStorageTarget(rt.Config, dbPath))
+			return mcp.ServeStdio(runCtx, cmd.InOrStdin(), stdout, mcpServerOptions(rt.Config, dbPath))
 		},
 	}
 	return cmd
@@ -397,6 +397,51 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func mcpServerOptions(cfg appconfig.Config, dbPath string) mcp.ServerOptions {
+	opts := mcp.ServerOptions{DBPath: dbPath}
+	switch storageDriver(cfg) {
+	case "clickhouse":
+		opts.OpenStore = func(context.Context) (mcp.ReadStore, error) {
+			return newClickHouseStoreFromConfig(cfg)
+		}
+	case "chdb":
+		var mu sync.Mutex
+		var readStore mcp.ReadStore
+		opts.KeepStoreOpen = true
+		opts.OpenStore = func(context.Context) (mcp.ReadStore, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if readStore != nil {
+				return readStore, nil
+			}
+			store, err := newChDBStoreFromConfig(cfg)
+			if err != nil {
+				return nil, err
+			}
+			opened, ok := store.(mcp.ReadStore)
+			if !ok {
+				if closer, closeOK := store.(interface{ Close() error }); closeOK {
+					_ = closer.Close()
+				}
+				return nil, fmt.Errorf("chdb store does not support MCP reads")
+			}
+			readStore = opened
+			return readStore, nil
+		}
+		opts.Close = func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			if readStore == nil {
+				return nil
+			}
+			err := readStore.Close()
+			readStore = nil
+			return err
+		}
+	}
+	return opts
 }
 
 func metricsServerOptions(cfg appconfig.Config, dbPath string) metrics.ServerOptions {

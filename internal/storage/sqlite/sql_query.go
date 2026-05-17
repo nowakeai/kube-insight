@@ -181,6 +181,7 @@ order by type, name`)
 	schema.Relationships = schemaRelationships()
 	schema.Recipes = schemaRecipes()
 	schema.Notes = []string{
+		"Active SQL backend: SQLite.",
 		"All timestamps are Unix milliseconds.",
 		"Join latest_raw_index.kind_id, latest_index.kind_id, or objects.kind_id to object_kinds.id, then object_kinds.api_resource_id to api_resources.id.",
 		"object_observations records every observed object event; versions records retained content documents.",

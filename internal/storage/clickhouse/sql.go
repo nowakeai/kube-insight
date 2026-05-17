@@ -76,6 +76,7 @@ ORDER BY table, position`, quoteString(database)))
 	}
 	schema := storage.SQLSchema{
 		Notes: []string{
+			"Active SQL backend: ClickHouse-compatible (ClickHouse or chDB).",
 			"ClickHouse timestamps use DateTime64 UTC columns unless noted otherwise.",
 			"Use observations and versions for proof; use facts, edges, and changes for investigation candidates.",
 			"SQL access is read-only; use SELECT/WITH/EXPLAIN/DESCRIBE/SHOW only.",

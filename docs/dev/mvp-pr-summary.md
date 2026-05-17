@@ -162,6 +162,9 @@ release mode publishes the configured multi-architecture tags.
 - `docs/validation/insight-vs-kubectl-benchmark.md` is the user-facing evidence
   for why agents should query retained kube-insight evidence instead of doing
   repeated broad live `kubectl` calls for historical/topology investigations.
+- The stale pre-MVP `scripts/benchmark-insight-vs-kubectl.sh` helper was removed;
+  `scripts/benchmark-agent-vs-kubectl.sh` is the canonical agent-vs-kubectl
+  benchmark script.
 - The final documentation pass aligned README, quickstart, docs index, agent SQL
   cookbook, data/query docs, and validation gates with the current default
   SQLite artifact, ClickHouse service backend, chDB-enabled variant, and

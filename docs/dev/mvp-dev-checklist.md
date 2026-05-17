@@ -222,18 +222,23 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
 - [x] Document schema status and repair dry-run/apply behavior.
 - [x] Update quickstart/config docs after final command names stabilize.
 - [x] Keep ClickHouse MVP closeout aligned with the latest live profile numbers.
+- [x] Keep the agent-vs-kubectl benchmark documented with real case mappings,
+  reproduction commands, and generated-output hygiene.
 - [x] Add a short "known limitations" section for the MVP backend.
 
 Acceptance:
 
 ```bash
 rg -n "ClickHouse|compose|live profile|repair-ingestion-offsets|cleanup-repair-artifacts" docs
+./scripts/benchmark-agent-vs-kubectl.sh kubeinsight.db <kubectl-context> testdata/generated/agent-vs-kubectl-latest
 ```
 
 Expected result: docs explain the current path without implying production S3
 cold tiering or UI is part of the MVP. chDB is documented as a validated
 chDB-enabled variant with a `libchdb.so` runtime requirement, while the default
-artifact remains the small SQLite-backed local build.
+artifact remains the small SQLite-backed local build. The agent-vs-kubectl
+benchmark remains positioned as a real-case investigation comparison, not a
+claim that every point lookup is faster than direct `kubectl`.
 
 ## Phase 6: Final Validation Before Calling MVP Done
 

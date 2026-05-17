@@ -85,7 +85,9 @@ and release packaging for default and chDB-enabled artifacts.
 - CLI/API integration: `internal/cli/`, `internal/api/`, `internal/metrics/`.
 - Validation scripts: `scripts/clickhouse-smoke.sh`,
   `scripts/clickhouse-live-profile.sh`, `scripts/clickhouse-api-smoke.sh`,
-  `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`.
+  `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`,
+  `scripts/benchmark-agent-vs-kubectl.sh`.
+- Agent benchmark docs: `docs/validation/insight-vs-kubectl-benchmark.md`.
 
 ## Validation Run
 
@@ -101,6 +103,7 @@ make release-chdb-check
 goreleaser check --config .goreleaser.yaml
 goreleaser release --snapshot --clean --skip=docker
 goreleaser release --snapshot --clean --skip=publish,archive
+./scripts/benchmark-agent-vs-kubectl.sh kubeinsight.db <kubectl-context> testdata/generated/agent-vs-kubectl-review-20260517
 make open-source-check
 git diff --check
 find cmd internal -name '*.go' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800 {print}'
@@ -152,6 +155,9 @@ release mode publishes the configured multi-architecture tags.
 - The checked-in docs intentionally keep developer-only workflows under
   `docs/dev/` and user-facing backend positioning in `README.md`,
   `docs/quickstart.md`, and `docs/configuration/configuration.md`.
+- `docs/validation/insight-vs-kubectl-benchmark.md` is the user-facing evidence
+  for why agents should query retained kube-insight evidence instead of doing
+  repeated broad live `kubectl` calls for historical/topology investigations.
 
 
 ## Suggested Commit Slices

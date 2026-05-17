@@ -1,6 +1,6 @@
 # kube-insight vs direct kubectl for agent investigations
 
-Last updated: 2026-05-15.
+Last updated: 2026-05-17.
 
 This report compares two ways an agent can investigate Kubernetes state:
 
@@ -57,6 +57,38 @@ Workload inventory for scope selection
 
 Each bar block is about 250 ms, with one block used as the minimum visible bar.
 
+## 2026-05-17 Review Rerun
+
+During the MVP closeout review, the helper was rerun against the local
+`kubeinsight.db` evidence database and the current live `kubectl` context:
+
+```bash
+./scripts/benchmark-agent-vs-kubectl.sh \
+  kubeinsight.db \
+  <kubectl-context> \
+  testdata/generated/agent-vs-kubectl-review-20260517
+```
+
+The rerun was a script and documentation sanity check, not a replacement for the
+freshness-controlled benchmark below. It did not refresh the SQLite evidence
+database immediately before timing, so the 2026-05-15 watcher-refresh run
+remains the canonical point-in-time comparison.
+
+Even with that caveat, the helper still showed the expected shape: kube-insight
+answered pre-extracted evidence questions in tens to hundreds of milliseconds,
+while direct `kubectl` had to make broad live apiserver calls.
+
+| Scenario | kube-insight | kubectl | Speedup |
+| --- | ---: | ---: | ---: |
+| Retained PolicyViolation Event count | 692 ms | 4,606 ms | 6.7x |
+| Event to affected resource investigation | 34 ms | 3,147 ms | 92.6x |
+| Event message keyword search | 29 ms | 3,182 ms | 109.7x |
+| Service topology candidate list | 33 ms | 3,036 ms | 92.0x |
+| Workload inventory for scope selection | 37 ms | 5,853 ms | 158.2x |
+
+Generated outputs stayed under `testdata/generated/` and should not be
+committed because they can contain environment-specific cluster details.
+
 ## Why This Matters for Agents
 
 Direct `kubectl` is excellent for current-state checks, but it is a broad live
@@ -80,6 +112,24 @@ kube-insight changes the agent workflow:
 - SQL/MCP read surfaces are intentionally read-only,
 - service mode is designed to support Kubernetes authorization-aware query
   boundaries.
+
+## Real-Case Coverage
+
+The benchmark scenarios intentionally map to recurring investigation cases in
+`docs/workflows/real-world-cases.md` instead of synthetic point queries.
+
+| Real case | What direct `kubectl` leaves to the agent | kube-insight evidence path |
+| --- | --- | --- |
+| Policy controller generated warnings that later expired | Re-list current Events and hope the apiserver still has them. | Retained `k8s_event.*` facts, Event versions, and edges to involved workload objects. |
+| Admission webhook briefly failed closed, then recovered | Compare only current webhook, Service, EndpointSlice, Pod, and certificate state. | Historical webhook versions, extracted failure-policy/service facts, EndpointSlice and Pod edges, and version diffs. |
+| Service routing looks suspicious | Fetch Services, EndpointSlices, and Pods separately, then reconstruct joins in tool code. | Pre-extracted Service -> EndpointSlice -> Pod topology edges and candidate fan-out counts. |
+| RBAC or controller permissions were rolled back | `kubectl auth can-i` answers only the current permission state. | Role/Binding versions, roleRef/subject facts, edge graph, and changes around the incident window. |
+| Certificate or Secret recovered before investigation | Current object may be healthy and hide the earlier condition. | Historical status-condition facts, Certificate -> Secret/Issuer edges, and proof versions. |
+| Agent needs to choose incident scope | Broad `kubectl get` calls across many resource types. | Latest resource inventory from the evidence index plus severity-ranked facts and changes. |
+
+This is the product claim the benchmark supports: kube-insight is not trying to
+beat `kubectl get pod foo` for a single current object. It is better for agent
+workflows that need sanitized history, repeatable joins, topology, and proof.
 
 ## Reproduce
 

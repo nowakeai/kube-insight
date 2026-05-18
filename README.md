@@ -159,10 +159,13 @@ tar -xzf kube-insight.tar.gz kube-insight
 chmod +x kube-insight
 ```
 
-Watch the current kubeconfig context into a local SQLite database:
+Take a bounded first capture from the current kubeconfig context into a local
+SQLite database:
 
 ```bash
-./kube-insight watch --db kubeinsight.db
+./kube-insight watch pods services \
+  --db kubeinsight.db \
+  --timeout 30s
 ```
 
 Check collector coverage before trusting an investigation:
@@ -179,7 +182,8 @@ Start SQL investigations by selecting a cluster:
   "select id, name, source from clusters order by id"
 ```
 
-Serve API and MCP for local agent workflows:
+For a continuous local agent service, keep the watcher running with API and MCP
+enabled:
 
 ```bash
 ./kube-insight serve --watch --api --mcp --db kubeinsight.db
@@ -197,15 +201,20 @@ sequenceDiagram
   participant DB as Evidence store
   participant Kube as Kubernetes API
 
-  Agent->>MCP: kube_insight_health
-  MCP->>DB: collector health and offsets
-  DB-->>MCP: stale/error coverage gaps
   Agent->>MCP: kube_insight_schema
-  Agent->>MCP: kube_insight_sql<br/>cluster-scoped facts and edges
-  MCP->>DB: read-only SQL
-  DB-->>Agent: candidate objects
+  MCP->>DB: backend notes, tables, recipes
+  DB-->>MCP: SQLite or ClickHouse-compatible SQL shape
+  MCP-->>Agent: schema and SQL recipes
+  Agent->>MCP: kube_insight_sql<br/>coverage and cluster scope
+  MCP->>DB: read-only SQL over offsets/facts
+  DB-->>MCP: coverage gaps and cluster id
+  MCP-->>Agent: scoped evidence context
+  Agent->>MCP: kube_insight_sql<br/>facts, changes, edges
+  DB-->>MCP: candidate objects and topology
+  MCP-->>Agent: ranked candidates
   Agent->>MCP: kube_insight_history
-  DB-->>Agent: retained versions and observations
+  DB-->>MCP: retained versions and observations
+  MCP-->>Agent: proof bundle
   Agent->>Kube: optional kubectl comparison
 ```
 
@@ -226,24 +235,21 @@ MCP prompts:
 - `kube_insight_event_history`
 - `kube_insight_object_history`
 
-## Example: Agent Investigations Without Broad kubectl
+## Validation Highlights
 
-The validation case in
-[Storage Modes And Performance](docs/validation/storage-mode-comparison.md#kube-insight-vs-raw-kubectl)
-compares five concrete agent investigation scenarios on retained kube-insight
-evidence against broad live `kubectl` calls.
+The detailed numbers live in
+[Storage Modes And Performance](docs/validation/storage-mode-comparison.md).
+The important reading is the shape of the work, not a claim that every point
+lookup beats `kubectl`:
 
-| Scenario | kube-insight | kubectl |
-| --- | ---: | ---: |
-| Retained PolicyViolation Event count | 215 ms | 3,214 ms |
-| Event to affected resource investigation | 26 ms | 3,307 ms |
-| Event message keyword search | 24 ms | 3,794 ms |
-| Service topology candidate list | 32 ms | 3,104 ms |
-| Workload inventory for scope selection | 26 ms | 5,745 ms |
-
-The same validation doc also includes one live Service investigation case:
-`8004scan-production/production-8004scan-backend-api` completed in `481 ms`
-through kube-insight SQL/API versus `3,229 ms` across four raw `kubectl` calls.
+- Five retained-evidence agent workflows completed in `24-215 ms` from
+  kube-insight versus `3,104-5,745 ms` through broad live `kubectl` calls.
+- One live same-target Service investigation completed in `481 ms` through
+  kube-insight ClickHouse SQL/API versus `3,229 ms` across four raw `kubectl`
+  calls for Service, EndpointSlices, namespace Pods, and namespace Events.
+- The same-dataset storage benchmark covers SQLite, ClickHouse, and chDB so
+  users can choose between smallest local install, local ClickHouse-compatible
+  storage, and central ClickHouse service mode.
 
 The point is evidence shape: kube-insight answers from retained, sanitized facts
 and topology edges; `kubectl` answers current apiserver state and leaves history

@@ -94,7 +94,7 @@ func TestReleaseWorkflowUsesGoReleaserAndGHCR(t *testing.T) {
 	for _, want := range []string{
 		"goreleaser/goreleaser-action",
 		"mikepenz/release-changelog-builder-action",
-		"--release-notes=dist/RELEASE_NOTES.md",
+		"--release-notes=RELEASE_NOTES.md",
 		"## Artifacts",
 		"docker/login-action",
 		"registry: ghcr.io",

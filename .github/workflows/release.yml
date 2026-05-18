@@ -36,7 +36,7 @@ jobs:
         uses: mikepenz/release-changelog-builder-action@v6
         with:
           mode: COMMIT
-          outputFile: dist/RELEASE_NOTES.md
+          outputFile: RELEASE_NOTES.md
           configurationJson: |
             {
               "template": "#{{CHANGELOG}}",
@@ -89,7 +89,7 @@ jobs:
             printf -- '- chDB archives: Linux and macOS amd64/arm64, each bundled with the matching `libchdb.so` runtime.\n'
             printf -- '- Container images: `ghcr.io/%s:%s` and `ghcr.io/%s:%s-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
             printf -- '- Convenience tags: `ghcr.io/%s:latest` and `ghcr.io/%s:latest-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REPOSITORY}"
-          } >> dist/RELEASE_NOTES.md
+          } >> RELEASE_NOTES.md
 
       - name: Prepare chDB runtime
         run: |
@@ -122,6 +122,6 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean --release-notes=dist/RELEASE_NOTES.md
+          args: release --clean --release-notes=RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

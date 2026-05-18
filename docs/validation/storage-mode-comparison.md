@@ -69,10 +69,12 @@ The current public benchmark is intentionally scoped:
 - It compares kube-insight's default SQLite evidence database with raw
   `kubectl` for agent-style investigations that need retained facts, topology,
   search, and inventory.
-- It does not claim SQLite, chDB, and ClickHouse have been measured against each
-  other on one identical dataset under a single harness.
-- ClickHouse and chDB have separate live-profile and smoke-validation results
-  that measure their MVP readiness and storage behavior.
+- It now includes an initial same-dataset storage-mode harness for SQLite,
+  ClickHouse, and chDB, but the generated dataset is still small enough that
+  fixed query overhead dominates some results.
+- ClickHouse and chDB still have separate live-profile and smoke-validation
+  results that measure their MVP readiness and storage behavior on real watcher
+  data.
 
 This distinction matters. kube-insight is expected to be better than raw
 `kubectl` for the project's target problem: retained, sanitized, repeatable
@@ -91,6 +93,8 @@ They are not direct engine shootout results yet.
 | chDB service investigation was around `607 ms`, while ClickHouse service investigation ranged from `224 ms` to `801 ms`. | An embedded local engine might be expected to beat a server over HTTP. | The current numbers are different validation runs, not the same service target on the same dataset. Query cost also includes API routing, result materialization, JSON decode/encode, cache warmth, selected topology size, and store/session lifecycle. The result is within the MVP `1s` guardrail, but it is not enough to rank chDB against ClickHouse. |
 | The chDB-enabled API reading the remote ClickHouse backend was faster than the default API in one profile (`224 ms` vs `783 ms` service investigation). | The binary build tag should not make remote ClickHouse queries much faster by itself. | Both profiles read a ClickHouse backend, but the selected service target, row counts, watcher state, cache state, and timing of the run differed. Treat this as evidence that both paths work, not as evidence that one binary is faster. |
 | SQLite benchmark queries are much faster than broad raw `kubectl` calls. | SQLite is not the large-history backend, so users may wonder why ClickHouse is needed. | SQLite can be very fast for a local retained evidence database. ClickHouse is chosen for central service scale, compression, long-running append-heavy history, and future cold-tiering, not because every small local query is faster than SQLite. |
+| SQLite is also faster than ClickHouse on several same-dataset small reads. | A columnar analytical engine may be expected to beat SQLite everywhere. | The benchmark query set is mostly bounded point lookups and small joins over a few thousand rows. SQLite uses local B-tree indexes in-process, while ClickHouse pays HTTP, server pipeline, and result-format overhead per query. ClickHouse already wins on ingest in the larger run and is expected to pull ahead for larger scans, aggregations, retained history, compression, and central service use. |
+| chDB reads are slower than both SQLite and ClickHouse in the same-dataset harness. | chDB is embedded and ClickHouse-compatible, so local reads may be expected to be close to ClickHouse or SQLite. | The current chDB adapter serializes queries through one session, returns JSON-shaped result sets, and decodes into generic maps before typed API objects are built. Small query latency is dominated by session/query/result materialization overhead, not by compressed data scan cost. |
 
 ## Optimization Opportunities
 
@@ -129,22 +133,58 @@ chDB opportunities:
   uncompressed bytes, directory footprint, query timings, and session lifecycle
   costs in one place.
 
-## Next Benchmark Gap
+## Same-Dataset Harness Results
 
-The next useful benchmark is a same-dataset matrix. The initial harness is
-available as `make storage-mode-benchmark` and writes generated reports under
-`testdata/generated/storage-mode-benchmark/`:
+The initial harness is available as `make storage-mode-benchmark` and writes
+generated reports under `testdata/generated/storage-mode-benchmark/`. It uses
+one generated evidence dataset and runs the same API-style query groups against
+SQLite, ClickHouse, and chDB when their runtimes are available.
 
-| Query group | SQLite | chDB | ClickHouse | raw kubectl |
-| --- | ---: | ---: | ---: | ---: |
-| resource health | planned | planned | planned | not applicable |
-| evidence search | planned | planned | planned | current-state search baseline |
-| object history | planned | planned | planned | limited by live history |
-| topology expansion | planned | planned | planned | broad live list/join baseline |
-| service investigation | planned | planned | planned | broad live list/join baseline |
-| storage footprint | planned | planned | planned | no retained storage |
+Small local run:
 
-That matrix should use one reproducible dataset for SQLite, chDB, and
-ClickHouse, then report query latency, database size, compressed bytes per row,
-and import/write cost. Raw `kubectl` remains optional in the harness because it
-is a live-state baseline, not a storage engine for the generated dataset.
+```bash
+make storage-mode-benchmark
+```
+
+| Backend | Ingest | Health | Search | History | Topology | Service investigation |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQLite | `405 ms` | `5 ms` | `5 ms` | `4 ms` | `4 ms` | `23 ms` |
+| ClickHouse | `4.6 s` | `63 ms` | `61 ms` | `57 ms` | `78 ms` | `189 ms` |
+| chDB | `467 ms` | `260 ms` | `255 ms` | `255 ms` | `259 ms` | `442 ms` |
+
+Larger local run:
+
+```bash
+STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20 make storage-mode-benchmark
+```
+
+| Backend | Ingest | Health | Search | History | Topology | Service investigation | Storage signal |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| SQLite | `17.64 s` | `24.8 ms` | `62.1 ms` | `32.1 ms` | `27.7 ms` | `75.6 ms` | `4.61 MB` database |
+| ClickHouse | `7.97 s` | `63.3 ms` | `65.7 ms` | `58.5 ms` | `88.2 ms` | `237.0 ms` | `606 KiB` active compressed bytes, about `4.8x` active compression |
+| chDB | `1.60 s` | `284.7 ms` | `255.7 ms` | `289.7 ms` | `283.2 ms` | `555.6 ms` | `1.23 MB` directory, about `5.7x` active compression |
+
+The larger run had `1,760` versions, `2,280` facts, `2,320` edges, and `1,482`
+latest objects. This is enough to expose fixed per-query overhead, but it is
+still not a large-history benchmark. The result supports these narrower claims:
+
+- SQLite is the fastest local option for small point-lookups and bounded joins.
+- ClickHouse is already faster than SQLite on this generated batch ingest path
+  and stores active business tables compactly.
+- chDB produces ClickHouse-like compressed table storage locally, but its
+  current read adapter needs result-format and query-count optimization before
+  it should be positioned as the fastest local read path.
+
+## Remaining Benchmark Gaps
+
+Raw `kubectl` remains optional in the storage-mode harness because it is a
+live-state baseline, not a storage engine for the generated dataset. The next
+useful benchmark additions are:
+
+- a larger generated dataset that reaches hundreds of thousands to millions of
+  facts, edges, and versions,
+- a live raw-`kubectl` comparison for the same service-investigation target,
+- cold-cache and warm-cache splits for ClickHouse and chDB,
+- p50/p95 timings from repeated runs instead of one-shot timings,
+- separate scan/aggregation benchmarks that are expected to favor ClickHouse
+  more strongly than point lookups.

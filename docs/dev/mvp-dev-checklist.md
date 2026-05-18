@@ -237,6 +237,10 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
   same-dataset harness improved ClickHouse service investigation from about
   `352 ms` to `189 ms`, while chDB stayed roughly flat and needs a different
   optimization path.
+- [x] Run a larger same-dataset storage-mode benchmark
+  (`STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20`) and document why SQLite
+  wins small local point reads while ClickHouse/chDB remain better positioned
+  for compression, batch ingest, retained history, and central-service scale.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on

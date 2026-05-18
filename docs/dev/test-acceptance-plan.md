@@ -8,8 +8,9 @@ so within acceptable storage, performance, and security limits.
 
 This plan defines test layers and release gates. Benchmark metric definitions
 live in [PoC And Benchmark Plan](poc-and-benchmark-plan.md), the user-facing
-agent comparison lives in [Insight vs kubectl Benchmark](insight-vs-kubectl-benchmark.md),
-and the latest ClickHouse/chDB closeout metrics live in
+storage and agent-performance summary lives in
+[Storage Modes And Performance](../validation/storage-mode-comparison.md), and the
+latest ClickHouse/chDB closeout metrics live in
 [ClickHouse MVP Closeout](clickhouse-mvp-closeout.md).
 
 ## Acceptance Gates

@@ -62,6 +62,26 @@ Use raw `kubectl` when:
 - you do not need retained history,
 - you are validating a kube-insight finding against the live apiserver.
 
+## kube-insight vs Raw kubectl
+
+The retained-evidence benchmark compares agent-style investigation workflows,
+not a single `kubectl get pod/name` lookup. kube-insight first watches and
+normalizes cluster evidence, then agents query local retained facts, topology
+edges, observations, and versions. Raw `kubectl` asks the live apiserver each
+time and has to reconstruct joins in the caller.
+
+| Scenario | kube-insight retained evidence | Raw `kubectl` live calls | Speedup |
+| --- | ---: | ---: | ---: |
+| Retained PolicyViolation Event count | `215 ms` | `3,214 ms` | `14.9x` |
+| Event to affected resource investigation | `26 ms` | `3,307 ms` | `127.2x` |
+| Event message keyword search | `24 ms` | `3,794 ms` | `158.1x` |
+| Service topology candidate list | `32 ms` | `3,104 ms` | `97.0x` |
+| Workload inventory for scope selection | `26 ms` | `5,745 ms` | `221.0x` |
+
+Read these numbers as workflow evidence: kube-insight is faster for retained,
+sanitized, repeatable investigation context. `kubectl` remains the right final
+confirmation tool for exact current state.
+
 ## Performance Claims
 
 The current public benchmark is intentionally scoped:

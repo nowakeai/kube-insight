@@ -223,9 +223,9 @@ MCP prompts:
 ## Example: Agent Investigations Without Broad kubectl
 
 The validation case in
-[kube-insight vs direct kubectl for agent investigations](docs/validation/insight-vs-kubectl-benchmark.md)
-compares five concrete agent investigation scenarios on a sanitized workload
-cluster after a bounded watcher refresh.
+[Storage Modes And Performance](docs/validation/storage-mode-comparison.md#kube-insight-vs-raw-kubectl)
+compares five concrete agent investigation scenarios on retained kube-insight
+evidence against broad live `kubectl` calls.
 
 | Scenario | kube-insight | kubectl |
 | --- | ---: | ---: |
@@ -263,9 +263,7 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Data model](docs/data/data-model.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
 - [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
-- [Insight vs kubectl benchmark](docs/validation/insight-vs-kubectl-benchmark.md)
-- [Storage mode comparison](docs/validation/storage-mode-comparison.md)
-- [ClickHouse MVP closeout](docs/validation/clickhouse-mvp-closeout.md)
+- [Storage modes and performance](docs/validation/storage-mode-comparison.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)

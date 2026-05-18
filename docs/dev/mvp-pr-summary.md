@@ -91,7 +91,7 @@ and release packaging for default and chDB-enabled artifacts.
   `scripts/clickhouse-live-profile.sh`, `scripts/clickhouse-api-smoke.sh`,
   `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`,
   `scripts/benchmark-agent-vs-kubectl.sh`.
-- Agent benchmark docs: `docs/validation/insight-vs-kubectl-benchmark.md`.
+- Agent and storage benchmark docs: `docs/validation/storage-mode-comparison.md`.
 
 ## Validation Run
 
@@ -159,9 +159,9 @@ release mode publishes the configured multi-architecture tags.
 - The checked-in docs intentionally keep developer-only workflows under
   `docs/dev/` and user-facing backend positioning in `README.md`,
   `docs/quickstart.md`, and `docs/configuration/configuration.md`.
-- `docs/validation/insight-vs-kubectl-benchmark.md` is the user-facing evidence
-  for why agents should query retained kube-insight evidence instead of doing
-  repeated broad live `kubectl` calls for historical/topology investigations.
+- `docs/validation/storage-mode-comparison.md` is the user-facing evidence,
+  kubectl comparison, and storage-mode benchmark doc for retained kube-insight
+  evidence versus repeated broad live `kubectl` calls.
 - The stale pre-MVP `scripts/benchmark-insight-vs-kubectl.sh` helper was removed;
   `scripts/benchmark-agent-vs-kubectl.sh` is the canonical agent-vs-kubectl
   benchmark script.

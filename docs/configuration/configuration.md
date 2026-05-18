@@ -549,19 +549,27 @@ The current runtime supports these built-in extractors:
 - `node`
 - `event`
 - `endpointslice`
+- `service`
 
 ```yaml
 processing:
   extractorSets:
     generic: [reference]
     pod: [reference, pod]
+    service_topology: [reference, service]
     none: []
+
   extractors:
     pod:
       type: builtin
       enabled: true
       guard:
         resources: [pods]
+    service:
+      type: builtin
+      enabled: true
+      guard:
+        resources: [services]
 ```
 
 Future plugin path:

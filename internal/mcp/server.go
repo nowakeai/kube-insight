@@ -616,7 +616,7 @@ Use this order:
 2. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
 3. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
 4. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
-5. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search.
+5. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search. For Service exposure issues, start with service.load_balancer.pending and service.load_balancer.ingress_ip facts before opening retained Service versions.
 6. Query edges with src_id or dst_id around candidates to expand topology.
 7. Query observations and versions for retained proof. Use kube_insight_history only for final candidate objects or when packaged diffs are clearer than raw SQL.
 

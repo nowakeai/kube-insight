@@ -144,6 +144,13 @@ k8s_event.reporting_controller
 k8s_event.reporting_instance
 k8s_event.count
 k8s_event.series_count
+service.type
+service.cluster_ip
+service.load_balancer.pending
+service.load_balancer.ingress_count
+service.load_balancer.ingress_ip
+service.load_balancer.ingress_hostname
+service.deleted
 endpoint.ready
 endpoint.serving
 endpoint.terminating

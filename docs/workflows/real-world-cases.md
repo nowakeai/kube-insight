@@ -9,6 +9,11 @@ admission webhooks, GKE-managed webhooks, Rancher webhooks, external-secrets,
 cert-manager, Flux, Kyverno, APIService backends, HPA, EndpointSlice, Pod, Node,
 and Kubernetes Events.
 
+Detailed anonymized report:
+
+- [Service-mux historical reconstruction](service-mux-history-case-report.md)
+
+
 ## 1. Fail-Closed Admission Webhook Blocks Deployments
 
 Symptom:

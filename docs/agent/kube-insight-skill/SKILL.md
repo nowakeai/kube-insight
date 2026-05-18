@@ -99,6 +99,7 @@ For ClickHouse-compatible backends, use these tables directly through
 | Is coverage trustworthy? | `ingestion_offsets` | Collapse append-only rows with `argMax(status, updated_at)` before judging current state. |
 | Which cluster should I query? | `versions`, `facts`, `edges` | `group by cluster_id`, then keep that `cluster_id` in every query. |
 | What evidence types exist? | `facts` | `group by kind, fact_key, severity` to discover useful predicates. |
+| Which Services are pending or externally assigned? | `facts`, `versions` | Query `service.load_balancer.pending` and `service.load_balancer.ingress_ip`; use `versions` for exact Service status proof. |
 | What changed recently? | `changes` | Filter by `cluster_id`, `kind`, `severity`, `path`, or `object_id`. |
 | Which objects are related? | `edges` | Filter where `src_id` or `dst_id` equals a candidate `object_id`. |
 | What proof can I cite? | `versions`, `observations` | Use `versions` for retained content and `observations` for the watch/list timeline. |

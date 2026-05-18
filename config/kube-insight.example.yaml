@@ -254,7 +254,7 @@ processing:
     endpointslice: [reference, endpointslice]
     secret_metadata: [reference]
     workload: [reference]
-    service_topology: [reference]
+    service_topology: [reference, service]
     webhook: [reference]
     rbac: [reference]
     certmanager: [reference]
@@ -284,6 +284,11 @@ processing:
       enabled: true
       guard:
         resources: [endpointslices.discovery.k8s.io]
+    service:
+      type: builtin
+      enabled: true
+      guard:
+        resources: [services]
 
 plugins:
   goja:

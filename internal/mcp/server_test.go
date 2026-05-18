@@ -210,6 +210,7 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 				"ingestion_offsets is append-only",
 				"argMax(status, updated_at)",
 				"facts and changes",
+				"service.load_balancer.pending",
 				"observations and versions",
 			},
 		},

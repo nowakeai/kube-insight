@@ -177,6 +177,12 @@ order by severity desc, rows desc
 limit 100;
 ```
 
+Useful Service LoadBalancer predicates include `service.load_balancer.pending`,
+`service.load_balancer.ingress_ip`, `service.load_balancer.ingress_hostname`,
+and `service.load_balancer.ingress_count`. Use these facts first, then open
+`versions.doc` only when exact proof JSON is needed.
+
+
 Find high-severity Pod candidates:
 
 ```sql

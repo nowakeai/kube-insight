@@ -282,13 +282,50 @@ storage:
     policies:
       standard:
         minVersionsPerObject: 2
+      hot:
+        maxAgeSeconds: 1209600 # 14 days
+        minVersionsPerObject: 5
+      large_status:
+        maxAgeSeconds: 2592000 # 30 days
+        minVersionsPerObject: 2
+      topology:
+        maxAgeSeconds: 2592000 # 30 days
+        minVersionsPerObject: 2
+      workload:
+        maxAgeSeconds: 2592000 # 30 days
+        minVersionsPerObject: 3
+      gitops_state:
+        maxAgeSeconds: 2592000 # 30 days
+        minVersionsPerObject: 3
+      control_plane:
+        maxAgeSeconds: 7776000 # 90 days
+        minVersionsPerObject: 3
+      security:
+        maxAgeSeconds: 7776000 # 90 days
+        minVersionsPerObject: 3
+      sensitive_metadata:
+        maxAgeSeconds: 1209600 # 14 days
+        minVersionsPerObject: 1
+      certificate_lifecycle:
+        maxAgeSeconds: 7776000 # 90 days
+        minVersionsPerObject: 3
       events_short_window:
         maxAgeSeconds: 604800 # 7 days
         minVersionsPerObject: 1
       crd_long_window:
         maxAgeSeconds: 7776000 # 90 days
         minVersionsPerObject: 2
+      derived_short_window:
+        maxAgeSeconds: 604800 # 7 days
+        minVersionsPerObject: 1
 ```
+
+The built-in policy names are intentionally descriptive rather than storage-engine
+specific: `hot` for Pods, `large_status` for Nodes, `topology` for Services and
+network objects, `workload` for controllers, `gitops_state` for Flux and Argo CD
+resources, `control_plane` for admission/webhook resources, `security` for RBAC,
+`sensitive_metadata` for Secrets, `certificate_lifecycle` for cert-manager, and
+shorter windows for Events and derived reports.
 
 Retention always keeps each object's latest version and at least
 `minVersionsPerObject` retained versions. It deletes expired older versions,
@@ -437,6 +474,14 @@ resourceProfiles:
       extractorSet: service_topology
       priority: high
 ```
+
+Built-in profile rules include high-value defaults for Pods, Nodes, Events,
+EndpointSlices, Services, workload controllers, admission webhooks, RBAC,
+cert-manager, CRDs, and GitOps controllers. The GitOps rules cover Flux toolkit
+resources (`source.toolkit.fluxcd.io`, `kustomize.toolkit.fluxcd.io`,
+`helm.toolkit.fluxcd.io`, `image.toolkit.fluxcd.io`, and
+`notification.toolkit.fluxcd.io`) plus Argo CD `Application`, `AppProject`, and
+`ApplicationSet` resources under `argoproj.io`.
 
 Rule matching supports:
 

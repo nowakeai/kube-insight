@@ -37,6 +37,33 @@ storage:
     policies:
       standard:
         minVersionsPerObject: 1
+      hot:
+        maxAgeSeconds: 1209600
+        minVersionsPerObject: 5
+      large_status:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 2
+      topology:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 2
+      workload:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 3
+      gitops_state:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 3
+      control_plane:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
+      security:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
+      sensitive_metadata:
+        maxAgeSeconds: 1209600
+        minVersionsPerObject: 1
+      certificate_lifecycle:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
       events_short_window:
         maxAgeSeconds: 604800
         minVersionsPerObject: 1
@@ -255,6 +282,7 @@ processing:
     secret_metadata: [reference]
     workload: [reference]
     service_topology: [reference, service]
+    gitops: [reference]
     webhook: [reference]
     rbac: [reference]
     certmanager: [reference]

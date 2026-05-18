@@ -126,6 +126,26 @@ rules:
     retentionPolicy: control_plane
     extractorSet: webhook
 
+  - name: flux_gitops
+    groups:
+      - source.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - helm.toolkit.fluxcd.io
+      - image.toolkit.fluxcd.io
+      - notification.toolkit.fluxcd.io
+    retentionPolicy: gitops_state
+    extractorSet: gitops
+    compactionStrategy: spec_status_delta
+    priority: high
+
+  - name: argocd_gitops
+    groups: [argoproj.io]
+    resources: [applications, appprojects, applicationsets]
+    retentionPolicy: gitops_state
+    extractorSet: gitops
+    compactionStrategy: spec_status_delta
+    priority: high
+
   - name: rbac
     groups: [rbac.authorization.k8s.io]
     resources: [roles, rolebindings, clusterroles, clusterrolebindings]

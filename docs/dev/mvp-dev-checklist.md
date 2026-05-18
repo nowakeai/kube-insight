@@ -350,6 +350,19 @@ These are useful but outside the MVP stop line:
 - Promoting chDB to the default local backend in the default artifact; keep this
   deferred until runtime packaging is reliable enough for normal installs.
 
+## 2026-05-18 Default Policy Cleanup
+
+- [x] Default retention policies now cover every built-in resource profile policy
+  name: `hot`, `large_status`, `topology`, `workload`, `gitops_state`,
+  `control_plane`, `security`, `sensitive_metadata`,
+  `certificate_lifecycle`, `events_short_window`, `crd_long_window`, and
+  `derived_short_window`.
+- [x] Built-in GitOps profiles now cover Flux toolkit resources and Argo CD
+  `Application`, `AppProject`, and `ApplicationSet` resources with the
+  `gitops_state` policy.
+- [x] Added config tests that fail if built-in profile rules reference unknown
+  retention policies or extractor sets.
+
 ## Next Operating Rule
 
 When choosing what to do next, prefer the first unchecked item in this file. If a

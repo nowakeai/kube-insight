@@ -498,3 +498,20 @@ func TestValidateRejectsEmptyProfileReplacement(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestDefaultProfileRulesReferenceConfiguredPoliciesAndExtractorSets(t *testing.T) {
+	cfg := Default()
+	for _, rule := range cfg.ProfileRules() {
+		profile := rule.EffectiveProfile(profileDefaultsFromConfig(cfg.ResourceProfiles.Defaults))
+		if profile.RetentionPolicy != "" {
+			if _, ok := cfg.Storage.Retention.Policies[profile.RetentionPolicy]; !ok {
+				t.Fatalf("profile rule %q references unknown retention policy %q", profile.Name, profile.RetentionPolicy)
+			}
+		}
+		if profile.ExtractorSet != "" {
+			if _, ok := cfg.Processing.ExtractorSets[profile.ExtractorSet]; !ok {
+				t.Fatalf("profile rule %q references unknown extractor set %q", profile.Name, profile.ExtractorSet)
+			}
+		}
+	}
+}

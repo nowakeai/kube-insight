@@ -4,37 +4,46 @@
 
 <p align="center">
   <a href="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/badge/go-1.26-00ADD8"></a>
-  <img alt="Default storage" src="https://img.shields.io/badge/default%20storage-SQLite-64748b">
-  <img alt="MVP central storage" src="https://img.shields.io/badge/MVP%20central%20storage-ClickHouse-2563eb">
-  <img alt="Agent ready" src="https://img.shields.io/badge/MCP-agent%20ready-16a34a">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
 </p>
 
 <p align="center">
-  <strong>Historical Kubernetes evidence for humans and agents.</strong><br>
-  Capture sanitized cluster history, extract troubleshooting facts and topology
-  edges, then query the evidence long after live state and Kubernetes Events
-  have moved on.<br>
-  Give agents a fast, sanitized evidence layer instead of broad live
-  <code>kubectl</code> access.
+  <strong>Stop losing Kubernetes incident evidence before the investigation starts.</strong><br>
+  kube-insight captures sanitized list/watch history, extracts facts and topology,
+  and exposes read-only SQL, API, and MCP tools so humans and agents can
+  investigate from retained proof instead of broad live <code>kubectl</code> access.
 </p>
 
 ---
 
-## Why kube-insight?
+## The Problem
 
-`kubectl` is the fastest way to ask what the cluster looks like now.
-`kube-insight` is for the questions that arrive later:
+`kubectl` is excellent for current state. Incident investigations often need the
+state that already changed:
 
-- What changed around the time the incident started?
-- Which objects were related to the failed workload, webhook, certificate, or
-  policy?
-- Did a delete actually happen, or was there only a graceful deletion timestamp?
-- Which Events disappeared from the apiserver but still matter?
-- What proof can an agent cite instead of guessing from summaries?
+- Kubernetes Events expire or roll out of the apiserver window.
+- Rollouts, webhook changes, RBAC edits, endpoint shifts, and deletes can be
+  reverted before anyone asks why the incident happened.
+- Agents with raw `kubectl` access need live cluster credentials and must rebuild
+  joins across Services, EndpointSlices, Pods, Events, owners, and policies in
+  prompt/tool code.
+- Sensitive fields need to be filtered before storage and before they ever reach
+  an agent transcript.
 
-## Why Not Point Agents at kubectl?
+## The kube-insight Approach
+
+kube-insight records the evidence once, shapes it for investigation, and serves
+it through narrow read surfaces:
+
+- **Retained proof:** observed objects, content versions, and watch/list
+  timestamps.
+- **Investigation candidates:** extracted facts, changes, and topology edges.
+- **Agent-friendly access:** backend-aware schema, read-only SQL, HTTP API, and
+  MCP tools/prompts.
+- **Storage choices:** SQLite for the default local artifact, chDB for local
+  ClickHouse-compatible mode, and ClickHouse for continuous central history.
+
+## Why Not Just Give Agents kubectl?
 
 Direct `kubectl` access makes an agent repeatedly list live resources, join
 relationships in prompt/tool code, and handle raw cluster payloads. That is
@@ -83,7 +92,7 @@ database and check collector health before trusting the result.
 | Safer agent access | Filters run before hashing and storage; destructive filters write audit decisions; read surfaces are designed for read-only, authz-aware service access. |
 | Default local mode | One pure-Go binary with SQLite storage, CLI, HTTP API, and MCP surfaces. |
 | Optional local chDB mode | A separate chDB-enabled artifact can use embedded ClickHouse-compatible local storage with a bundled or installed `libchdb.so`. |
-| MVP central storage path | ClickHouse for append-heavy evidence history, compression, read-side investigation queries, and cold-tiering experiments. |
+| Central ClickHouse mode | ClickHouse for append-heavy evidence history, compression, read-side investigation queries, and cold-tiering experiments. |
 
 ## Choosing A Mode
 
@@ -292,13 +301,12 @@ Facts and edges are the candidate path. Versions are the proof.
 ## Release Status
 
 kube-insight is currently released as a local-first tool with a small pure-Go
-SQLite default artifact. The MVP central evidence backend targets ClickHouse for
+SQLite default artifact. The central evidence path targets ClickHouse for
 append-heavy history, compression, read-side investigation queries, and cold
 object-storage tiering experiments. A separate chDB-enabled artifact provides
 embedded ClickHouse-compatible local storage; it still supports SQLite but
-requires the bundled or otherwise compatible `libchdb.so` runtime. PostgreSQL
-and CockroachDB remain possible future metadata/control-plane backends, not the
-MVP evidence store.
+requires a compatible `libchdb.so` runtime. PostgreSQL and CockroachDB remain
+possible future metadata/control-plane backends, not the primary evidence store.
 
 ## Development
 

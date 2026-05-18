@@ -13,7 +13,7 @@ ClickHouse-compatible variant, and SQLite remains the default pure-Go local and
 test backend.
 
 The PR also adds repeatable local dev workflows, live profiling, API smoke tests,
-and release packaging for default and chDB-enabled artifacts.
+and release packaging for default and chDB-enabled artifacts. ClickHouse maintenance commands are grouped under `db clickhouse maintenance` while older flat paths remain hidden compatibility commands.
 
 ## Main Change Groups
 
@@ -23,7 +23,8 @@ and release packaging for default and chDB-enabled artifacts.
   inserts, typed reads, search, history, topology, service investigation,
   storage stats, schema status, and safe repair helpers.
 - Adds ClickHouse-backed CLI wiring for `serve`, `collect`, query paths, and
-  `db clickhouse` operational commands.
+  `db clickhouse` operational commands. Explicit backfill/repair/cleanup tasks
+  live under `db clickhouse maintenance`.
 - Keeps retention/TTL tiering opt-in; default local/dev schema does not enable
   cold-tier movement.
 - Adds ClickHouse storage metrics for compression ratio, bytes per row, active
@@ -103,14 +104,18 @@ Latest local validation completed on 2026-05-18:
 ```bash
 make test
 make build
-make build-chdb
+make chdb-build-check
+go test -tags chdb ./...
+timeout 240 make chdb-smoke
+make release-chdb-check
 make build-chdb-image
 docker run --rm kube-insight-chdb:local version
-make release-chdb-check
-goreleaser check --config .goreleaser.yaml
-goreleaser release --snapshot --clean --skip=docker
-goreleaser release --snapshot --clean --skip=publish,archive
-./scripts/benchmark-agent-vs-kubectl.sh kubeinsight.db <kubectl-context> testdata/generated/agent-vs-kubectl-review-20260517
+make clickhouse-smoke
+make clickhouse-live-profile
+make clickhouse-api-smoke
+make clickhouse-status
+make clickhouse-cleanup-repair-artifacts
+make clickhouse-clean-system-logs
 make mcp-sql-first-smoke
 make release-artifact-smoke
 make live-service-vs-kubectl
@@ -138,10 +143,15 @@ The release artifact smoke unpacked the local Linux amd64 default and chDB
 snapshot archives, then ran `version`, `config validate`, `ingest`, `query
 schema`, and `query sql` from the extracted binaries.
 
+The latest ClickHouse live profile measured active business-table compression at
+`29.58x`, `31.13` compressed bytes per active row, API health/search/history/topology
+under `500 ms`, and service investigation at `262.618 ms` after per-object
+fact/change caps. API smoke measured service investigation at `279.171 ms`.
+
 The live same-target Service comparison used the current kubeconfig context and
 target `8004scan-production/production-8004scan-backend-api`: kube-insight
-ClickHouse SQL/API completed in `481.150 ms` total, while the comparable raw
-`kubectl` calls completed in `3,229.201 ms` total.
+ClickHouse SQL/API completed in `448.746 ms` total, while the comparable raw
+`kubectl` calls completed in `3,462.546 ms` total.
 
 ## Release Notes
 
@@ -169,8 +179,6 @@ ClickHouse SQL/API completed in `481.150 ms` total, while the comparable raw
   or Linux/amd64-only chDB release references were found in current release docs.
 - Local `.env`, `kubeinsight.db`, `todos.md`, `dist/`, `build/`, and
   `testdata/generated/` are ignored and should not be staged.
-- `internal/storage/sqlite/store_test.go` is exactly 800 lines. It passes the
-  project rule, but future edits should split it before adding more cases.
 - The checked-in docs intentionally keep developer-only workflows under
   `docs/dev/` and user-facing backend positioning in `README.md`,
   `docs/quickstart.md`, and `docs/configuration/configuration.md`.
@@ -247,12 +255,17 @@ is squashed, but they are useful for staging and review.
 
 - [x] `make test`
 - [x] `make build`
-- [x] `make build-chdb`
+- [x] `make chdb-build-check`
+- [x] `go test -tags chdb ./...`
+- [x] `timeout 240 make chdb-smoke`
 - [x] `make build-chdb-image`
 - [x] `docker run --rm kube-insight-chdb:local version`
 - [x] `make release-chdb-check`
-- [x] `goreleaser release --snapshot --clean --skip=docker`
-- [x] `goreleaser release --snapshot --clean --skip=publish,archive`
+- [x] `make clickhouse-smoke`
+- [x] `make clickhouse-live-profile`
+- [x] `make clickhouse-api-smoke`
+- [x] `make clickhouse-status`
+- [x] `make clickhouse-cleanup-repair-artifacts`
 - [x] `make mcp-sql-first-smoke`
 - [x] `make release-artifact-smoke`
 - [x] `make live-service-vs-kubectl`

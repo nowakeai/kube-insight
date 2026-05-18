@@ -108,12 +108,12 @@ MVP acceptance thresholds for the local ClickHouse backend:
 | Schema status | `make clickhouse-status` reports `ok yes` | `ok yes` |
 | Watch errors | `0` errors after initial list phase | `0` |
 | Queued resources | `0` queued after initial list phase | `0` |
-| Unstable streams | Less than 5% of resources during steady state | latest profile: `7 / 241` retrying, `6 / 241` watching, `228 / 241` bookmark |
-| Compression ratio | At least `15x` on active business tables | latest default: `28.4x`; latest chDB-enabled ClickHouse profile: `30.53x`; embedded chDB real-data profile: about `5.8x` |
-| Compressed bytes per row | At most `100` bytes on active business tables | latest default: `33.96`; latest chDB-enabled ClickHouse profile: `32.16` |
-| Service investigation latency | Under `1s` for representative live service query | latest default: `783.779 ms`; embedded chDB real-data profile: `606.767 ms`; chDB-enabled ClickHouse profile: `224.201 ms` |
-| Health/search/history/topology API latency | Under `500ms` each in live profile | latest default: health `93.497ms`, search `84.622ms`, history `70.040ms`, topology `106.344ms` |
-| Inactive part age | Oldest inactive `kube_insight` part under `1h` during local dev | about `480s` |
+| Unstable streams | Less than 5% of resources during steady state | latest API health: `0` unstable, `234 / 241` bookmark, `7 / 241` watching |
+| Compression ratio | At least `15x` on active business tables | latest default: `29.58x`; latest chDB-enabled ClickHouse profile: `30.53x`; embedded chDB real-data profile: about `5.8x` |
+| Compressed bytes per row | At most `100` bytes on active business tables | latest default: `31.13`; latest chDB-enabled ClickHouse profile: `32.16` |
+| Service investigation latency | Under `1s` for representative live service query | latest default: `262.618 ms`; API smoke: `279.171 ms`; embedded chDB real-data profile: `606.767 ms` |
+| Health/search/history/topology API latency | Under `500ms` each in live profile | latest default: health `113.257ms`, search `91.010ms`, history `46.262ms`, topology `103.208ms` |
+| Inactive part age | Oldest inactive `kube_insight` part under `1h` during local dev | latest spot check: about `545s` |
 | Repair artifacts | `make clickhouse-cleanup-repair-artifacts` reports `droppable 0` | `droppable 0` |
 
 These thresholds are MVP guardrails, not production SLOs. Tighten them only

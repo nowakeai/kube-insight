@@ -71,9 +71,9 @@ comparable direct `kubectl` operations took **3,104-5,745 ms**:
 
 A live Service investigation on the long-running ClickHouse dev watcher also
 used the same current cluster target for both paths. kube-insight answered with
-SQL plus the service investigation API in **481 ms total**; the comparable
+SQL plus the service investigation API in **449 ms total**; the comparable
 `kubectl get service`, `endpointslices`, namespace Pods, and namespace Events
-calls took **3,229 ms total**.
+calls took **3,463 ms total**.
 
 The speedup is not a universal benchmark claim. It comes from changing the
 shape of the problem: kube-insight precomputes investigation candidates and
@@ -253,8 +253,8 @@ lookup beats `kubectl`:
 
 - Five retained-evidence agent workflows completed in `24-215 ms` from
   kube-insight versus `3,104-5,745 ms` through broad live `kubectl` calls.
-- One live same-target Service investigation completed in `481 ms` through
-  kube-insight ClickHouse SQL/API versus `3,229 ms` across four raw `kubectl`
+- One live same-target Service investigation completed in `449 ms` through
+  kube-insight ClickHouse SQL/API versus `3,463 ms` across four raw `kubectl`
   calls for Service, EndpointSlices, namespace Pods, and namespace Events.
 - The same-dataset storage benchmark covers SQLite, ClickHouse, and chDB so
   users can choose between smallest local install, local ClickHouse-compatible

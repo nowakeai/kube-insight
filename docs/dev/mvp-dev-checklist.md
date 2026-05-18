@@ -246,6 +246,10 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
   paths; the larger same-dataset harness now measures ClickHouse service
   investigation around `182 ms`, while chDB remains around `500 ms` and needs a
   different optimization path.
+- [x] Add default-off chDB query tracing and profile one service investigation;
+  the run showed `18` queries, about `149 ms` total query time, and no single SQL
+  outlier, so deeper chDB optimization is deferred instead of complicating MVP
+  read paths.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on

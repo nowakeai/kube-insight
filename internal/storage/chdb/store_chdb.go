@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	chdbgo "github.com/chdb-io/chdb-go/chdb"
 
@@ -266,29 +268,65 @@ func (c *client) exec(ctx context.Context, query string) (chdbResult, error) {
 }
 
 func (c *client) execFormat(ctx context.Context, query, format string) (chdbResult, error) {
+	trace := chdbTraceQueries()
+	started := time.Now()
+	status := "ok"
+	defer func() {
+		if trace {
+			traceChDBQuery(format, query, status, time.Since(started))
+		}
+	}()
 	if c == nil {
+		status = "error"
 		return nil, fmt.Errorf("chdb session is closed")
 	}
 	if err := ctx.Err(); err != nil {
+		status = "canceled"
 		return nil, err
 	}
 	c.mu.Lock()
 	if c.session == nil {
 		c.mu.Unlock()
+		status = "error"
 		return nil, fmt.Errorf("chdb session is closed")
 	}
 	result, err := c.session.Query(query, format)
 	c.mu.Unlock()
 	if err != nil {
+		status = "error"
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		if result != nil {
 			result.Free()
 		}
+		status = "canceled"
 		return nil, err
 	}
 	return result, nil
+}
+
+func chdbTraceQueries() bool {
+	value := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_CHDB_TRACE_QUERIES"))
+	return value != "" && value != "0" && !strings.EqualFold(value, "false")
+}
+
+func traceChDBQuery(format, query, status string, elapsed time.Duration) {
+	fmt.Fprintf(os.Stderr, "chdb_query\tformat=%s\tstatus=%s\telapsed_ms=%.3f\tstatement=%s\n", format, status, float64(elapsed.Microseconds())/1000, chdbStatementLabel(query))
+}
+
+func chdbStatementLabel(query string) string {
+	fields := strings.Fields(query)
+	if len(fields) == 0 {
+		return "empty"
+	}
+	label := strings.ToLower(fields[0])
+	for i := 1; i+1 < len(fields); i++ {
+		if strings.EqualFold(fields[i], "from") || strings.EqualFold(fields[i], "into") {
+			return label + ":" + strings.Trim(strings.ReplaceAll(fields[i+1], "`", ""), ".,()")
+		}
+	}
+	return label
 }
 
 type chdbResult interface {

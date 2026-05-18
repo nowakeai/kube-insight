@@ -180,6 +180,11 @@ still not a large-history benchmark. The result supports these narrower claims:
   `237.0 ms` run to about `182.0 ms`. chDB remains around `500 ms`, which points
   to embedded session/query overhead rather than JSON map decoding as the main
   remaining cost.
+- A follow-up chDB query trace on the same service target recorded `18` chDB
+  queries with about `149 ms` total query time and `27 ms` max single-query time.
+  That is low enough that further MVP work should avoid complex caches or custom
+  query planners; the remaining cost is mostly fixed query/session/process and
+  response materialization overhead.
 
 ## Remaining Benchmark Gaps
 

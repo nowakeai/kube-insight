@@ -1,4 +1,4 @@
-.PHONY: test check-lines build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
+.PHONY: test check-lines build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
 
 -include .env
 
@@ -156,6 +156,22 @@ storage-mode-benchmark: build
 	CLICKHOUSE_USER='$(CLICKHOUSE_USER)' \
 	CLICKHOUSE_PASSWORD='$(CLICKHOUSE_PASSWORD)' \
 	./scripts/storage-mode-benchmark.sh
+
+
+mcp-sql-first-smoke: build
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+	./scripts/mcp-sql-first-smoke.sh
+
+release-artifact-smoke:
+	./scripts/release-artifact-smoke.sh
+
+live-service-vs-kubectl: build
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+	CLICKHOUSE_HTTP_PORT='$(CLICKHOUSE_HTTP_PORT)' \
+	CLICKHOUSE_DATABASE='$(CLICKHOUSE_DATABASE)' \
+	CLICKHOUSE_USER='$(CLICKHOUSE_USER)' \
+	CLICKHOUSE_PASSWORD='$(CLICKHOUSE_PASSWORD)' \
+	./scripts/live-service-vs-kubectl.sh
 
 clickhouse-status: build
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \

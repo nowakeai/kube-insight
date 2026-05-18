@@ -226,6 +226,29 @@ It writes reports under `testdata/generated/storage-mode-benchmark/` by default.
 Raw `kubectl` is optional because it is a live-current-state baseline, not a
 storage backend for the generated dataset.
 
+Run the live same-target Service comparison against the current dev watcher and
+kubeconfig context:
+
+```bash
+make live-service-vs-kubectl
+LIVE_SERVICE_NAMESPACE=<namespace> LIVE_SERVICE_NAME=<service> make live-service-vs-kubectl
+LIVE_SERVICE_KUBECTL_CONTEXT=<kubectl-context> make live-service-vs-kubectl
+```
+
+Run the MCP SQL-first smoke against the configured backend:
+
+```bash
+make mcp-sql-first-smoke
+MCP_SQL_FIRST_SMOKE_CONFIG=config/kube-insight.clickhouse.example.yaml make mcp-sql-first-smoke
+```
+
+Smoke-test local GoReleaser snapshot archives after creating `dist/` artifacts:
+
+```bash
+make release-artifact-smoke
+RELEASE_SMOKE_REQUIRE_CHDB=0 make release-artifact-smoke
+```
+
 For the full local dev loop, use `config/kube-insight.clickhouse.example.yaml`
 with the workflow in [ClickHouse Local Workflow](clickhouse-local-workflow.md).
 

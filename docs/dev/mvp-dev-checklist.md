@@ -306,6 +306,9 @@ make clickhouse-live-profile
 make clickhouse-status
 make clickhouse-cleanup-repair-artifacts
 make clickhouse-clean-system-logs
+make mcp-sql-first-smoke
+make release-artifact-smoke
+make live-service-vs-kubectl
 ```
 
 Expected result: all commands pass, no Go file exceeds 800 lines, ClickHouse
@@ -316,7 +319,11 @@ and `make clickhouse-api-smoke` passed against `127.0.0.1:8080`; service
 investigation was `801.255 ms`, still inside the MVP `1s` guardrail. The release-path run also passed `make release-chdb-check` and a local
 `goreleaser release --snapshot --clean --skip=docker`; the generated chDB archive
 was `kube-insight_0.0.2-next_chdb_linux_amd64.tar.gz` and contained
-`kube-insight`, `libchdb.so`, and `config/kube-insight.chdb.example.yaml`.
+`kube-insight`, `libchdb.so`, and `config/kube-insight.chdb.example.yaml`. On
+2026-05-18, `make mcp-sql-first-smoke`, `make release-artifact-smoke`, and
+`make live-service-vs-kubectl` also passed; the live Service case measured
+kube-insight SQL/API at `481.150 ms` total versus raw `kubectl` at
+`3,229.201 ms` total for the same current target.
 
 ## Explicitly Deferred
 

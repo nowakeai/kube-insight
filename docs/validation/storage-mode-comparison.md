@@ -82,6 +82,29 @@ Read these numbers as workflow evidence: kube-insight is faster for retained,
 sanitized, repeatable investigation context. `kubectl` remains the right final
 confirmation tool for exact current state.
 
+## Live Service Investigation Case
+
+The retained-evidence benchmark above uses a refreshed SQLite evidence database.
+The ClickHouse MVP also has one live same-target comparison from the long-running
+local watcher and the current kubeconfig context. The script is
+`make live-service-vs-kubectl`, and it writes reports to
+`testdata/generated/live-service-vs-kubectl/`.
+
+Target on 2026-05-18: `8004scan-production/production-8004scan-backend-api`.
+
+| Path | Operations | Total elapsed | Output bytes |
+| --- | ---: | ---: | ---: |
+| kube-insight ClickHouse SQL/API | 3 | `481.150 ms` | `650,829` |
+| Raw kubectl live calls | 4 | `3,229.201 ms` | `536,343` |
+
+The kube-insight path ran a service-version SQL query, a service-edge SQL query,
+and the service investigation API. The raw `kubectl` path fetched the Service,
+EndpointSlices selected by `kubernetes.io/service-name`, all Pods in the
+namespace, and namespace Events. This is intentionally a practical agent
+workflow comparison: an agent needs enough live payloads to reconstruct topology
+and recent signals, while kube-insight already has retained facts, edges, and
+proof versions shaped for investigation.
+
 ## Performance Claims
 
 The current public benchmark is intentionally scoped:
@@ -214,7 +237,7 @@ useful benchmark additions are:
 
 - a larger generated dataset that reaches hundreds of thousands to millions of
   facts, edges, and versions,
-- a live raw-`kubectl` comparison for the same service-investigation target,
+- repeated live raw-`kubectl` comparisons across several service targets,
 - cold-cache and warm-cache splits for ClickHouse and chDB,
 - p50/p95 timings from repeated runs instead of one-shot timings,
 - separate scan/aggregation benchmarks that are expected to favor ClickHouse

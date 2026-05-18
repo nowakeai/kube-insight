@@ -60,6 +60,12 @@ comparable direct `kubectl` operations took **3,104-5,745 ms**:
 | Service topology candidate list | 32 ms | 3,104 ms | 97.0x |
 | Workload inventory for scope selection | 26 ms | 5,745 ms | 221.0x |
 
+A live Service investigation on the long-running ClickHouse dev watcher also
+used the same current cluster target for both paths. kube-insight answered with
+SQL plus the service investigation API in **481 ms total**; the comparable
+`kubectl get service`, `endpointslices`, namespace Pods, and namespace Events
+calls took **3,229 ms total**.
+
 The speedup is not a universal benchmark claim. It comes from changing the
 shape of the problem: kube-insight precomputes investigation candidates and
 keeps sanitized proof; `kubectl` asks the live apiserver each time. For
@@ -234,6 +240,10 @@ evidence against broad live `kubectl` calls.
 | Event message keyword search | 24 ms | 3,794 ms |
 | Service topology candidate list | 32 ms | 3,104 ms |
 | Workload inventory for scope selection | 26 ms | 5,745 ms |
+
+The same validation doc also includes one live Service investigation case:
+`8004scan-production/production-8004scan-backend-api` completed in `481 ms`
+through kube-insight SQL/API versus `3,229 ms` across four raw `kubectl` calls.
 
 The point is evidence shape: kube-insight answers from retained, sanitized facts
 and topology edges; `kubectl` answers current apiserver state and leaves history

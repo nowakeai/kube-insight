@@ -210,6 +210,22 @@ CLICKHOUSE_LIVE_DATABASE=kube_insight make clickhouse-live-profile
 CLICKHOUSE_LIVE_PROFILE_API=http://127.0.0.1:8080 make clickhouse-live-profile
 ```
 
+Run a same-dataset storage-mode benchmark across the local backends that are
+available in the current environment:
+
+```bash
+make storage-mode-benchmark
+STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20 make storage-mode-benchmark
+STORAGE_BENCH_INCLUDE_KUBECTL=1 STORAGE_BENCH_KUBECTL_CONTEXT=<kubectl-context> make storage-mode-benchmark
+```
+
+The benchmark generates one deterministic fixture-derived dataset, imports it
+into SQLite, ClickHouse when reachable, and chDB when `libchdb.so` is available,
+then times health, search, history, topology, and service-investigation queries.
+It writes reports under `testdata/generated/storage-mode-benchmark/` by default.
+Raw `kubectl` is optional because it is a live-current-state baseline, not a
+storage backend for the generated dataset.
+
 For the full local dev loop, use `config/kube-insight.clickhouse.example.yaml`
 with the workflow in [ClickHouse Local Workflow](clickhouse-local-workflow.md).
 

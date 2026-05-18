@@ -230,6 +230,13 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
 - [x] Add a community-facing four-option performance/tradeoff guide covering
   raw `kubectl`, kube-insight SQLite, kube-insight chDB, and kube-insight
   ClickHouse so users can choose the right deployment level.
+- [x] Add the first same-dataset storage-mode benchmark harness so SQLite,
+  ClickHouse, chDB when available, and optional raw `kubectl` can be measured
+  with one generated dataset and common query set.
+- [x] Apply first service-investigation read-path optimization; the small
+  same-dataset harness improved ClickHouse service investigation from about
+  `352 ms` to `189 ms`, while chDB stayed roughly flat and needs a different
+  optimization path.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on

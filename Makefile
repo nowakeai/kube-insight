@@ -1,4 +1,4 @@
-.PHONY: test check-lines build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
+.PHONY: test check-lines build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
 
 -include .env
 
@@ -149,6 +149,13 @@ clickhouse-api-smoke: build
 	CLICKHOUSE_USER='$(CLICKHOUSE_USER)' \
 	CLICKHOUSE_PASSWORD='$(CLICKHOUSE_PASSWORD)' \
 	./scripts/clickhouse-api-smoke.sh
+
+storage-mode-benchmark: build
+	@set -a; [ ! -f .env ] || . ./.env; set +a; \
+	CLICKHOUSE_HTTP_PORT='$(CLICKHOUSE_HTTP_PORT)' \
+	CLICKHOUSE_USER='$(CLICKHOUSE_USER)' \
+	CLICKHOUSE_PASSWORD='$(CLICKHOUSE_PASSWORD)' \
+	./scripts/storage-mode-benchmark.sh
 
 clickhouse-status: build
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \

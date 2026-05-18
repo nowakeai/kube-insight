@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 
 	"kube-insight/internal/storage"
 )
@@ -20,10 +21,14 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target storag
 		return storage.ServiceInvestigation{}, err
 	}
 	bundleOpts := investigationBundleOptions(opts)
-	service, err := s.evidenceBundle(ctx, serviceObject, bundleOpts)
-	if err != nil {
-		return storage.ServiceInvestigation{}, err
-	}
+	var service storage.EvidenceBundle
+	var serviceErr error
+	var serviceWG sync.WaitGroup
+	serviceWG.Add(1)
+	go func() {
+		defer serviceWG.Done()
+		service, serviceErr = s.evidenceBundle(ctx, serviceObject, bundleOpts)
+	}()
 	maxObjects := boundedLimit(opts.MaxEvidenceObjects, 20, 1000)
 	visited := map[string]bool{serviceObject.LogicalID: true}
 	queued := []string{serviceObject.LogicalID}
@@ -56,13 +61,17 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target storag
 			}
 		}
 	}
-	objects := make([]storage.EvidenceBundle, 0, len(recordsByID))
+	serviceWG.Wait()
+	if serviceErr != nil {
+		return storage.ServiceInvestigation{}, serviceErr
+	}
+	records := make([]storage.ObjectRecord, 0, len(recordsByID))
 	for _, record := range recordsByID {
-		bundle, err := s.evidenceBundle(ctx, record, bundleOpts)
-		if err != nil {
-			return storage.ServiceInvestigation{}, err
-		}
-		objects = append(objects, bundle)
+		records = append(records, record)
+	}
+	objects, err := s.evidenceBundles(ctx, records, bundleOpts)
+	if err != nil {
+		return storage.ServiceInvestigation{}, err
 	}
 	topology := make([]storage.TopologyEdge, 0, len(topologyByKey))
 	for _, edge := range topologyByKey {
@@ -84,6 +93,80 @@ func investigationBundleOptions(opts storage.InvestigationOptions) storage.Inves
 	out := opts
 	out.MaxVersionsPerObject = boundedLimit(out.MaxVersionsPerObject, 3, 100)
 	return out
+}
+
+func (s *Store) evidenceBundles(ctx context.Context, records []storage.ObjectRecord, opts storage.InvestigationOptions) ([]storage.EvidenceBundle, error) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+	workers := 4
+	if len(records) < workers {
+		workers = len(records)
+	}
+	type job struct {
+		index  int
+		record storage.ObjectRecord
+	}
+	jobs := make(chan job)
+	bundles := make([]storage.EvidenceBundle, len(records))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	setErr := func(err error) {
+		if err == nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range jobs {
+				mu.Lock()
+				stopped := firstErr != nil
+				mu.Unlock()
+				if stopped {
+					continue
+				}
+				bundle, err := s.evidenceBundle(ctx, item.record, opts)
+				if err != nil {
+					setErr(err)
+					continue
+				}
+				bundles[item.index] = bundle
+			}
+		}()
+	}
+	for i, record := range records {
+		mu.Lock()
+		stopped := firstErr != nil
+		mu.Unlock()
+		if stopped {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			setErr(ctx.Err())
+		case jobs <- job{index: i, record: record}:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	out := make([]storage.EvidenceBundle, 0, len(bundles))
+	for _, bundle := range bundles {
+		if bundle.Object.LogicalID != "" {
+			out = append(out, bundle)
+		}
+	}
+	return out, nil
 }
 
 func serviceInvestigationKind(kind string) bool {

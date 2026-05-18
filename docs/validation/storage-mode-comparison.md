@@ -131,7 +131,9 @@ chDB opportunities:
 
 ## Next Benchmark Gap
 
-The next useful benchmark is a same-dataset matrix:
+The next useful benchmark is a same-dataset matrix. The initial harness is
+available as `make storage-mode-benchmark` and writes generated reports under
+`testdata/generated/storage-mode-benchmark/`:
 
 | Query group | SQLite | chDB | ClickHouse | raw kubectl |
 | --- | ---: | ---: | ---: | ---: |
@@ -144,5 +146,5 @@ The next useful benchmark is a same-dataset matrix:
 
 That matrix should use one reproducible dataset for SQLite, chDB, and
 ClickHouse, then report query latency, database size, compressed bytes per row,
-and import/write cost. Raw `kubectl` should remain a live-state baseline, not a
-storage engine.
+and import/write cost. Raw `kubectl` remains optional in the harness because it
+is a live-state baseline, not a storage engine for the generated dataset.

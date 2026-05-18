@@ -333,7 +333,7 @@ was `kube-insight_0.0.2-next_chdb_linux_amd64.tar.gz` and contained
 2026-05-18, `make mcp-sql-first-smoke`, `make release-artifact-smoke`, and
 `make live-service-vs-kubectl` also passed; the live Service case measured
 kube-insight SQL/API at `481.150 ms` total versus raw `kubectl` at
-`3,229.201 ms` total for the same current target.
+`3,229.201 ms` total for the same current target. Service LoadBalancer facts were added on 2026-05-18, with an append-only `db clickhouse backfill-service-facts` command used to backfill the restored svc-mux ClickHouse history so agents can query `service.load_balancer.pending` and `service.load_balancer.ingress_ip` directly from facts.
 
 ## Explicitly Deferred
 

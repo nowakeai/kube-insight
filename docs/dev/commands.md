@@ -139,6 +139,19 @@ Native TCP DSNs are not supported by these ClickHouse commands. To make normal
 `ingest`, `watch`, and `serve --watch` write to ClickHouse, set
 `storage.driver: clickhouse` and export `KUBE_INSIGHT_CLICKHOUSE_DSN`.
 
+Backfill missing Service LoadBalancer facts after adding the Service extractor
+or after restoring older ClickHouse history. This is append-only and defaults to
+dry-run; it does not rewrite retained `observations` or `versions`:
+
+```bash
+./bin/kube-insight db clickhouse backfill-service-facts \
+  --endpoint http://localhost:8123
+./bin/kube-insight db clickhouse backfill-service-facts \
+  --endpoint http://localhost:8123 \
+  --namespace svc-mux-eip-test \
+  --yes
+```
+
 Rebuild derived facts, edges, and changes after extractor/profile changes:
 
 ```bash

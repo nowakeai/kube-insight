@@ -82,6 +82,7 @@ func dbClickHouseCommand(ctx context.Context, stdout io.Writer, state *cliState)
 	cmd.AddCommand(dbClickHouseCleanupCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseImportCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseServiceCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseBackfillServiceFactsCommand(ctx, stdout, state))
 	return cmd
 }
 

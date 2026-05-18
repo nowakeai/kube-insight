@@ -227,6 +227,9 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
 - [x] Keep ClickHouse MVP closeout aligned with the latest live profile numbers.
 - [x] Keep the agent-vs-kubectl benchmark documented with real case mappings,
   reproduction commands, and generated-output hygiene.
+- [x] Add a community-facing four-option performance/tradeoff guide covering
+  raw `kubectl`, kube-insight SQLite, kube-insight chDB, and kube-insight
+  ClickHouse so users can choose the right deployment level.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on

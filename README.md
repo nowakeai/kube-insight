@@ -79,6 +79,22 @@ database and check collector health before trusting the result.
 | Optional local chDB mode | A separate chDB-enabled artifact can use embedded ClickHouse-compatible local storage with a bundled or installed `libchdb.so`. |
 | MVP central storage path | ClickHouse for append-heavy evidence history, compression, read-side investigation queries, and cold-tiering experiments. |
 
+## Choosing A Mode
+
+kube-insight is the retained evidence layer; the storage mode controls how much
+scale and operational complexity you take on. Raw `kubectl` remains the live
+current-state baseline.
+
+| Option | Use it when | Main tradeoff |
+| --- | --- | --- |
+| Raw `kubectl` | You need one live current-state confirmation. | No retained sanitized history; agents must do broad live calls and joins. |
+| kube-insight + SQLite | You want the default small local binary and a simple evidence DB. | Local row-store backend, not the large-history storage target. |
+| kube-insight + chDB | You want local ClickHouse-compatible tables without a server. | Requires `libchdb.so`; larger artifact and more runtime packaging complexity. |
+| kube-insight + ClickHouse | You need continuous central evidence history, compression, API/MCP service reads, and future cold-tiering. | Requires operating ClickHouse. |
+
+See [Storage Modes And Performance Positioning](docs/validation/storage-mode-comparison.md)
+for the detailed performance and tradeoff matrix.
+
 ## How It Works
 
 ```mermaid
@@ -248,6 +264,7 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
 - [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
 - [Insight vs kubectl benchmark](docs/validation/insight-vs-kubectl-benchmark.md)
+- [Storage mode comparison](docs/validation/storage-mode-comparison.md)
 - [ClickHouse MVP closeout](docs/validation/clickhouse-mvp-closeout.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)

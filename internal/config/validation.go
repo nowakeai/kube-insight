@@ -44,6 +44,20 @@ func (c Config) Validate() error {
 		if c.Storage.Cockroach.DSNEnv == "" {
 			return errors.New("cockroach dsnEnv is required")
 		}
+	case "clickhouse":
+		if c.Storage.ClickHouse.DSNEnv == "" {
+			return errors.New("clickhouse dsnEnv is required")
+		}
+		if c.Storage.ClickHouse.Database == "" {
+			return errors.New("clickhouse database is required")
+		}
+	case "chdb":
+		if c.Storage.ChDB.Path == "" {
+			return errors.New("chdb path is required")
+		}
+		if c.Storage.ChDB.Database == "" {
+			return errors.New("chdb database is required")
+		}
 	default:
 		return fmt.Errorf("unsupported storage.driver %q", c.Storage.Driver)
 	}
@@ -107,6 +121,15 @@ func validateStorage(storage StorageConfig) error {
 		if storage.Maintenance.JournalSizeLimitBytes < 0 {
 			return errors.New("storage.maintenance.journalSizeLimitBytes must be non-negative")
 		}
+	}
+	if storage.ClickHouse.ColdAfterSeconds < 0 {
+		return errors.New("storage.clickhouse.coldAfterSeconds must be non-negative")
+	}
+	if storage.ClickHouse.BatchSize < 0 {
+		return errors.New("storage.clickhouse.batchSize must be non-negative")
+	}
+	if storage.ClickHouse.FlushIntervalMS < 0 {
+		return errors.New("storage.clickhouse.flushIntervalMillis must be non-negative")
 	}
 	if storage.Retention.MaxAgeSeconds < 0 {
 		return errors.New("storage.retention.maxAgeSeconds must be non-negative")

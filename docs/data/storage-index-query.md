@@ -76,110 +76,109 @@ Leases:
 - skip by default or downsample aggressively,
 - do not include in generic JSON indexes unless explicitly enabled.
 
-## PostgreSQL Indexes
+## ClickHouse Evidence Tables
 
-Latest:
+The current central-backend MVP uses ClickHouse for append-heavy evidence
+history and low-cost cold storage experiments. The baseline shape is append-only;
+mutable read models can be added after correctness and cost are measured.
 
-```sql
-create index latest_kind_ns_name_idx
-on latest_index(cluster_id, kind_id, namespace, name);
+Core tables:
 
--- Full latest JSON is exposed through latest_documents by joining the latest
--- content version to blobs. Do not duplicate it in latest_index. If a backend
--- needs fast arbitrary latest JSON predicates, use a materialized hot
--- latest-documents table/view with a GIN index.
+```text
+observations: raw retained observations and filtered documents
+versions: retained content versions and proof payloads
+facts: extracted investigation predicates
+edges: topology intervals
+changes: timeline-oriented scalar/path changes
+filter_decisions: auditable destructive and sensitive filter decisions
+ingestion_offsets: current list/watch progress and health state
 ```
 
-Versions:
+Generate or apply the current MVP DDL:
 
-```sql
-create index versions_object_seq_idx
-on versions(object_id, seq desc);
-
-create index versions_object_time_idx
-on versions(object_id, observed_at desc);
+```bash
+kube-insight db clickhouse schema
+kube-insight db clickhouse schema --json-type --output json
+KUBE_INSIGHT_CLICKHOUSE_DSN=http://localhost:8123 kube-insight db clickhouse init
+kube-insight db clickhouse import --endpoint http://localhost:8123 --file testdata/fixtures/kube/core.json
+kube-insight db clickhouse service default api --endpoint http://localhost:8123
 ```
 
-Observations:
+`db clickhouse init` sends each statement over the ClickHouse HTTP interface.
+`db clickhouse import` runs the existing filter/extractor pipeline in memory and
+then writes observations, object aliases, versions, facts, edges, changes, and
+auditable filter decisions as JSONEachRow batches. Runtime `ingest`, `watch`,
+and `serve --watch` can write directly to the same tables when
+`storage.driver: clickhouse` is selected.
+`db clickhouse service` now uses the same typed service investigation store
+path as the HTTP API. That keeps CLI smoke, API responses, and storage adapter
+behavior aligned around `internal/storage.ServiceInvestigation` instead of a
+separate raw SQL probe. The HTTP API opens storage through read-side interfaces
+in `internal/storage`, so ClickHouse serves generic schema, SQL, resource
+health, object history, evidence search, service investigation, topology reads,
+and Prometheus metrics. The current service/topology implementation intentionally
+uses append-only source tables plus bounded graph expansion; materialized read
+models can be added later when query cost under larger datasets is measured.
 
-```sql
-create index object_observations_object_time_idx
-on object_observations(object_id, observed_at desc);
+Remote ClickHouse and embedded chDB share the ClickHouse schema and most SQL row
+mapping. The default release can stay SQLite-compatible, while the chDB-enabled
+variant adds the `chdb-go` executor and `libchdb.so` runtime dependency. ClickHouse
+stores are constructed with `NewStore` or `NewHTTPStore`; callers should depend
+on the store and the small executor/read-side interfaces rather than reaching
+into the concrete HTTP client. Low-level `QueryRunner` helpers remain useful for
+schema status, SQL probes, and focused tests, but product-facing investigation
+commands should go through the typed store interfaces.
 
-create index object_observations_cluster_time_idx
-on object_observations(cluster_id, observed_at desc);
-```
+Storage rules:
 
-Topology:
+- Use MergeTree-family tables.
+- Partition by observed month or day depending on volume.
+- Order by access path, for example `(cluster_id, kind, namespace, name,
+  observed_at, uid)` for observations and `(cluster_id, fact_key, fact_value,
+  ts, object_id)` for facts.
+- Keep topology intervals as `valid_from_ms` and `valid_to_ms` so overlap
+  predicates stay portable.
+- Store proof payloads as `String CODEC(ZSTD)` first; benchmark the new
+  ClickHouse `JSON` type for hot/recent documents before making it default.
+- Use TTL `TO VOLUME` policies to move older parts to S3-compatible cold
+  storage after the hot window. Keep this disabled unless the ClickHouse server
+  has a matching storage policy.
+- The ClickHouse MVP schema adds lightweight bloom-filter skip indexes for the
+  interactive read paths: `versions.object_id`, `versions.uid`,
+  `versions.name`, `observations.uid`, `facts.object_id`, `changes.object_id`,
+  and both `edges.src_id`/`edges.dst_id`. These keep service investigation,
+  topology expansion, object history, and evidence bundles from depending only
+  on broad primary-key scans.
+- Defer heavier text/JSON skip indexes until measured. Candidate follow-ups
+  include selected JSON paths, Event message text, `JSONAllPaths`, and
+  `JSONAllValues`.
 
-```sql
-create extension if not exists btree_gist;
+Important constraints:
 
-alter table object_edges
-add column valid_range tstzrange generated always as
-  (tstzrange(valid_from, coalesce(valid_to, 'infinity'), '[)')) stored;
-
-create index object_edges_src_range_idx
-on object_edges using gist (cluster_id, edge_type, src_id, valid_range);
-
-create index object_edges_dst_range_idx
-on object_edges using gist (cluster_id, edge_type, dst_id, valid_range);
-```
-
-Facts:
-
-```sql
-create index object_facts_key_value_time_idx
-on object_facts(cluster_id, fact_key_id, fact_value, ts desc);
-
-create index object_facts_object_time_idx
-on object_facts(cluster_id, object_id, ts desc);
-
-create index object_facts_workload_time_idx
-on object_facts(cluster_id, workload_id, ts desc)
-where workload_id is not null;
-
-create index object_facts_service_time_idx
-on object_facts(cluster_id, service_id, ts desc)
-where service_id is not null;
-
-create index object_facts_node_time_idx
-on object_facts(cluster_id, node_id, ts desc)
-where node_id is not null;
-```
-
-Maintenance:
-
-```sql
-create index ingestion_offsets_resource_scope_idx
-on ingestion_offsets(cluster_id, api_resource_id, namespace);
-
-create index maintenance_runs_cluster_task_idx
-on maintenance_runs(cluster_id, task, started_at desc);
-```
-
-Changes:
-
-```sql
-create index object_changes_object_time_idx
-on object_changes(cluster_id, object_id, ts desc);
-
-create index object_changes_path_time_idx
-on object_changes(cluster_id, change_family, path, ts desc);
-```
+- Do not issue frequent tiny synchronous inserts from watch workers. Buffer and
+  batch writes, or validate ClickHouse async insert settings.
+- Do not model latest rows and open edges as mutation-heavy OLTP tables. Use
+  append-only source rows plus materialized views, ReplacingMergeTree read
+  models, or argMax queries. `ingestion_offsets` is a current-state health table
+  and uses `ReplacingMergeTree(updated_at)` keyed by resource and event so old
+  bookmark/watch/list rows can collapse during background merges.
+- Treat S3-tiered cold proof retrieval as a measured workflow. Cold query latency
+  may be acceptable for proof but not for every interactive filter.
 
 ## SQLite Indexes
 
-The local PoC uses the pure-Go `modernc.org/sqlite` driver. This favors
-portable builds over the smaller dependency graph of CGO-backed SQLite drivers.
+The default local backend uses the pure-Go `modernc.org/sqlite` driver. This
+favors portable builds over the smaller dependency graph of CGO-backed SQLite
+drivers.
 
 The initial implementation stores each retained version as full JSON with an
 identity blob codec. Compression, reverse deltas, and profitable snapshot
 selection remain application-layer work above the storage backend.
 
-Do not compress all SQLite historical blobs by default while SQLite is still the
-primary query-shape PoC. Compressed blobs preserve proof, but they remove direct
-SQL access to body JSON unless every query pays a decompression scan. Prefer:
+Do not compress all SQLite historical blobs by default while SQLite remains the
+default local query shape. Compressed blobs preserve proof, but they remove
+direct SQL access to body JSON unless every query pays a decompression scan.
+Prefer:
 
 - `latest_index` as a compact navigation/projection table,
 - `latest_documents` view for full latest JSON when proof is needed,
@@ -232,14 +231,14 @@ Maintenance rules:
   enabled.
 - Run `ANALYZE` after bulk ingest, purge, or index rebuild.
 
-PostgreSQL maintenance rules:
+Future OLTP metadata backend maintenance rules:
 
-- Keep autovacuum enabled for normal churn.
-- Monitor dead tuples and index bloat on `versions`, `latest_index`,
-  `object_facts`, `object_edges`, and `ingestion_offsets`.
-- Run explicit `VACUUM (ANALYZE)` after large retention purges or derived-index
-  rebuilds.
-- Treat `VACUUM FULL` or heavy reindexing as offline maintenance, not a normal
+- Keep PostgreSQL autovacuum or CockroachDB equivalent maintenance enabled for
+  normal churn if those backends are added.
+- Monitor dead tuples, range/table bloat, and index bloat on metadata tables.
+- Run explicit backend-native maintenance after large retention purges or
+  derived-index rebuilds.
+- Treat heavy reindexing or table rewrites as offline maintenance, not a normal
   ingestion-path operation.
 
 ## Query Recipes
@@ -370,7 +369,7 @@ Then query resource request, limit, restart, and readiness facts for those Pods.
 facts + edges: candidate search
 versions: proof and diff
 latest_index: navigation
-JSONB GIN: optional hot ad-hoc query
+ClickHouse JSON/skip indexes: optional hot ad-hoc query
 ```
 
 ## Agent SQL Access
@@ -389,7 +388,7 @@ kube-insight query sql --db kubeinsight.db \
 `PRAGMA query_only`, accepts only `SELECT`, `WITH`, and `EXPLAIN` statements,
 rejects mutation keywords, and caps returned rows with `--max-rows`.
 
-Future API backends should keep the same product contract:
+Future API backends, including ClickHouse, should keep the same product contract:
 
 - expose schema/metadata first,
 - execute only read-only SQL for agents,

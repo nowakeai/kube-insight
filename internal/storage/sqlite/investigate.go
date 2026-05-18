@@ -10,77 +10,16 @@ import (
 
 	"kube-insight/internal/core"
 	"kube-insight/internal/logging"
+	"kube-insight/internal/storage"
 )
 
-type ObjectTarget struct {
-	ClusterID string
-	Kind      string
-	Namespace string
-	Name      string
-	UID       string
-}
-
-type ObjectRecord struct {
-	LogicalID        string    `json:"logicalId"`
-	ClusterID        string    `json:"clusterId"`
-	Group            string    `json:"group"`
-	Version          string    `json:"version"`
-	Resource         string    `json:"resource"`
-	Kind             string    `json:"kind"`
-	Namespace        string    `json:"namespace,omitempty"`
-	Name             string    `json:"name"`
-	UID              string    `json:"uid,omitempty"`
-	LatestObservedAt time.Time `json:"latestObservedAt"`
-}
-
-type EvidenceBundle struct {
-	Object       ObjectRecord      `json:"object"`
-	Latest       map[string]any    `json:"latest,omitempty"`
-	Versions     []VersionEvidence `json:"versions,omitempty"`
-	VersionDiffs []VersionDiff     `json:"versionDiffs,omitempty"`
-	Facts        []core.Fact       `json:"facts,omitempty"`
-	Edges        []core.Edge       `json:"edges,omitempty"`
-	Changes      []core.Change     `json:"changes,omitempty"`
-	Summary      BundleSummary     `json:"summary"`
-}
-
-type VersionEvidence struct {
-	ID              int64          `json:"id"`
-	Sequence        int64          `json:"sequence"`
-	ObservedAt      time.Time      `json:"observedAt"`
-	ResourceVersion string         `json:"resourceVersion,omitempty"`
-	DocumentHash    string         `json:"documentHash"`
-	Materialization string         `json:"materialization"`
-	Strategy        string         `json:"strategy"`
-	ReplayDepth     int            `json:"replayDepth"`
-	Summary         map[string]any `json:"summary,omitempty"`
-	Document        map[string]any `json:"document,omitempty"`
-}
-
-type VersionDiff struct {
-	FromVersionID int64                `json:"fromVersionId"`
-	ToVersionID   int64                `json:"toVersionId"`
-	FromSequence  int64                `json:"fromSequence"`
-	ToSequence    int64                `json:"toSequence"`
-	Changes       []DocumentDiffChange `json:"changes"`
-	Truncated     bool                 `json:"truncated,omitempty"`
-}
-
-type DocumentDiffChange struct {
-	Path   string `json:"path"`
-	Before string `json:"before,omitempty"`
-	After  string `json:"after,omitempty"`
-}
-
-type BundleSummary struct {
-	Facts         int `json:"facts"`
-	Edges         int `json:"edges"`
-	Changes       int `json:"changes"`
-	Versions      int `json:"versions,omitempty"`
-	VersionDiffs  int `json:"versionDiffs,omitempty"`
-	EvidenceScore int `json:"evidenceScore,omitempty"`
-	Rank          int `json:"rank,omitempty"`
-}
+type ObjectTarget = storage.ObjectTarget
+type ObjectRecord = storage.ObjectRecord
+type EvidenceBundle = storage.EvidenceBundle
+type VersionEvidence = storage.VersionEvidence
+type VersionDiff = storage.VersionDiff
+type DocumentDiffChange = storage.DocumentDiffChange
+type BundleSummary = storage.BundleSummary
 
 func (s *Store) Investigate(ctx context.Context, target ObjectTarget) (EvidenceBundle, error) {
 	return s.InvestigateWithOptions(ctx, target, InvestigationOptions{})

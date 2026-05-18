@@ -79,9 +79,9 @@ removed_at
 `resource_processing_profiles` stores per-resource behavior. The default profile
 uses the generic history path. High-volume or high-value resources can use a
 specialized profile without changing the logical storage contract.
-The SQLite PoC writes a profile row during discovery and first observation
-storage, then reports API resource count and stored version count by profile in
-benchmark output.
+The SQLite default backend writes a profile row during discovery and first
+observation storage, then reports API resource count and stored version count by
+profile in validation output.
 
 Initial profiles:
 
@@ -144,6 +144,13 @@ k8s_event.reporting_controller
 k8s_event.reporting_instance
 k8s_event.count
 k8s_event.series_count
+service.type
+service.cluster_ip
+service.load_balancer.pending
+service.load_balancer.ingress_count
+service.load_balancer.ingress_ip
+service.load_balancer.ingress_hostname
+service.deleted
 endpoint.ready
 endpoint.serving
 endpoint.terminating
@@ -442,7 +449,7 @@ vacuum_or_analyze
 ```
 
 SQLite should run incremental vacuum when enabled, `wal_checkpoint`, and
-`ANALYZE` after large ingestion or purge jobs. PostgreSQL should rely on
-autovacuum for normal load, but retention purges and large rebuilds should
-schedule explicit `VACUUM (ANALYZE)` or backend-specific maintenance windows
-when bloat or query plans degrade.
+`ANALYZE` after large ingestion or purge jobs. ClickHouse should report active
+and inactive part footprint, compression ratio, and merge pressure during live
+profiles. Future OLTP metadata backends such as PostgreSQL or CockroachDB should
+use their native vacuum/analyze or bloat-management workflows if they are added.

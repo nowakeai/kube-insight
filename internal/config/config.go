@@ -39,6 +39,8 @@ type StorageConfig struct {
 	SQLite      SQLiteConfig      `yaml:"sqlite" json:"sqlite"`
 	Postgres    SQLDatabaseConfig `yaml:"postgres" json:"postgres"`
 	Cockroach   SQLDatabaseConfig `yaml:"cockroach" json:"cockroach"`
+	ClickHouse  ClickHouseConfig  `yaml:"clickhouse" json:"clickhouse"`
+	ChDB        ChDBConfig        `yaml:"chdb" json:"chdb"`
 	Maintenance MaintenanceConfig `yaml:"maintenance" json:"maintenance"`
 	Retention   RetentionConfig   `yaml:"retention" json:"retention"`
 }
@@ -73,6 +75,25 @@ type RetentionPolicyConfig struct {
 
 type SQLDatabaseConfig struct {
 	DSNEnv string `yaml:"dsnEnv" json:"dsnEnv"`
+}
+
+type ChDBConfig struct {
+	Path     string `yaml:"path" json:"path"`
+	Database string `yaml:"database" json:"database"`
+}
+
+type ClickHouseConfig struct {
+	InitOnStart      bool   `yaml:"initOnStart" json:"initOnStart"`
+	DSNEnv           string `yaml:"dsnEnv" json:"dsnEnv"`
+	Database         string `yaml:"database" json:"database"`
+	Cluster          string `yaml:"cluster" json:"cluster"`
+	HotVolume        string `yaml:"hotVolume" json:"hotVolume"`
+	ColdVolume       string `yaml:"coldVolume" json:"coldVolume"`
+	ColdAfterSeconds int    `yaml:"coldAfterSeconds" json:"coldAfterSeconds"`
+	UseJSONType      bool   `yaml:"useJsonType" json:"useJsonType"`
+	AsyncInsert      bool   `yaml:"asyncInsert" json:"asyncInsert"`
+	BatchSize        int    `yaml:"batchSize" json:"batchSize"`
+	FlushIntervalMS  int    `yaml:"flushIntervalMillis" json:"flushIntervalMillis"`
 }
 
 type CollectionConfig struct {

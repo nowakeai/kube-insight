@@ -52,6 +52,11 @@ Run the history scan after final docs and fixtures are committed, not before.
 
 - [ ] CI is green.
 - [ ] GoReleaser config passes a local check or release workflow dry-run.
-- [ ] GHCR image visibility is confirmed.
+- [ ] The merged `.goreleaser.yaml` stages each chDB `libchdb.so` runtime before
+  publishing chDB-enabled archives and Docker images.
+- [ ] Do not add Windows chDB artifacts until upstream chDB and `chdb-go` provide
+  a working Windows runtime.
+- [ ] GHCR package `ghcr.io/nowakeai/kube-insight` is public and includes default
+  `<tag>` plus chDB `<tag>-chdb` multi-architecture tags.
 - [ ] Release notes mention breaking schema, storage, or CLI changes.
 - [ ] The tag follows semantic versioning, for example `v0.1.0`.

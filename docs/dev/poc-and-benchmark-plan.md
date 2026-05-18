@@ -1,7 +1,10 @@
 # PoC And Benchmark Plan
 
-This document defines what to measure during the PoC. The broader correctness,
-security, integration, and release gates are defined in
+This document captures the original PoC measurement plan. The current MVP
+validation story is split across this plan,
+[Storage Modes And Performance](../validation/storage-mode-comparison.md),
+[ClickHouse MVP Closeout](clickhouse-mvp-closeout.md), and the broader
+correctness, security, integration, and release gates in
 [Test Acceptance Plan](test-acceptance-plan.md).
 
 ## Goals
@@ -14,7 +17,7 @@ Validate:
 4. Fact index size and query latency.
 5. Service investigation end-to-end latency.
 6. Global watcher coverage, stability, and API/storage pressure.
-7. Backend tradeoffs across SQLite and PostgreSQL/TimescaleDB.
+7. Backend tradeoffs across SQLite and the ClickHouse evidence-backend spike.
 8. Filter correctness, redaction safety, and discarded-change accounting.
 9. Delete detection and relist reconciliation correctness.
 10. Storage maintenance impact, including vacuum/analyze behavior.
@@ -210,28 +213,25 @@ SQLite:
 - query latency,
 - index size.
 
-PostgreSQL:
+ClickHouse:
 
-- JSONB GIN hot query latency,
-- GiST topology interval latency,
-- write throughput,
-- table/index size.
-
-TimescaleDB:
-
-- fact hypertable compression,
-- compressed cold query latency,
-- retention behavior.
+- compressed columnar storage size,
+- hot local-disk query latency,
+- cold S3/object-storage query latency,
+- batched write throughput and part/merge pressure,
+- JSON payload query latency for compressed `String` versus the new `JSON` type,
+- data skipping index size and usefulness for Event/status/message queries.
 
 Maintenance:
 
 - SQLite `wal_checkpoint`, incremental vacuum when enabled, and `ANALYZE`.
-- PostgreSQL autovacuum behavior after sustained ingestion.
-- Explicit `VACUUM (ANALYZE)` after retention purge or large rebuild.
-- Index bloat before and after purge/compaction.
+- ClickHouse part counts, merge backlog, mutation avoidance, and hot/cold TTL
+  movement behavior.
+- Index/storage bytes before and after compaction or cold-tier movement.
 
-Do not use local host port `5432` for tests if occupied. Use `55432` or another
-free port.
+Do not require a distributed ClickHouse cluster for the first spike. A single
+server with local hot storage and an S3-compatible cold disk is enough to answer
+the storage-cost question.
 
 ## Core Acceptance Metrics
 

@@ -23,6 +23,12 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Storage.Retention.Enabled || cfg.Storage.Retention.MinVersionsPerObject <= 0 {
 		t.Fatalf("retention = %#v", cfg.Storage.Retention)
 	}
+	if !cfg.Storage.ClickHouse.InitOnStart || cfg.Storage.ClickHouse.DSNEnv == "" || cfg.Storage.ClickHouse.Database == "" {
+		t.Fatalf("clickhouse = %#v", cfg.Storage.ClickHouse)
+	}
+	if cfg.Storage.ChDB.Path == "" || cfg.Storage.ChDB.Database == "" {
+		t.Fatalf("chdb = %#v", cfg.Storage.ChDB)
+	}
 	if cfg.Instance.Role != "all" || !cfg.Collection.Enabled {
 		t.Fatalf("instance/collection = %#v %#v", cfg.Instance, cfg.Collection)
 	}
@@ -50,6 +56,44 @@ func TestLoadExampleConfig(t *testing.T) {
 		if !hasProcessingFilter(cfg.Processing.Filters, want) {
 			t.Fatalf("filter %q missing: %#v", want, cfg.Processing.Filters)
 		}
+	}
+}
+
+func TestLoadClickHouseExampleConfig(t *testing.T) {
+	cfg, err := LoadFile(filepath.Join("..", "..", "config", "kube-insight.clickhouse.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Driver != "clickhouse" {
+		t.Fatalf("driver = %q", cfg.Storage.Driver)
+	}
+	if cfg.Storage.ClickHouse.DSNEnv != "KUBE_INSIGHT_CLICKHOUSE_DSN" || cfg.Storage.ClickHouse.Database != "kube_insight" {
+		t.Fatalf("clickhouse = %#v", cfg.Storage.ClickHouse)
+	}
+	if cfg.Storage.ClickHouse.ColdVolume != "" || cfg.Storage.ClickHouse.ColdAfterSeconds != 0 {
+		t.Fatalf("cold tiering should be disabled in local example: %#v", cfg.Storage.ClickHouse)
+	}
+	if !cfg.Collection.Enabled || !cfg.Collection.Resources.All {
+		t.Fatalf("defaults not overlaid: %#v", cfg.Collection)
+	}
+	if cfg.Collection.Watch.MaxConcurrentStreams != 256 {
+		t.Fatalf("clickhouse dev maxConcurrentStreams = %d", cfg.Collection.Watch.MaxConcurrentStreams)
+	}
+}
+
+func TestLoadChDBExampleConfig(t *testing.T) {
+	cfg, err := LoadFile(filepath.Join("..", "..", "config", "kube-insight.chdb.example.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Driver != "chdb" {
+		t.Fatalf("driver = %q", cfg.Storage.Driver)
+	}
+	if cfg.Storage.ChDB.Path != "kubeinsight.chdb" || cfg.Storage.ChDB.Database != "kube_insight" {
+		t.Fatalf("chdb = %#v", cfg.Storage.ChDB)
+	}
+	if !cfg.Collection.Enabled || !cfg.Collection.Resources.All {
+		t.Fatalf("defaults not overlaid: %#v", cfg.Collection)
 	}
 }
 
@@ -269,6 +313,55 @@ func TestValidateAcceptsPostgresSharedDSN(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsClickHouseSharedDSN(t *testing.T) {
+	cfg := Config{
+		Version:  "v1alpha1",
+		Instance: InstanceConfig{Role: "api"},
+		Storage: StorageConfig{
+			Driver: "clickhouse",
+			ClickHouse: ClickHouseConfig{
+				DSNEnv:   "KUBE_INSIGHT_CLICKHOUSE_DSN",
+				Database: "kube_insight",
+			},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateAcceptsChDBLocalConfig(t *testing.T) {
+	cfg := Config{
+		Version:  "v1alpha1",
+		Instance: InstanceConfig{Role: "api"},
+		Storage: StorageConfig{
+			Driver: "chdb",
+			ChDB: ChDBConfig{
+				Path:     "kubeinsight.chdb",
+				Database: "kube_insight",
+			},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateRejectsChDBWithoutPath(t *testing.T) {
+	cfg := Config{
+		Version:  "v1alpha1",
+		Instance: InstanceConfig{Role: "api"},
+		Storage: StorageConfig{
+			Driver: "chdb",
+			ChDB:   ChDBConfig{Database: "kube_insight"},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "chdb path") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestValidateRejectsWriterInstanceWithListeners(t *testing.T) {
 	cfg := Config{
 		Version:  "v1alpha1",
@@ -403,5 +496,22 @@ func TestValidateRejectsEmptyProfileReplacement(t *testing.T) {
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "resourceProfiles.rules") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDefaultProfileRulesReferenceConfiguredPoliciesAndExtractorSets(t *testing.T) {
+	cfg := Default()
+	for _, rule := range cfg.ProfileRules() {
+		profile := rule.EffectiveProfile(profileDefaultsFromConfig(cfg.ResourceProfiles.Defaults))
+		if profile.RetentionPolicy != "" {
+			if _, ok := cfg.Storage.Retention.Policies[profile.RetentionPolicy]; !ok {
+				t.Fatalf("profile rule %q references unknown retention policy %q", profile.Name, profile.RetentionPolicy)
+			}
+		}
+		if profile.ExtractorSet != "" {
+			if _, ok := cfg.Processing.ExtractorSets[profile.ExtractorSet]; !ok {
+				t.Fatalf("profile rule %q references unknown extractor set %q", profile.Name, profile.ExtractorSet)
+			}
+		}
 	}
 }

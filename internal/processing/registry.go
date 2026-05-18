@@ -205,6 +205,7 @@ var builtInExtractors = map[string]func() extractor.Extractor{
 	"pod":       func() extractor.Extractor { return extractor.PodExtractor{} },
 	"node":      func() extractor.Extractor { return extractor.NodeExtractor{} },
 	"event":     func() extractor.Extractor { return extractor.EventExtractor{} },
+	"service":   func() extractor.Extractor { return extractor.ServiceExtractor{} },
 	"endpointslice": func() extractor.Extractor {
 		return extractor.EndpointSliceExtractor{}
 	},

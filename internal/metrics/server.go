@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
+	"kube-insight/internal/storage"
+	"kube-insight/internal/storage/clickhouse"
 	"kube-insight/internal/storage/sqlite"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -13,7 +16,11 @@ import (
 )
 
 type ServerOptions struct {
-	DBPath string
+	DBPath              string
+	Driver              string
+	ClickHouseEndpoint  string
+	ClickHouseOptions   clickhouse.Options
+	OpenClickHouseStore func(context.Context) (clickHouseMetricsStore, error)
 }
 
 type Server struct {
@@ -21,11 +28,25 @@ type Server struct {
 }
 
 func NewServer(opts ServerOptions) (*Server, error) {
-	if opts.DBPath == "" {
-		return nil, errors.New("metrics server requires a sqlite database path")
+	driver := strings.ToLower(strings.TrimSpace(opts.Driver))
+	if driver == "" {
+		driver = "sqlite"
 	}
 	registry := prometheus.NewRegistry()
-	registry.MustRegister(NewCollector(opts.DBPath))
+	switch driver {
+	case "sqlite":
+		if opts.DBPath == "" {
+			return nil, errors.New("metrics server requires a sqlite database path")
+		}
+		registry.MustRegister(NewCollector(opts.DBPath))
+	case "clickhouse":
+		if opts.OpenClickHouseStore == nil && strings.TrimSpace(opts.ClickHouseEndpoint) == "" {
+			return nil, errors.New("metrics server requires a clickhouse endpoint")
+		}
+		registry.MustRegister(NewClickHouseCollector(opts))
+	default:
+		return nil, errors.New("metrics server does not support storage driver " + driver)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +181,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.NewInvalidMetric(c.clusters, err)
 		return
 	}
-	health, err := store.ResourceHealth(context.Background(), sqlite.ResourceHealthOptions{})
+	health, err := store.ResourceHealth(context.Background(), storage.ResourceHealthOptions{})
 	if err != nil {
 		ch <- prometheus.NewInvalidMetric(c.resourceStreams, err)
 		return
@@ -218,7 +239,7 @@ func (c *Collector) collectProfileStats(ch chan<- prometheus.Metric, stats sqlit
 	}
 }
 
-func (c *Collector) collectResourceHealth(ch chan<- prometheus.Metric, health sqlite.ResourceHealthReport) {
+func (c *Collector) collectResourceHealth(ch chan<- prometheus.Metric, health storage.ResourceHealthReport) {
 	ch <- gauge(c.resourceStreams, float64(health.Summary.Healthy), "healthy")
 	ch <- gauge(c.resourceStreams, float64(health.Summary.Unstable), "unstable")
 	ch <- gauge(c.resourceStreams, float64(health.Summary.Errors), "errors")

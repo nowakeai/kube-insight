@@ -1,9 +1,15 @@
 # Quickstart
 
-This quickstart runs kube-insight as a local PoC with SQLite. PostgreSQL and
-CockroachDB are the planned MVP backends for central service deployments.
+This quickstart uses the default kube-insight artifact. The default artifact has
+no storage-backend suffix, stays small and pure Go, and uses SQLite for local
+single-file runs. A separate chDB-enabled artifact is available for local
+ClickHouse-compatible storage when `libchdb.so` is installed. The current central
+backend MVP targets ClickHouse for append-only evidence history, JSON search,
+storage-efficiency metrics, and low-cost cold object-storage tiering experiments.
 
 ## Install
+
+Use a version from the [release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
 KI_VERSION=0.0.1
@@ -22,6 +28,67 @@ chmod +x kube-insight
 
 Windows users can download the `.zip` artifact from the
 [release page](https://github.com/nowakeai/kube-insight/releases).
+
+## Local Storage Variants
+
+For performance numbers and backend tradeoffs, see
+[Storage Modes And Performance](validation/storage-mode-comparison.md).
+
+Use the default `kube-insight` binary for the smallest local install:
+
+```bash
+./kube-insight watch --db kubeinsight.db
+```
+
+Use the chDB-enabled variant when you want the embedded local store to share the
+ClickHouse table/query contract. Local development builds write
+`bin/kube-insight-chdb`; release chDB archives are named with `_chdb_` and still
+contain a binary named `kube-insight`:
+
+```bash
+# Source checkout local build
+./bin/kube-insight-chdb --config config/kube-insight.chdb.example.yaml \
+  watch pods services --timeout 30s
+
+# Release chDB archive, after extracting kube-insight and libchdb.so
+CHDB_LIB_PATH=./libchdb.so ./kube-insight \
+  --config config/kube-insight.chdb.example.yaml \
+  watch pods services --timeout 30s
+```
+
+The chDB-enabled binary still supports SQLite and ClickHouse. It additionally
+requires a compatible `libchdb.so` discoverable through the system dynamic
+linker, `LD_LIBRARY_PATH`, or `CHDB_LIB_PATH`. The default binary does not link
+chDB; selecting `storage.driver: chdb` with it fails with an explicit setup
+error.
+
+## ClickHouse Service Backend
+
+Use ClickHouse when kube-insight should keep continuous central evidence history
+for a team, API service, or MCP service. Start from the example config and pass
+the HTTP DSN through the configured environment variable:
+
+```bash
+export KUBE_INSIGHT_CLICKHOUSE_DSN='http://127.0.0.1:8123/?user=kube_insight&password=...'
+./kube-insight --config config/kube-insight.clickhouse.example.yaml serve \
+  --watch pods services endpointslices.discovery.k8s.io \
+  --api \
+  --mcp \
+  --metrics
+```
+
+For source checkouts, the local Docker Compose workflow starts ClickHouse and a
+dev watcher environment:
+
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+make clickhouse-live-profile
+```
+
+Cold object-storage movement is opt-in. The default example config does not move
+data to S3 or another object store unless a matching ClickHouse storage policy is
+configured explicitly.
 
 ## Watch Current Cluster
 
@@ -90,7 +157,7 @@ Inspect one object's retained content versions and observation trail:
 unchanged observations keep the time/resourceVersion without duplicating JSON,
 facts, edges, or changes.
 
-## Compact Storage
+## Compact SQLite Storage
 
 Long-running `watch` and `serve --watch` processes run lightweight SQLite
 maintenance automatically. The periodic task checkpoints/truncates WAL and runs
@@ -123,8 +190,8 @@ The combined command supports these components:
 - `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP endpoint at `/mcp`.
-- `--webui`: web UI listener. The PoC exposes only a placeholder until the UI
-  is implemented.
+- `--webui`: web UI listener. The current build exposes only a placeholder until
+  the UI is implemented.
 
 Example with all current and planned service surfaces:
 
@@ -161,7 +228,16 @@ curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&
 
 ```bash
 ./kube-insight serve mcp --db kubeinsight.db
+
+# ClickHouse-backed stdio MCP
+KUBE_INSIGHT_CLICKHOUSE_DSN=http://127.0.0.1:8123/?user=kube_insight \
+  ./kube-insight --config config/kube-insight.clickhouse.example.yaml serve mcp
 ```
+
+MCP follows the configured `storage.driver`: SQLite by default, ClickHouse when
+started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
+Agents should call `kube_insight_schema` first because SQLite and
+ClickHouse-compatible backends expose different SQL table names.
 
 MCP stdio currently exposes:
 
@@ -176,16 +252,17 @@ It also exposes prompts for common agent workflows:
 - `kube_insight_event_history`
 - `kube_insight_object_history`
 
-## Validate PoC
+## Validate A Checkout
+
+For source checkouts, run the same quick validation used during development:
 
 ```bash
-make check-lines
-go test ./...
-make validate
+make test
+make build
+git diff --check
 ```
 
-Expected PoC validation output should include:
-
-```text
-PASS checks=22/22
-```
+`make validate` runs the generated PoC fixture validation and writes reports
+under `testdata/generated/`; use it when changing ingestion, extraction, storage,
+query, API, or MCP behavior. ClickHouse and chDB validation commands are listed
+in [Development Commands](dev/commands.md).

@@ -1,0 +1,8 @@
+version: v1alpha1
+
+storage:
+  driver: chdb
+  chdb:
+    # Requires a binary built with -tags chdb and a discoverable libchdb.so.
+    path: kubeinsight.chdb
+    database: kube_insight

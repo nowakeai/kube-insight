@@ -37,6 +37,33 @@ storage:
     policies:
       standard:
         minVersionsPerObject: 1
+      hot:
+        maxAgeSeconds: 1209600
+        minVersionsPerObject: 5
+      large_status:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 2
+      topology:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 2
+      workload:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 3
+      gitops_state:
+        maxAgeSeconds: 2592000
+        minVersionsPerObject: 3
+      control_plane:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
+      security:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
+      sensitive_metadata:
+        maxAgeSeconds: 1209600
+        minVersionsPerObject: 1
+      certificate_lifecycle:
+        maxAgeSeconds: 7776000
+        minVersionsPerObject: 3
       events_short_window:
         maxAgeSeconds: 604800
         minVersionsPerObject: 1
@@ -50,6 +77,27 @@ storage:
     dsnEnv: KUBE_INSIGHT_POSTGRES_DSN
   cockroach:
     dsnEnv: KUBE_INSIGHT_COCKROACH_DSN
+  clickhouse:
+    # Used when storage.driver is clickhouse. Writes use the HTTP interface.
+    initOnStart: true
+    dsnEnv: KUBE_INSIGHT_CLICKHOUSE_DSN
+    database: kube_insight
+    cluster: ""
+    # Local Docker ClickHouse does not define hot/cold volumes by default.
+    # Set coldVolume and coldAfterSeconds only after configuring a storage policy.
+    hotVolume: ""
+    coldVolume: ""
+    coldAfterSeconds: 0
+    useJsonType: false
+    asyncInsert: true
+    batchSize: 1000
+    flushIntervalMillis: 1000
+  chdb:
+    # Embedded ClickHouse-compatible local backend for the chDB-enabled variant.
+    # Normal default builds use the unavailable placeholder; build with -tags
+    # chdb and libchdb.so to run it.
+    path: kubeinsight.chdb
+    database: kube_insight
 
 collection:
   enabled: true
@@ -233,7 +281,8 @@ processing:
     endpointslice: [reference, endpointslice]
     secret_metadata: [reference]
     workload: [reference]
-    service_topology: [reference]
+    service_topology: [reference, service]
+    gitops: [reference]
     webhook: [reference]
     rbac: [reference]
     certmanager: [reference]
@@ -263,6 +312,11 @@ processing:
       enabled: true
       guard:
         resources: [endpointslices.discovery.k8s.io]
+    service:
+      type: builtin
+      enabled: true
+      guard:
+        resources: [services]
 
 plugins:
   goja:

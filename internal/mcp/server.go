@@ -10,19 +10,32 @@ import (
 	"net/http"
 	"time"
 
+	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
 
 const protocolVersion = "2025-06-18"
 
 type ServerOptions struct {
-	DBPath string
-	Name   string
+	DBPath        string
+	Name          string
+	OpenStore     StoreOpener
+	KeepStoreOpen bool
+	Close         func() error
+}
+
+type StoreOpener func(context.Context) (ReadStore, error)
+
+type ReadStore interface {
+	Close() error
 }
 
 type Server struct {
-	dbPath string
-	name   string
+	dbPath              string
+	name                string
+	openStore           StoreOpener
+	closeStoreOnRequest bool
+	closeFunc           func() error
 }
 
 type rpcRequest struct {
@@ -89,14 +102,30 @@ type toolContent struct {
 }
 
 func NewServer(opts ServerOptions) (*Server, error) {
-	if opts.DBPath == "" {
-		return nil, errors.New("mcp server requires a sqlite database path")
+	openStore := opts.OpenStore
+	if openStore == nil {
+		if opts.DBPath == "" {
+			return nil, errors.New("mcp server requires a read store or sqlite database path")
+		}
+		openStore = sqliteStoreOpener(opts.DBPath)
 	}
 	name := opts.Name
 	if name == "" {
 		name = "kube-insight"
 	}
-	return &Server{dbPath: opts.DBPath, name: name}, nil
+	return &Server{
+		dbPath:              opts.DBPath,
+		name:                name,
+		openStore:           openStore,
+		closeStoreOnRequest: !opts.KeepStoreOpen,
+		closeFunc:           opts.Close,
+	}, nil
+}
+
+func sqliteStoreOpener(path string) StoreOpener {
+	return func(context.Context) (ReadStore, error) {
+		return sqlite.OpenReadOnly(path)
+	}
 }
 
 func ServeStdio(ctx context.Context, in io.Reader, out io.Writer, opts ServerOptions) error {
@@ -104,6 +133,7 @@ func ServeStdio(ctx context.Context, in io.Reader, out io.Writer, opts ServerOpt
 	if err != nil {
 		return err
 	}
+	defer server.Close()
 	return server.ServeStdio(ctx, in, out)
 }
 
@@ -115,6 +145,7 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 	if err != nil {
 		return err
 	}
+	defer server.Close()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "http"})
@@ -213,6 +244,23 @@ func (s *Server) HandleJSONRPC(ctx context.Context, payload []byte) ([]byte, boo
 	return data, true, nil
 }
 
+func (s *Server) Close() error {
+	if s.closeFunc == nil {
+		return nil
+	}
+	return s.closeFunc()
+}
+
+func (s *Server) openReadStore(ctx context.Context) (ReadStore, error) {
+	return s.openStore(ctx)
+}
+
+func (s *Server) closeReadStore(store ReadStore) {
+	if s.closeStoreOnRequest && store != nil {
+		_ = store.Close()
+	}
+}
+
 func (s *Server) handleLine(ctx context.Context, line []byte) *rpcResponse {
 	var request rpcRequest
 	if err := json.Unmarshal(line, &request); err != nil {
@@ -295,28 +343,36 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (map[stri
 }
 
 func (s *Server) querySchema(ctx context.Context) (any, error) {
-	store, err := sqlite.OpenReadOnly(s.dbPath)
+	store, err := s.openReadStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
-	return store.QuerySchema(ctx)
+	defer s.closeReadStore(store)
+	queryStore, ok := store.(storage.SQLQueryStore)
+	if !ok {
+		return nil, fmt.Errorf("configured store does not support schema queries")
+	}
+	return queryStore.QuerySchema(ctx)
 }
 
 func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
-	store, err := sqlite.OpenReadOnly(s.dbPath)
+	store, err := s.openReadStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
-	return store.QuerySQL(ctx, sqlite.SQLQueryOptions{
+	defer s.closeReadStore(store)
+	queryStore, ok := store.(storage.SQLQueryStore)
+	if !ok {
+		return nil, fmt.Errorf("configured store does not support SQL queries")
+	}
+	return queryStore.QuerySQL(ctx, storage.SQLQueryOptions{
 		SQL:     args.SQL,
 		MaxRows: args.MaxRows,
 	})
 }
 
 func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, error) {
-	opts := sqlite.ResourceHealthOptions{
+	opts := storage.ResourceHealthOptions{
 		ClusterID:        args.ClusterID,
 		Status:           args.Status,
 		ErrorsOnly:       args.ErrorsOnly,
@@ -331,23 +387,27 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 		}
 		opts.StaleAfter = value
 	}
-	store, err := sqlite.OpenReadOnly(s.dbPath)
+	store, err := s.openReadStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
-	return store.ResourceHealth(ctx, opts)
+	defer s.closeReadStore(store)
+	healthStore, ok := store.(storage.ResourceHealthStore)
+	if !ok {
+		return nil, fmt.Errorf("configured store does not support resource health")
+	}
+	return healthStore.ResourceHealth(ctx, opts)
 }
 
 func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, error) {
-	target := sqlite.ObjectTarget{
+	target := storage.ObjectTarget{
 		ClusterID: args.ClusterID,
 		UID:       args.UID,
 		Kind:      args.Kind,
 		Namespace: args.Namespace,
 		Name:      args.Name,
 	}
-	opts := sqlite.ObjectHistoryOptions{
+	opts := storage.ObjectHistoryOptions{
 		MaxVersions:     args.MaxVersions,
 		MaxObservations: args.MaxObservations,
 		IncludeDocs:     args.IncludeDocs,
@@ -372,12 +432,16 @@ func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, 
 	if args.Diffs != nil {
 		opts.IncludeDiffs = *args.Diffs
 	}
-	store, err := sqlite.OpenReadOnly(s.dbPath)
+	store, err := s.openReadStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer store.Close()
-	return store.ObjectHistory(ctx, target, opts)
+	defer s.closeReadStore(store)
+	historyStore, ok := store.(storage.ObjectHistoryStore)
+	if !ok {
+		return nil, fmt.Errorf("configured store does not support object history")
+	}
+	return historyStore.ObjectHistory(ctx, target, opts)
 }
 
 func toolResult(value any, err error) (map[string]any, error) {
@@ -406,7 +470,7 @@ func tools() []map[string]any {
 	return []map[string]any{
 		{
 			"name":        "kube_insight_schema",
-			"description": "Return kube-insight SQL tables, columns, indexes, and join hints.",
+			"description": "Return the active kube-insight backend schema, SQL dialect notes, tables, columns, indexes, and join hints. Call this before writing SQL because SQLite and ClickHouse table names differ.",
 			"inputSchema": map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -414,7 +478,7 @@ func tools() []map[string]any {
 		},
 		{
 			"name":        "kube_insight_sql",
-			"description": "Run read-only SQL against kube-insight evidence storage.",
+			"description": "Run read-only SQL against the configured kube-insight evidence store. Use kube_insight_schema first and write SQL for the reported backend/dialect.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -545,12 +609,16 @@ func promptText(name string, args map[string]string) (string, string, error) {
 		cluster := promptArg(args, "cluster", "the relevant cluster")
 		return fmt.Sprintf(`Investigate %s with kube-insight.
 
+Default to SQL after schema detection. Typed tools such as kube_insight_health and kube_insight_history are guardrails and packaged summaries; use kube_insight_sql for discovery, ranking candidates, topology expansion, and proof queries.
+
 Use this order:
-1. Call kube_insight_health for %s. Treat list/watch errors and stale resources as evidence gaps.
-2. Call kube_insight_schema and list clusters with SQL: select id, name, source from clusters order by id.
-3. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
-4. Query facts and edges for candidate resources. Prefer exact fact_key/fact_value predicates before broad text search.
-5. Use kube_insight_history only for the final candidate objects or as proof for claims.
+1. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
+2. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
+3. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
+4. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
+5. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search. For Service exposure issues, start with service.load_balancer.pending and service.load_balancer.ingress_ip facts before opening retained Service versions.
+6. Query edges with src_id or dst_id around candidates to expand topology.
+7. Query observations and versions for retained proof. Use kube_insight_history only for final candidate objects or when packaged diffs are clearer than raw SQL.
 
 Do not claim absence unless collector coverage is healthy for the resource types involved.`, symptom, cluster), "Coverage-first kube-insight investigation", nil
 	case "kube_insight_event_history":
@@ -559,19 +627,31 @@ Do not claim absence unless collector coverage is healthy for the resource types
 		keyword := promptArg(args, "keyword", "the message keyword")
 		return fmt.Sprintf(`Investigate retained Kubernetes Events in %s.
 
-Use kube_insight_sql to:
-1. List clusters and select one cluster_id.
-2. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
-3. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
-4. Join Event objects through object_edges with event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
-5. Fetch kube_insight_history for the affected resource and the Event when proof is needed.
+Use kube_insight_schema first, then use kube_insight_sql as the primary interface with SQL that matches the active backend:
+1. Identify whether schema notes say SQLite or ClickHouse-compatible.
+2. Check current collector coverage for Event and affected-resource types. For ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at) before trusting current status.
+3. Select a cluster_id using available schema rows or evidence rows.
+4. Query Event facts directly. SQLite uses object_facts; ClickHouse-compatible backends use facts. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
+5. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
+6. Follow Event relationship edges. SQLite uses object_edges; ClickHouse-compatible backends use edges. Look for event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
+7. Query changes, observations, and versions for affected object_ids before making a claim.
+8. Fetch kube_insight_history for the affected resource and the Event only when packaged proof or diffs are needed.
 
 Compare retained Event history with current kubectl only as separate evidence; kubectl shows live apiserver state, not the retained window.`, cluster, reason, keyword), "Retained Event history investigation", nil
 	case "kube_insight_object_history":
 		target := promptObjectTarget(args)
 		return fmt.Sprintf(`Inspect object history for %s.
 
-Use kube_insight_history with the most specific identifier available, preferring uid when known. Include diffs and keep maxVersions/maxObservations bounded at first.
+Use kube_insight_schema first and treat kube_insight_sql as the primary investigation interface. Detect whether the active backend exposes SQLite tables such as object_facts/object_edges/object_observations/latest_index or ClickHouse-compatible tables such as facts/edges/changes/observations/versions.
+
+Start with SQL:
+1. Check coverage for the object's resource type; for ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at).
+2. Locate the object by the most specific identifier available, preferring uid when known.
+3. Query facts and changes for the object_id to explain why it matters.
+4. Query edges where the object is src_id or dst_id to find related causes and dependents.
+5. Query observations and versions for proof timestamps, resource versions, doc_hash values, and retained documents when needed.
+
+Use kube_insight_history after SQL has identified the object. Include diffs and keep maxVersions/maxObservations bounded at first.
 
 Summarize:
 1. First and last observed times.

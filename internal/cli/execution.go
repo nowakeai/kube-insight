@@ -27,7 +27,14 @@ func ingestInputs(ctx context.Context, store storage.Store, file, dir string, cf
 		if err != nil {
 			return ingest.Summary{}, err
 		}
-		return pipeline.IngestJSON(ctx, data)
+		summary, err := pipeline.IngestJSON(ctx, data)
+		if err != nil {
+			return ingest.Summary{}, err
+		}
+		if err := flushStore(ctx, store); err != nil {
+			return summary, err
+		}
+		return summary, nil
 	}
 
 	files, err := jsonFiles(dir)
@@ -58,7 +65,18 @@ func ingestInputs(ctx context.Context, store storage.Store, file, dir string, cf
 		total.Edges += summary.Edges
 		total.Changes += summary.Changes
 	}
+	if err := flushStore(ctx, store); err != nil {
+		return total, err
+	}
 	return total, nil
+}
+
+func flushStore(ctx context.Context, store storage.Store) error {
+	flushable, ok := store.(storage.FlushableStore)
+	if !ok {
+		return nil
+	}
+	return flushable.Flush(ctx)
 }
 
 func jsonFiles(dir string) ([]string, error) {

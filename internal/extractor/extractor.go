@@ -186,6 +186,8 @@ func defaultExtractorName(e Extractor) string {
 		return "event"
 	case EndpointSliceExtractor:
 		return "endpointslice"
+	case ServiceExtractor:
+		return "service"
 	default:
 		return e.Kind()
 	}

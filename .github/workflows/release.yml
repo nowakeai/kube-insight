@@ -9,6 +9,10 @@ permissions:
   contents: write
   packages: write
 
+env:
+  CHDB_VERSION: "3.7.2"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
@@ -24,6 +28,88 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Prepare release notes
+        run: mkdir -p dist
+
+      - name: Build changelog
+        id: build_changelog
+        uses: mikepenz/release-changelog-builder-action@v6
+        with:
+          mode: COMMIT
+          outputFile: dist/RELEASE_NOTES.md
+          configurationJson: |
+            {
+              "template": "#{{CHANGELOG}}",
+              "empty_template": "No user-facing changes were detected by the changelog builder.",
+              "commit_template": "- #{{TITLE}} (#{{MERGE_SHA}})",
+              "categories": [
+                {
+                  "title": "## Features",
+                  "labels": ["feat", "feature"]
+                },
+                {
+                  "title": "## Performance",
+                  "labels": ["perf", "performance"]
+                },
+                {
+                  "title": "## Fixes",
+                  "labels": ["fix", "bug"]
+                },
+                {
+                  "title": "## Documentation",
+                  "labels": ["docs", "documentation"]
+                },
+                {
+                  "title": "## CI and Maintenance",
+                  "labels": ["build", "chore", "ci", "refactor", "test"]
+                },
+                {
+                  "title": "## Other Changes",
+                  "labels": []
+                }
+              ],
+              "label_extractor": [
+                {
+                  "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([\\w\\-.]+\\))?(!)?: .+",
+                  "on_property": "title",
+                  "target": "$1"
+                }
+              ]
+            }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Append release artifact notes
+        run: |
+          {
+            echo
+            echo "## Artifacts"
+            echo
+            printf -- '- Default archives: Linux, macOS, and Windows amd64; Linux and macOS arm64.\n'
+            printf -- '- chDB archives: Linux and macOS amd64/arm64, each bundled with the matching `libchdb.so` runtime.\n'
+            printf -- '- Container images: `ghcr.io/%s:%s` and `ghcr.io/%s:%s-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+            printf -- '- Convenience tags: `ghcr.io/%s:latest` and `ghcr.io/%s:latest-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REPOSITORY}"
+          } >> dist/RELEASE_NOTES.md
+
+      - name: Prepare chDB runtime
+        run: |
+          download_chdb_runtime() {
+            asset="$1"
+            dest="$2"
+            tmp="/tmp/${asset}.tar.gz"
+            mkdir -p "${dest}"
+            curl -fsSL -o "${tmp}" "https://github.com/chdb-io/chdb/releases/download/v${CHDB_VERSION}/${asset}.tar.gz"
+            tar -xzf "${tmp}" -C "${dest}" libchdb.so
+            test -s "${dest}/libchdb.so"
+          }
+
+          download_chdb_runtime linux-x86_64-libchdb build/chdb-runtime/linux-amd64
+          download_chdb_runtime linux-aarch64-libchdb build/chdb-runtime/linux-arm64
+          download_chdb_runtime macos-x86_64-libchdb build/chdb-runtime/darwin-amd64
+          download_chdb_runtime macos-arm64-libchdb build/chdb-runtime/darwin-arm64
+          cp build/chdb-runtime/linux-amd64/libchdb.so build/chdb-runtime/libchdb-linux-amd64.so
+          cp build/chdb-runtime/linux-arm64/libchdb.so build/chdb-runtime/libchdb-linux-arm64.so
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -36,6 +122,6 @@ jobs:
         with:
           distribution: goreleaser
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=dist/RELEASE_NOTES.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

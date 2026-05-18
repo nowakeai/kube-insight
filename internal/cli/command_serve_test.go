@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	appconfig "kube-insight/internal/config"
 )
 
 func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
@@ -51,5 +53,19 @@ func TestWatchLogLevelClassifiesHighVolumeAndErrors(t *testing.T) {
 		if got := watchLogLevel(message); got != want {
 			t.Fatalf("%q level = %v, want %v", message, got, want)
 		}
+	}
+}
+
+func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Storage.Driver = "clickhouse"
+	cfg.Storage.ClickHouse.Database = "ki"
+	if got := serviceStorageTarget(cfg, "kubeinsight.db"); got != "clickhouse:ki" {
+		t.Fatalf("clickhouse target = %q", got)
+	}
+
+	cfg.Storage.Driver = "sqlite"
+	if got := serviceStorageTarget(cfg, "custom.db"); got != "custom.db" {
+		t.Fatalf("sqlite target = %q", got)
 	}
 }

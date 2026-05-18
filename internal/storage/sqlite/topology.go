@@ -3,31 +3,15 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"kube-insight/internal/storage"
 	"time"
 
 	"kube-insight/internal/logging"
 )
 
-type TopologyGraph struct {
-	Root    ObjectRecord    `json:"root"`
-	Nodes   []ObjectRecord  `json:"nodes"`
-	Edges   []TopologyEdge  `json:"edges"`
-	Summary TopologySummary `json:"summary"`
-}
-
-type TopologyEdge struct {
-	Type      string       `json:"type"`
-	Source    ObjectRecord `json:"source"`
-	Target    ObjectRecord `json:"target"`
-	Direction string       `json:"direction"`
-	ValidFrom time.Time    `json:"validFrom"`
-	ValidTo   *time.Time   `json:"validTo,omitempty"`
-}
-
-type TopologySummary struct {
-	Nodes int `json:"nodes"`
-	Edges int `json:"edges"`
-}
+type TopologyGraph = storage.TopologyGraph
+type TopologyEdge = storage.TopologyEdge
+type TopologySummary = storage.TopologySummary
 
 func (s *Store) Topology(ctx context.Context, target ObjectTarget) (TopologyGraph, error) {
 	logger := logging.FromContext(ctx).With("component", "query")

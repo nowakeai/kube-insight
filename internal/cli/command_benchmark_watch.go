@@ -14,6 +14,7 @@ import (
 	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/resourcematch"
+	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 
 	"github.com/spf13/cobra"
@@ -221,25 +222,45 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 			if len(resources) != 1 {
 				return fmt.Errorf("watch resource requires exactly one resource")
 			}
-			dbPath, err := watchDBPath(ctx, cmd, state, rt, selection)
-			if err != nil {
-				return err
-			}
 			runCtx, logger, err := runtimeContext(ctx, stderr, rt)
 			if err != nil {
 				return err
 			}
 			opts.Logf = newWatchLogf(logger)
-			opts.Logf("using db", "db", dbPath)
-			sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
-			if err != nil {
-				return err
+			var store storage.Store
+			dbPath := ""
+			switch storageDriver(rt.Config) {
+			case "clickhouse":
+				dbPath = "clickhouse:" + rt.Config.Storage.ClickHouse.Database
+				store, err = newClickHouseStore(runCtx, rt.Config)
+				if err != nil {
+					return err
+				}
+			case "chdb":
+				store, err = newChDBStore(runCtx, rt.Config)
+				if err != nil {
+					return err
+				}
+				dbPath = "chdb:" + rt.Config.Storage.ChDB.Database
+			case "sqlite":
+				dbPath, err = watchDBPath(ctx, cmd, state, rt, selection)
+				if err != nil {
+					return err
+				}
+				sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
+				if err != nil {
+					return err
+				}
+				defer sqliteStore.Close()
+				store = sqliteStore
+			default:
+				return fmt.Errorf("watch resource does not support storage.driver %q", rt.Config.Storage.Driver)
 			}
-			defer sqliteStore.Close()
+			opts.Logf("using storage", "target", dbPath)
 			opts.Context = singleContext(selection)
 			opts.Namespace = selection.Namespace
 			opts.Resource = resources[0]
-			opts.Store = sqliteStore
+			opts.Store = store
 			opts.Filters = filterChains.Default
 			opts.FilterChains = filterChains
 			opts.Extractors = extractors
@@ -369,20 +390,39 @@ func runWatchContexts(ctx context.Context, cmd *cobra.Command, state *cliState, 
 		Contexts: len(contexts),
 		Results:  make([]watchContextResult, len(contexts)),
 	}
-	var sharedStore *sqlite.Store
-	sharedDBPath := optionalDBPath(cmd, state, rt)
-	if sharedDBPath == "" {
-		sharedDBPath = defaultSQLiteDBPath
-	}
+	var sharedStore storage.Store
+	sharedDBPath := ""
 	var err error
-	sharedStore, err = sqlite.OpenWithOptions(sharedDBPath, sqliteOptionsFromConfig(rt.Config))
-	if err != nil {
-		return out, err
+	switch storageDriver(rt.Config) {
+	case "clickhouse":
+		sharedDBPath = "clickhouse:" + rt.Config.Storage.ClickHouse.Database
+		sharedStore, err = newClickHouseStore(ctx, rt.Config)
+		if err != nil {
+			return out, err
+		}
+	case "chdb":
+		sharedDBPath = "chdb:" + rt.Config.Storage.ChDB.Database
+		sharedStore, err = newChDBStore(ctx, rt.Config)
+		if err != nil {
+			return out, err
+		}
+	case "sqlite":
+		sharedDBPath = optionalDBPath(cmd, state, rt)
+		if sharedDBPath == "" {
+			sharedDBPath = defaultSQLiteDBPath
+		}
+		sqliteStore, err := sqlite.OpenWithOptions(sharedDBPath, sqliteOptionsFromConfig(rt.Config))
+		if err != nil {
+			return out, err
+		}
+		defer sqliteStore.Close()
+		sharedStore = sqliteStore
+		stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage)
+		defer stopMaintenance()
+	default:
+		return out, fmt.Errorf("watch does not support storage.driver %q", rt.Config.Storage.Driver)
 	}
-	defer sharedStore.Close()
-	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sharedStore, rt.Config.Storage)
-	defer stopMaintenance()
-	opts.Logf("using shared db", "db", sharedDBPath)
+	opts.Logf("using shared storage", "target", sharedDBPath)
 
 	var wg sync.WaitGroup
 	for i, kubeContext := range contexts {
@@ -416,7 +456,7 @@ func runWatchContexts(ctx context.Context, cmd *cobra.Command, state *cliState, 
 	return out, nil
 }
 
-func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, rt runtimeSettings, selection collectionSettings, kubeContext string, resourceArgs []string, opts collector.WatchResourcesOptions, sharedStore *sqlite.Store, sharedDBPath string) (collector.WatchResourcesSummary, string, error) {
+func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, rt runtimeSettings, selection collectionSettings, kubeContext string, resourceArgs []string, opts collector.WatchResourcesOptions, sharedStore storage.Store, sharedDBPath string) (collector.WatchResourcesSummary, string, error) {
 	selection.Contexts = []string{kubeContext}
 	selection.AllContexts = false
 	opts.Context = kubeContext
@@ -444,24 +484,45 @@ func runWatchContext(ctx context.Context, cmd *cobra.Command, state *cliState, r
 	opts.DiscoverResources = shouldDiscoverResources
 
 	dbPath := sharedDBPath
-	if dbPath == "" {
+	if dbPath == "" && storageDriver(rt.Config) == "sqlite" {
 		dbPath = watchDBPathForContext(cmd, state, rt, kubeContext)
 	}
-	opts.Logf("using db", "context", kubeContext, "db", dbPath)
+	if dbPath == "" {
+		dbPath = "clickhouse:" + rt.Config.Storage.ClickHouse.Database
+	}
+	opts.Logf("using storage", "context", kubeContext, "target", dbPath)
 	if sharedStore != nil {
 		opts.Store = sharedStore
 		summary, err := collector.WatchResourcesClientGo(ctx, opts)
 		return summary, dbPath, err
 	}
 
-	sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
-	if err != nil {
-		return collector.WatchResourcesSummary{}, dbPath, err
+	var store storage.Store
+	switch storageDriver(rt.Config) {
+	case "clickhouse":
+		store, err = newClickHouseStore(ctx, rt.Config)
+		if err != nil {
+			return collector.WatchResourcesSummary{}, dbPath, err
+		}
+	case "chdb":
+		dbPath = "chdb:" + rt.Config.Storage.ChDB.Database
+		store, err = newChDBStore(ctx, rt.Config)
+		if err != nil {
+			return collector.WatchResourcesSummary{}, dbPath, err
+		}
+	case "sqlite":
+		sqliteStore, err := sqlite.OpenWithOptions(dbPath, sqliteOptionsFromConfig(rt.Config))
+		if err != nil {
+			return collector.WatchResourcesSummary{}, dbPath, err
+		}
+		defer sqliteStore.Close()
+		store = sqliteStore
+		stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage)
+		defer stopMaintenance()
+	default:
+		return collector.WatchResourcesSummary{}, dbPath, fmt.Errorf("watch does not support storage.driver %q", rt.Config.Storage.Driver)
 	}
-	defer sqliteStore.Close()
-	stopMaintenance := startSQLiteMaintenanceLoop(ctx, opts.Logf, sqliteStore, rt.Config.Storage)
-	defer stopMaintenance()
-	opts.Store = sqliteStore
+	opts.Store = store
 	summary, err := collector.WatchResourcesClientGo(ctx, opts)
 	return summary, dbPath, err
 }

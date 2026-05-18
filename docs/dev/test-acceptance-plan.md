@@ -7,7 +7,11 @@ evidence, answer incident questions without scanning all historical JSON, and do
 so within acceptable storage, performance, and security limits.
 
 This plan defines test layers and release gates. Benchmark metric definitions
-live in [PoC And Benchmark Plan](poc-and-benchmark-plan.md).
+live in [PoC And Benchmark Plan](poc-and-benchmark-plan.md), the user-facing
+storage and agent-performance summary lives in
+[Storage Modes And Performance](../validation/storage-mode-comparison.md), and the
+latest ClickHouse/chDB closeout metrics live in
+[ClickHouse MVP Closeout](clickhouse-mvp-closeout.md).
 
 ## Acceptance Gates
 
@@ -22,28 +26,36 @@ Required before merging core changes:
 - no Secret payload is stored in safe-default mode,
 - generated evidence fixtures are deterministic.
 
-### Gate 1: Local PoC
+### Gate 1: Local Evidence MVP
 
-Required before declaring the local PoC useful:
+Required before declaring the local default artifact useful:
 
 - collect from a real kubeconfig context,
 - store all allowed resources or explicitly skipped resources by policy,
 - reconstruct retained versions within `max_delta_chain`,
 - answer service investigation scenarios from SQLite,
-- produce a benchmark JSON report,
-- pass `kube-insight dev validate poc`,
+- prove MCP/API/CLI reads use the configured backend shape,
+- produce generated validation reports under `testdata/generated/`,
+- pass `make validate`,
 - pass all generated incident scenarios.
 
-### Gate 2: Central Service
+### Gate 2: ClickHouse/Service MVP
 
-Required before multi-user service testing:
+Required before claiming the central evidence backend is ready for service-mode
+MVP testing:
 
-- PostgreSQL backend passes the same correctness suite as SQLite,
-- SAR/SSAR authorization filters raw resources, facts, edges, diffs, and
-  support bundles,
-- audit rows are written for allow, deny, and partial responses,
-- retention purge removes source versions and derived indexes,
-- vacuum/analyze maintenance is measured after purge and rebuild jobs.
+- ClickHouse backend passes the same typed read coverage as SQLite for health,
+  search, history, topology, service investigation, schema, and read-only SQL,
+- chDB-enabled variant passes the shared ClickHouse-compatible read path where
+  the runtime library is available,
+- API and MCP read paths route through the configured backend instead of a
+  SQLite-only shortcut,
+- live profile reports storage efficiency, active/inactive footprint, skip
+  indexes, representative SQL/API timings, and threshold status,
+- smoke tests prove no write/reset/import path mutates the live profiling
+  database,
+- retention/cold-tier behavior is documented as opt-in unless a matching
+  ClickHouse storage policy exists.
 
 ### Gate 3: Production Readiness
 
@@ -91,14 +103,17 @@ SQLite:
 - reconstruct versions across full snapshots and reverse deltas,
 - run `ANALYZE`, `wal_checkpoint`, and incremental vacuum where enabled.
 
-PostgreSQL:
+ClickHouse/chDB:
 
-- create schema from scratch,
-- verify indexes exist,
-- query topology interval overlap,
-- test JSONB hot latest query,
-- run retention purge and explicit `VACUUM (ANALYZE)`,
-- verify derived indexes are purged with source versions.
+- create schema from scratch through generated ClickHouse-compatible DDL,
+- verify MergeTree engines, sorting keys, and skip indexes exist,
+- import fixture evidence without schema mutation during read paths,
+- query resource health, search, history, topology, and service investigation
+  through shared typed store interfaces,
+- verify read-only SQL rejects write/DDL statements,
+- measure active compressed/uncompressed bytes, compressed bytes per row, part
+  counts, and inactive part footprint,
+- verify repair/cleanup helpers are explicit and do not run during live profile.
 
 Acceptance:
 
@@ -259,7 +274,7 @@ Acceptance:
 - facts and edges remain much smaller than universal JSON indexing,
 - compaction does not break reconstruction,
 - retention purge removes derived data,
-- SQLite and PostgreSQL maintenance jobs are observable and repeatable,
+- SQLite and ClickHouse maintenance jobs are observable and repeatable,
 - post-maintenance query latency does not regress materially.
 
 ## Security Tests
@@ -284,8 +299,8 @@ Acceptance:
 
 Each validation run should produce:
 
-- benchmark JSON report,
-- scenario result JSON,
+- benchmark report, such as JSON, TSV, or summary text depending on the tool,
+- scenario result JSON or API response captures,
 - schema version,
 - filter and extractor versions,
 - dataset manifest,
@@ -300,9 +315,11 @@ Each validation run should produce:
 MVP is accepted when:
 
 - all Gate 0 and Gate 1 tests pass,
+- Gate 2 tests pass when claiming ClickHouse/chDB service-mode MVP readiness,
 - every required generated scenario is detected,
 - safe-default redaction has zero Secret payload violations,
 - service investigation uses facts and edges as the candidate path,
 - retained versions can prove top evidence,
-- benchmark report includes performance, throughput, storage, security, and
-  resource-specific metrics.
+- benchmark and profile reports include performance, throughput, storage,
+  security, resource-specific metrics, and the agent-vs-kubectl comparison that
+  supports user-facing positioning.

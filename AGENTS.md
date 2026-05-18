@@ -32,6 +32,8 @@ operational notes, and design details in `docs/`.
   implementations. Do not reinvent protocol encoders, CLI parsers, metrics
   exposition, Kubernetes clients, SQL drivers, or UI primitives unless there is
   a clear product-specific reason.
+- When stopping, handing off, or summarizing an incomplete thread, state both
+  what should happen next and how you intend to do it.
 - Keep code files at or below 800 lines. Split by responsibility before adding
   more behavior.
 - Preserve user changes. Do not revert unrelated dirty worktree changes.
@@ -40,7 +42,8 @@ operational notes, and design details in `docs/`.
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.
 - Keep compression, delta logic, and retention policy above storage backends so
-  SQLite/Postgres/Cockroach can share the same product semantics.
+  SQLite/chDB/ClickHouse and any SQL compatibility backends can share the same
+  product semantics.
 
 ## Dependency Preferences
 
@@ -52,8 +55,9 @@ operational notes, and design details in `docs/`.
 - CLI: use Cobra/pflag patterns already in the repo.
 - Logs/TUI styling: stay compatible with the Charm ecosystem.
 - Metrics: use the official Prometheus Go client.
-- SQLite: continue using the chosen pure-Go driver unless the storage design
-  changes deliberately and is documented.
+- Local embedded storage: SQLite remains the pure-Go compatibility/test backend
+  until the documented chDB migration is implemented; do not switch the local
+  default to chDB without a real `chdb-go` adapter and validation.
 
 ## Validation
 

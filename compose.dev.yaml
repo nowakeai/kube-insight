@@ -1,0 +1,56 @@
+services:
+  clickhouse:
+    image: ${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:25.3}
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-kube_insight}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-kube_insight}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-kube-insight-dev}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./docker/clickhouse-dev/config.d/system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'clickhouse-client --host 127.0.0.1 --user "$$CLICKHOUSE_USER" --password "$$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null'
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  watcher:
+    build:
+      context: .
+      dockerfile: docker/dev-watcher.Dockerfile
+    image: kube-insight-dev-watcher:local
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      KUBE_INSIGHT_CLICKHOUSE_DSN: "http://clickhouse:8123/?user=${CLICKHOUSE_USER:-kube_insight}&password=${CLICKHOUSE_PASSWORD:-kube-insight-dev}"
+      KUBECONFIG: /home/kube-insight/.kube/config
+      CLOUDSDK_CONFIG: /home/kube-insight/.config/gcloud
+      USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
+    volumes:
+      - ./config:/workspace/config:ro
+      - ${KUBECONFIG_PATH:-${HOME}/.kube/config}:/home/kube-insight/.kube/config:ro
+      - ${GCLOUD_CONFIG_PATH:-${HOME}/.config/gcloud}:/home/kube-insight/.config/gcloud
+    ports:
+      - "${KUBE_INSIGHT_API_PORT:-8080}:8080"
+      - "${KUBE_INSIGHT_METRICS_PORT:-9090}:9090"
+    command:
+      - serve
+      - --config
+      - /workspace/config/kube-insight.clickhouse.example.yaml
+      - --watch
+      - --api
+      - --api-listen
+      - 0.0.0.0:8080
+      - --metrics
+      - --metrics-listen
+      - 0.0.0.0:9090
+
+volumes:
+  clickhouse-data:

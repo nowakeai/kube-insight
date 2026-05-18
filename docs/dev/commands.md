@@ -40,7 +40,7 @@ make build
 Validate config:
 
 ```bash
-./bin/kube-insight config validate --config config/kube-insight.example.yaml
+./bin/kube-insight config validate --file config/kube-insight.example.yaml
 ```
 
 Watch current context:

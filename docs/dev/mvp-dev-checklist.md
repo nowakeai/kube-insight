@@ -1,6 +1,6 @@
 # MVP Dev Checklist
 
-Status date: 2026-05-17
+Status date: 2026-05-18
 
 This checklist is the working boundary for the kube-insight MVP. Use it to keep
 local development focused. Items outside the stop line are deliberate follow-ups,
@@ -229,7 +229,9 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
   reproduction commands, and generated-output hygiene.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
-  current SQLite/ClickHouse/chDB positioning.
+  current SQLite/ClickHouse/chDB positioning. Latest structure pass on
+  2026-05-18 also checked release docs, Makefile targets, ignored local
+  artifacts, and agent skill backend-detection guidance.
 - [x] Add a short "known limitations" section for the MVP backend.
 
 Acceptance:

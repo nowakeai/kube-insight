@@ -76,7 +76,7 @@ database and check collector health before trusting the result.
 | Faster agent workflows | SQL recipes, MCP tools, and prompts over pre-extracted evidence instead of repeated live `kubectl` joins. |
 | Safer agent access | Filters run before hashing and storage; destructive filters write audit decisions; read surfaces are designed for read-only, authz-aware service access. |
 | Default local mode | One pure-Go binary with SQLite storage, CLI, HTTP API, and MCP surfaces. |
-| Optional local chDB mode | A separate chDB-enabled artifact can use embedded ClickHouse-compatible local storage when `libchdb.so` is installed. |
+| Optional local chDB mode | A separate chDB-enabled artifact can use embedded ClickHouse-compatible local storage with a bundled or installed `libchdb.so`. |
 | MVP central storage path | ClickHouse for append-heavy evidence history, compression, read-side investigation queries, and cold-tiering experiments. |
 
 ## How It Works
@@ -94,7 +94,7 @@ flowchart LR
     E["Evidence extraction<br/>facts, edges, changes"]
   end
 
-  subgraph Store["SQLite default / ClickHouse MVP evidence store"]
+  subgraph Store["SQLite default / ClickHouse-compatible evidence store"]
     F["versions"]
     G["facts"]
     H["edges"]

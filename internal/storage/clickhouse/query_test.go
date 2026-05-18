@@ -268,23 +268,28 @@ func TestListRepairArtifactsAndPlanCleanup(t *testing.T) {
 
 func TestStoreQuerySQLReturnsStorageResult(t *testing.T) {
 	var body string
+	var rawQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
 		body = string(data)
+		rawQuery = r.URL.RawQuery
 		_, _ = w.Write([]byte(`{"meta":[{"name":"name","type":"String"}],"data":[{"name":"api"},{"name":"worker"}],"rows":2,"rows_before_limit_at_least":2}`))
 	}))
 	defer server.Close()
 
-	store := Store{Client: HTTPClient{Endpoint: server.URL, HTTPClient: server.Client()}}
+	store := Store{Client: HTTPClient{Endpoint: server.URL, HTTPClient: server.Client()}, Database: "ki"}
 	result, err := store.QuerySQL(context.Background(), storage.SQLQueryOptions{SQL: "select name from versions", MaxRows: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(body, "FORMAT JSON") {
 		t.Fatalf("query body = %s", body)
+	}
+	if !strings.Contains(rawQuery, "database=ki") {
+		t.Fatalf("raw query = %s", rawQuery)
 	}
 	if len(result.Columns) != 1 || result.Columns[0] != "name" || result.RowCount != 1 || !result.Truncated {
 		t.Fatalf("result = %#v", result)

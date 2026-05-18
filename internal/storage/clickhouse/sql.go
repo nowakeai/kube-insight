@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 	"unicode"
@@ -21,7 +22,11 @@ func (s *Store) QuerySQL(ctx context.Context, opts storage.SQLQueryOptions) (sto
 		maxRows = 1000
 	}
 	start := time.Now()
-	result, err := s.client().QueryJSON(ctx, query)
+	runner, err := s.sqlQueryRunner()
+	if err != nil {
+		return storage.SQLQueryResult{}, err
+	}
+	result, err := runner.QueryJSON(ctx, query)
 	if err != nil {
 		return storage.SQLQueryResult{}, err
 	}
@@ -44,6 +49,41 @@ func (s *Store) QuerySQL(ctx context.Context, opts storage.SQLQueryOptions) (sto
 		Truncated: truncated || result.RowsBefore > maxRows,
 		ElapsedMS: float64(time.Since(start).Microseconds()) / 1000,
 	}, nil
+}
+
+func (s *Store) sqlQueryRunner() (QueryRunner, error) {
+	client := s.client()
+	httpClient, ok := client.(HTTPClient)
+	if !ok {
+		return client, nil
+	}
+	endpoint, err := endpointWithDatabase(httpClient.Endpoint, s.database())
+	if err != nil {
+		return nil, err
+	}
+	httpClient.Endpoint = endpoint
+	return httpClient, nil
+}
+
+func endpointWithDatabase(endpoint, database string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", fmt.Errorf("clickhouse endpoint is required")
+	}
+	database = strings.TrimSpace(database)
+	if database == "" {
+		database = defaultDatabase
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	values := parsed.Query()
+	if values.Get("database") == "" {
+		values.Set("database", database)
+	}
+	parsed.RawQuery = values.Encode()
+	return parsed.String(), nil
 }
 
 func (s *Store) QuerySchema(ctx context.Context) (storage.SQLSchema, error) {

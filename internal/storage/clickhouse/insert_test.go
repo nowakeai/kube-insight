@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kube-insight/internal/core"
+	"kube-insight/internal/extractor"
 )
 
 func TestBuildEvidenceBatch(t *testing.T) {
@@ -74,6 +75,65 @@ func TestBuildEvidenceBatch(t *testing.T) {
 	}
 	if batch.Edges[0]["src_id"] != "c1/pod-uid" || batch.Edges[0]["dst_id"] != "c1/node-uid" {
 		t.Fatalf("edge row = %#v", batch.Edges[0])
+	}
+}
+
+func TestBuildEvidenceBatchForPendingSkipsUnchangedEvidence(t *testing.T) {
+	obs := core.Observation{
+		Type:            core.ObservationModified,
+		ObservedAt:      time.Unix(10, 0),
+		ResourceVersion: "10",
+		Ref: core.ResourceRef{
+			ClusterID: "c1",
+			Version:   "v1",
+			Resource:  "configmaps",
+			Kind:      "ConfigMap",
+			Namespace: "default",
+			Name:      "settings",
+			UID:       "cm-uid",
+		},
+		Object: map[string]any{"kind": "ConfigMap", "data": map[string]any{"mode": "prod"}},
+	}
+	baseline, err := BuildEvidenceBatch("ki", []core.Observation{obs}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := baseline.Observations[0]["doc_hash"].(string)
+	pending := []pendingObservation{{
+		Observation: obs,
+		Evidence: extractor.Evidence{Facts: []core.Fact{{
+			Time:     obs.ObservedAt,
+			ObjectID: "c1/cm-uid",
+			Key:      "config.mode",
+			Value:    "prod",
+		}}},
+	}}
+
+	unchanged, err := buildEvidenceBatchForPending("ki", pending, map[string]objectVersionState{
+		"c1/cm-uid": {Seq: 7, DocHash: hash, Exists: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unchanged.Observations) != 1 || len(unchanged.ObjectAliases) != 2 {
+		t.Fatalf("unchanged proof rows = observations %d aliases %d", len(unchanged.Observations), len(unchanged.ObjectAliases))
+	}
+	if len(unchanged.Versions) != 0 || len(unchanged.Facts) != 0 || len(unchanged.Edges) != 0 || len(unchanged.Changes) != 0 {
+		t.Fatalf("unchanged batch retained evidence = %#v", unchanged)
+	}
+
+	changedObs := obs
+	changedObs.ResourceVersion = "11"
+	changedObs.Object = map[string]any{"kind": "ConfigMap", "data": map[string]any{"mode": "dev"}}
+	changedPending := []pendingObservation{{Observation: changedObs, Evidence: pending[0].Evidence}}
+	changed, err := buildEvidenceBatchForPending("ki", changedPending, map[string]objectVersionState{
+		"c1/cm-uid": {Seq: 7, DocHash: hash, Exists: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed.Versions) != 1 || changed.Versions[0]["seq"] != uint64(8) || len(changed.Facts) != 1 {
+		t.Fatalf("changed batch = %#v", changed)
 	}
 }
 

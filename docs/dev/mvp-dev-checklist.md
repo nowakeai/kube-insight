@@ -24,7 +24,9 @@ and the embedded chDB real-data API path was retested with alias-aware topology.
 
 Already working:
 
-- ClickHouse append-only evidence schema and runtime write path.
+- ClickHouse append-only evidence schema and runtime write path, including
+  unchanged-observation dedupe so repeated LIST/WATCH observations still update
+  observation traces without creating duplicate retained versions/evidence.
 - API/CLI read paths for health, search, history, topology, service
   investigation, and read-only SQL/schema inspection. Read commands open stores
   without schema mutation, and ClickHouse ad-hoc SQL now rejects multi-statement
@@ -76,6 +78,9 @@ tables.
 - [x] `ingestion_offsets` uses `ReplacingMergeTree(updated_at)` on fresh and
   repaired dev schemas.
 - [x] `serve --watch` writes to ClickHouse through `storage.driver: clickhouse`.
+- [x] ClickHouse writes preserve every observation trace but skip duplicate
+  retained versions/facts/edges/changes when the filtered document hash has not
+  changed.
 - [x] API reads use ClickHouse for health, search, history, topology, and service
   investigation when ClickHouse storage is selected.
 - [x] Run the compose watcher long enough to catch merge/part-count regressions.
@@ -113,6 +118,11 @@ MVP acceptance thresholds for the local ClickHouse backend:
 
 These thresholds are MVP guardrails, not production SLOs. Tighten them only
 after a larger dataset and a stable retention/cold-tier policy exist.
+
+2026-05-18 post-fix compose watcher sanity: after rebuilding the dev watcher, a
+short live window produced `4,757` observations but only `11` retained versions;
+the previous worst offender `kube-system/cluster-kubestore` had `26` new
+observations, `1` hash, and `0` new versions in that window.
 
 ## Phase 3: Query And API Confidence
 

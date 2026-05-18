@@ -33,19 +33,72 @@ type InsertResult struct {
 	Rows     int            `json:"rows"`
 }
 
+type evidenceBatchContext struct {
+	Batch   EvidenceBatch
+	Refs    map[string]core.ResourceRef
+	Aliases map[string]string
+	Changed []bool
+}
+
 func BuildEvidenceBatch(database string, observations []core.Observation, facts []core.Fact, edges []core.Edge, changes []core.Change) (EvidenceBatch, error) {
+	pending := make([]pendingObservation, 0, len(observations))
+	for _, obs := range observations {
+		pending = append(pending, pendingObservation{Observation: obs})
+	}
+	built, err := buildObservationRows(database, pending, nil)
+	if err != nil {
+		return EvidenceBatch{}, err
+	}
+	if err := appendFactRows(&built.Batch, built.Refs, built.Aliases, facts); err != nil {
+		return EvidenceBatch{}, err
+	}
+	if err := appendEdgeRows(&built.Batch, built.Refs, built.Aliases, edges); err != nil {
+		return EvidenceBatch{}, err
+	}
+	appendChangeRows(&built.Batch, built.Refs, built.Aliases, changes)
+	return built.Batch, nil
+}
+
+func buildEvidenceBatchForPending(database string, observations []pendingObservation, states map[string]objectVersionState) (EvidenceBatch, error) {
+	built, err := buildObservationRows(database, observations, states)
+	if err != nil {
+		return EvidenceBatch{}, err
+	}
+	for i, pending := range observations {
+		if !built.Changed[i] {
+			continue
+		}
+		if err := appendFactRows(&built.Batch, built.Refs, built.Aliases, pending.Evidence.Facts); err != nil {
+			return EvidenceBatch{}, err
+		}
+		if err := appendEdgeRows(&built.Batch, built.Refs, built.Aliases, pending.Evidence.Edges); err != nil {
+			return EvidenceBatch{}, err
+		}
+		appendChangeRows(&built.Batch, built.Refs, built.Aliases, pending.Evidence.Changes)
+	}
+	return built.Batch, nil
+}
+
+func buildObservationRows(database string, observations []pendingObservation, states map[string]objectVersionState) (evidenceBatchContext, error) {
 	if database == "" {
 		database = defaultDatabase
 	}
-	batch := EvidenceBatch{Database: database}
-	refs := map[string]core.ResourceRef{}
-	aliases := map[string]string{}
-	seq := map[string]uint64{}
-	for _, obs := range observations {
+	built := evidenceBatchContext{
+		Batch:   EvidenceBatch{Database: database},
+		Refs:    map[string]core.ResourceRef{},
+		Aliases: map[string]string{},
+		Changed: make([]bool, len(observations)),
+	}
+	localStates := cloneVersionStates(states)
+	for _, pending := range observations {
+		objectID := logicalID(pending.Observation.Ref)
+		registerObjectAliases(built.Refs, built.Aliases, pending.Observation.Ref, objectID)
+	}
+	for i, pending := range observations {
+		obs := pending.Observation
 		objectID := logicalID(obs.Ref)
-		registerObjectAliases(refs, aliases, obs.Ref, objectID)
 		for _, aliasID := range objectAliasIDs(obs.Ref, objectID) {
-			batch.ObjectAliases = append(batch.ObjectAliases, map[string]any{
+			built.Batch.ObjectAliases = append(built.Batch.ObjectAliases, map[string]any{
 				"cluster_id":  obs.Ref.ClusterID,
 				"object_id":   objectID,
 				"alias_id":    aliasID,
@@ -57,10 +110,10 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 		}
 		docBytes, err := json.Marshal(obs.Object)
 		if err != nil {
-			return EvidenceBatch{}, err
+			return evidenceBatchContext{}, err
 		}
 		digest := sha256Digest(docBytes)
-		batch.Observations = append(batch.Observations, map[string]any{
+		built.Batch.Observations = append(built.Batch.Observations, map[string]any{
 			"cluster_id":       obs.Ref.ClusterID,
 			"observed_at":      clickHouseTime(obs.ObservedAt),
 			"observation_type": string(obs.Type),
@@ -76,11 +129,16 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 			"doc_hash":         digest,
 			"doc":              string(docBytes),
 		})
-		seq[objectID]++
-		batch.Versions = append(batch.Versions, map[string]any{
+		state := localStates[objectID]
+		if !observationContentChanged(obs, state, digest) {
+			continue
+		}
+		nextSeq := state.Seq + 1
+		built.Changed[i] = true
+		built.Batch.Versions = append(built.Batch.Versions, map[string]any{
 			"cluster_id":       obs.Ref.ClusterID,
 			"object_id":        objectID,
-			"seq":              seq[objectID],
+			"seq":              nextSeq,
 			"observed_at":      clickHouseTime(obs.ObservedAt),
 			"api_group":        obs.Ref.Group,
 			"api_version":      obs.Ref.Version,
@@ -97,13 +155,36 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 			"stored_size":      len(docBytes),
 			"doc":              string(docBytes),
 		})
+		localStates[objectID] = objectVersionState{Seq: nextSeq, DocHash: digest, Exists: true}
 	}
+	return built, nil
+}
+
+func cloneVersionStates(states map[string]objectVersionState) map[string]objectVersionState {
+	out := make(map[string]objectVersionState, len(states))
+	for objectID, state := range states {
+		out[objectID] = state
+	}
+	return out
+}
+
+func observationContentChanged(obs core.Observation, state objectVersionState, digest string) bool {
+	if obs.Type == core.ObservationDeleted {
+		return true
+	}
+	if !state.Exists {
+		return true
+	}
+	return state.DocHash != digest
+}
+
+func appendFactRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, aliases map[string]string, facts []core.Fact) error {
 	for _, fact := range facts {
 		objectID := canonicalObjectID(fact.ObjectID, aliases)
 		ref := refs[objectID]
 		detail, err := jsonString(fact.Detail)
 		if err != nil {
-			return EvidenceBatch{}, err
+			return err
 		}
 		batch.Facts = append(batch.Facts, map[string]any{
 			"cluster_id":    ref.ClusterID,
@@ -119,6 +200,10 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 			"detail":        detail,
 		})
 	}
+	return nil
+}
+
+func appendEdgeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, aliases map[string]string, edges []core.Edge) error {
 	for _, edge := range edges {
 		srcID := canonicalObjectID(edge.SourceID, aliases)
 		dstID := canonicalObjectID(edge.TargetID, aliases)
@@ -126,7 +211,7 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 		dst := refs[dstID]
 		detail, err := jsonString(edge.Detail)
 		if err != nil {
-			return EvidenceBatch{}, err
+			return err
 		}
 		validTo := farFutureTime()
 		validToMS := int64(9223372036854775807)
@@ -152,6 +237,10 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 			"detail":        detail,
 		})
 	}
+	return nil
+}
+
+func appendChangeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, aliases map[string]string, changes []core.Change) {
 	for _, change := range changes {
 		objectID := canonicalObjectID(change.ObjectID, aliases)
 		ref := refs[objectID]
@@ -170,7 +259,6 @@ func BuildEvidenceBatch(database string, observations []core.Observation, facts 
 			"severity":      change.Severity,
 		})
 	}
-	return batch, nil
 }
 
 func (c HTTPClient) InsertEvidenceBatch(ctx context.Context, batch EvidenceBatch) (InsertResult, error) {

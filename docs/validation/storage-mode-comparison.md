@@ -102,7 +102,7 @@ There is still query-performance headroom in both ClickHouse and chDB.
 
 ClickHouse opportunities:
 
-- Add same-dataset profiles before making backend ranking claims.
+- Expand same-dataset profiles before making broader backend ranking claims.
 - Reduce service-investigation round trips by combining or parallelizing
   independent reads where it does not make the SQL harder to maintain.
 - Add materialized read models or projections for hot paths such as latest
@@ -160,9 +160,9 @@ STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20 make storage-mode-benchmark
 
 | Backend | Ingest | Health | Search | History | Topology | Service investigation | Storage signal |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| SQLite | `17.64 s` | `24.8 ms` | `62.1 ms` | `32.1 ms` | `27.7 ms` | `75.6 ms` | `4.61 MB` database |
-| ClickHouse | `7.97 s` | `63.3 ms` | `65.7 ms` | `58.5 ms` | `88.2 ms` | `237.0 ms` | `606 KiB` active compressed bytes, about `4.8x` active compression |
-| chDB | `1.60 s` | `284.7 ms` | `255.7 ms` | `289.7 ms` | `283.2 ms` | `555.6 ms` | `1.23 MB` directory, about `5.7x` active compression |
+| SQLite | `18.09 s` | `23.8 ms` | `63.9 ms` | `36.4 ms` | `29.8 ms` | `83.3 ms` | `4.61 MB` database |
+| ClickHouse | `7.72 s` | `62.0 ms` | `65.4 ms` | `56.1 ms` | `90.5 ms` | `187.5 ms` | `598 KiB` active compressed bytes, about `4.9x` active compression |
+| chDB | `1.41 s` | `252.5 ms` | `240.6 ms` | `235.0 ms` | `261.9 ms` | `493.5 ms` | `1.23 MB` directory, about `5.7x` active compression |
 
 The larger run had `1,760` versions, `2,280` facts, `2,320` edges, and `1,482`
 latest objects. This is enough to expose fixed per-query overhead, but it is
@@ -174,6 +174,10 @@ still not a large-history benchmark. The result supports these narrower claims:
 - chDB produces ClickHouse-like compressed table storage locally, but its
   current read adapter needs result-format and query-count optimization before
   it should be positioned as the fastest local read path.
+- The latest run includes batched evidence bundle loading and deferred topology
+  object hydration. On this fixture, ClickHouse service investigation improved
+  from the prior `237.0 ms` run to `187.5 ms`, and chDB improved from
+  `555.6 ms` to `493.5 ms`.
 
 ## Remaining Benchmark Gaps
 

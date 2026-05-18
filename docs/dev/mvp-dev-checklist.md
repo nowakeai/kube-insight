@@ -241,6 +241,9 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
   (`STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20`) and document why SQLite
   wins small local point reads while ClickHouse/chDB remain better positioned
   for compression, batch ingest, retained history, and central-service scale.
+- [x] Batch ClickHouse/chDB service-investigation evidence reads and defer
+  topology object hydration; the larger same-dataset harness now measures
+  ClickHouse service investigation at about `188 ms` and chDB at about `493 ms`.
 - [x] Re-review user-facing and validation docs so README, quickstart, docs
   index, agent SQL cookbook, benchmark plans, and acceptance gates match the
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on

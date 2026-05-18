@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 
 	"kube-insight/internal/storage"
 )
@@ -21,29 +20,21 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target storag
 		return storage.ServiceInvestigation{}, err
 	}
 	bundleOpts := investigationBundleOptions(opts)
-	var service storage.EvidenceBundle
-	var serviceErr error
-	var serviceWG sync.WaitGroup
-	serviceWG.Add(1)
-	go func() {
-		defer serviceWG.Done()
-		service, serviceErr = s.evidenceBundle(ctx, serviceObject, bundleOpts)
-	}()
 	maxObjects := boundedLimit(opts.MaxEvidenceObjects, 20, 1000)
 	visited := map[string]bool{serviceObject.LogicalID: true}
 	queued := []string{serviceObject.LogicalID}
-	topologyByKey := map[string]storage.TopologyEdge{}
+	topologyRowsByKey := map[string]topologyEdgeRow{}
 	recordsByID := map[string]storage.ObjectRecord{}
 	for len(queued) > 0 {
 		current := queued[0]
 		queued = queued[1:]
-		edges, err := s.relatedTopologyEdges(ctx, current, opts)
+		rows, err := s.relatedTopologyEdgeRows(ctx, current, opts)
 		if err != nil {
 			return storage.ServiceInvestigation{}, err
 		}
-		for _, edge := range edges {
-			topologyByKey[topologyEdgeKey(edge)] = edge
-			for _, record := range []storage.ObjectRecord{edge.Source, edge.Target} {
+		for _, row := range rows {
+			topologyRowsByKey[row.key()] = row
+			for _, record := range []storage.ObjectRecord{row.sourceRecord(), row.targetRecord()} {
 				if record.LogicalID == "" || visited[record.LogicalID] {
 					continue
 				}
@@ -61,22 +52,41 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target storag
 			}
 		}
 	}
-	serviceWG.Wait()
-	if serviceErr != nil {
-		return storage.ServiceInvestigation{}, serviceErr
+	topologyRows := make([]topologyEdgeRow, 0, len(topologyRowsByKey))
+	for _, row := range topologyRowsByKey {
+		topologyRows = append(topologyRows, row)
 	}
-	records := make([]storage.ObjectRecord, 0, len(recordsByID))
-	for _, record := range recordsByID {
-		records = append(records, record)
-	}
-	objects, err := s.evidenceBundles(ctx, records, bundleOpts)
+	topology, err := s.hydrateTopologyEdgeRows(ctx, topologyRows)
 	if err != nil {
 		return storage.ServiceInvestigation{}, err
 	}
-	topology := make([]storage.TopologyEdge, 0, len(topologyByKey))
-	for _, edge := range topologyByKey {
-		topology = append(topology, edge)
+	hydratedRecordsByID := map[string]storage.ObjectRecord{}
+	for _, edge := range topology {
+		for _, record := range []storage.ObjectRecord{edge.Source, edge.Target} {
+			if record.LogicalID == serviceObject.LogicalID || !serviceInvestigationKind(record.Kind) {
+				continue
+			}
+			if _, ok := hydratedRecordsByID[record.LogicalID]; !ok && len(hydratedRecordsByID) >= maxObjects {
+				continue
+			}
+			hydratedRecordsByID[record.LogicalID] = record
+		}
 	}
+	recordsByID = hydratedRecordsByID
+	records := make([]storage.ObjectRecord, 0, len(recordsByID)+1)
+	records = append(records, serviceObject)
+	for _, record := range recordsByID {
+		records = append(records, record)
+	}
+	bundles, err := s.evidenceBundles(ctx, records, bundleOpts)
+	if err != nil {
+		return storage.ServiceInvestigation{}, err
+	}
+	if len(bundles) == 0 {
+		return storage.ServiceInvestigation{}, fmt.Errorf("service evidence missing")
+	}
+	service := bundles[0]
+	objects := bundles[1:]
 	rankServiceEvidence(&service, objects)
 	sort.Slice(topology, func(i, j int) bool {
 		if topology[i].ValidFrom.Equal(topology[j].ValidFrom) {
@@ -99,72 +109,69 @@ func (s *Store) evidenceBundles(ctx context.Context, records []storage.ObjectRec
 	if len(records) == 0 {
 		return nil, nil
 	}
-	workers := 4
-	if len(records) < workers {
-		workers = len(records)
-	}
-	type job struct {
-		index  int
-		record storage.ObjectRecord
-	}
-	jobs := make(chan job)
-	bundles := make([]storage.EvidenceBundle, len(records))
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-	setErr := func(err error) {
-		if err == nil {
-			return
+	filtered := make([]storage.ObjectRecord, 0, len(records))
+	objectIDs := make([]string, 0, len(records))
+	seen := map[string]bool{}
+	for _, record := range records {
+		if record.LogicalID == "" || seen[record.LogicalID] {
+			continue
 		}
-		mu.Lock()
-		defer mu.Unlock()
-		if firstErr == nil {
-			firstErr = err
-		}
+		seen[record.LogicalID] = true
+		filtered = append(filtered, record)
+		objectIDs = append(objectIDs, record.LogicalID)
 	}
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range jobs {
-				mu.Lock()
-				stopped := firstErr != nil
-				mu.Unlock()
-				if stopped {
-					continue
-				}
-				bundle, err := s.evidenceBundle(ctx, item.record, opts)
-				if err != nil {
-					setErr(err)
-					continue
-				}
-				bundles[item.index] = bundle
-			}
-		}()
+	if len(filtered) == 0 {
+		return nil, nil
 	}
-	for i, record := range records {
-		mu.Lock()
-		stopped := firstErr != nil
-		mu.Unlock()
-		if stopped {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			setErr(ctx.Err())
-		case jobs <- job{index: i, record: record}:
+	latestByObject, err := s.latestDocumentsByObject(ctx, objectIDs)
+	if err != nil {
+		return nil, err
+	}
+	factsByObject, err := s.factsByObject(ctx, objectIDs, opts)
+	if err != nil {
+		return nil, err
+	}
+	changesByObject, err := s.changesByObject(ctx, objectIDs, opts)
+	if err != nil {
+		return nil, err
+	}
+	edgesByObject, err := s.edgesByObject(ctx, objectIDs)
+	if err != nil {
+		return nil, err
+	}
+	versionsByObject := map[string][]storage.VersionEvidence{}
+	if opts.MaxVersionsPerObject > 0 || !opts.From.IsZero() || !opts.To.IsZero() {
+		versionsByObject, err = s.versionEvidenceByObject(ctx, objectIDs, opts)
+		if err != nil {
+			return nil, err
 		}
 	}
-	close(jobs)
-	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	out := make([]storage.EvidenceBundle, 0, len(bundles))
-	for _, bundle := range bundles {
-		if bundle.Object.LogicalID != "" {
-			out = append(out, bundle)
+	out := make([]storage.EvidenceBundle, 0, len(filtered))
+	for _, record := range filtered {
+		latest, ok := latestByObject[record.LogicalID]
+		if !ok {
+			return nil, fmt.Errorf("latest document missing for %s", record.LogicalID)
 		}
+		facts := factsByObject[record.LogicalID]
+		edges := edgesByObject[record.LogicalID]
+		changes := changesByObject[record.LogicalID]
+		versions := versionsByObject[record.LogicalID]
+		bundle := storage.EvidenceBundle{
+			Object:   record,
+			Latest:   latest,
+			Facts:    facts,
+			Edges:    edges,
+			Changes:  changes,
+			Versions: versions,
+			Summary: storage.BundleSummary{
+				Facts:         len(facts),
+				Edges:         len(edges),
+				Changes:       len(changes),
+				Versions:      len(versions),
+				EvidenceScore: len(facts)*20 + len(edges)*10 + len(changes)*15,
+			},
+		}
+		out = append(out, bundle)
 	}
 	return out, nil
 }

@@ -141,7 +141,7 @@ func TestStoreGetFactsAndEdgesQueryClickHouse(t *testing.T) {
 		switch {
 		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id, argMax"):
 			_, _ = w.Write([]byte(`{"data":[{"alias_id":"c1/pods/default/api-0","object_id":"c1/pod-uid"}],"rows":1}`))
-		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"):
+		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"), strings.HasPrefix(strings.TrimSpace(query), "SELECT object_id, alias_id"):
 			_, _ = w.Write([]byte(`{"data":[{"alias_id":"c1/pods/default/api-0"}],"rows":1}`))
 		case strings.Contains(query, "FROM `ki`.facts"):
 			if !strings.Contains(query, "FROM `ki`.object_aliases") {
@@ -615,7 +615,7 @@ func TestStoreSearchEvidenceFindsFactsAndBundles(t *testing.T) {
 		query := string(data)
 		queries = append(queries, query)
 		switch {
-		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"):
+		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"), strings.HasPrefix(strings.TrimSpace(query), "SELECT object_id, alias_id"):
 			_, _ = w.Write([]byte(`{"data":[],"rows":0}`))
 		case strings.Contains(query, "FROM `ki`.`facts`") && strings.Contains(query, "positionCaseInsensitive"):
 			_, _ = w.Write([]byte(`{"data":[{"object_id":"c1/pod-uid","fact_key":"pod_status.phase","severity":10}],"rows":1}`))
@@ -662,7 +662,7 @@ func TestStoreTopologyBuildsGraphFromEdges(t *testing.T) {
 		}
 		query := string(data)
 		switch {
-		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"):
+		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"), strings.HasPrefix(strings.TrimSpace(query), "SELECT object_id, alias_id"):
 			_, _ = w.Write([]byte(`{"data":[],"rows":0}`))
 		case strings.Contains(query, "FROM `ki`.versions") && strings.Contains(query, "GROUP BY object_id") && strings.Contains(query, "LIMIT 2"):
 			_, _ = w.Write([]byte(`{"data":[{"object_id":"c1/pod-uid","cluster_id":"c1","api_group":"","api_version":"v1","resource":"pods","kind":"Pod","namespace":"default","name":"api-0","uid":"pod-uid","latest_observed_at":"1970-01-01 00:00:20.000"}],"rows":1}`))
@@ -696,7 +696,7 @@ func TestStoreInvestigateServiceExpandsTopologyAndEvidence(t *testing.T) {
 		}
 		query := string(data)
 		switch {
-		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"):
+		case strings.HasPrefix(strings.TrimSpace(query), "SELECT alias_id"), strings.HasPrefix(strings.TrimSpace(query), "SELECT object_id, alias_id"):
 			_, _ = w.Write([]byte(`{"data":[],"rows":0}`))
 		case strings.Contains(query, "FROM `ki`.versions") && strings.Contains(query, "GROUP BY object_id") && strings.Contains(query, "LIMIT 2"):
 			_, _ = w.Write([]byte(`{"data":[{"object_id":"c1/svc-uid","cluster_id":"c1","api_group":"","api_version":"v1","resource":"services","kind":"Service","namespace":"default","name":"api","uid":"svc-uid","latest_observed_at":"1970-01-01 00:00:20.000"}],"rows":1}`))

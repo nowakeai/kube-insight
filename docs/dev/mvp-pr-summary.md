@@ -56,6 +56,8 @@ and release packaging for default and chDB-enabled artifacts.
 - Adds portable `compose.dev.yaml` plus ClickHouse and watcher containers for
   local development.
 - Adds ClickHouse smoke, benchmark, API smoke, and read-only live profile scripts.
+- Adds MCP SQL-first smoke, release archive smoke, and a live same-target Service
+  comparison against raw `kubectl`.
 - Live profile reports query timings, storage compression, bytes per row,
   ClickHouse footprint, skip indexes, and explain output.
 - Adds docs for ClickHouse local workflows and the MVP development checklist.
@@ -90,12 +92,13 @@ and release packaging for default and chDB-enabled artifacts.
 - Validation scripts: `scripts/clickhouse-smoke.sh`,
   `scripts/clickhouse-live-profile.sh`, `scripts/clickhouse-api-smoke.sh`,
   `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`,
-  `scripts/benchmark-agent-vs-kubectl.sh`.
+  `scripts/benchmark-agent-vs-kubectl.sh`, `scripts/mcp-sql-first-smoke.sh`,
+  `scripts/release-artifact-smoke.sh`, `scripts/live-service-vs-kubectl.sh`.
 - Agent and storage benchmark docs: `docs/validation/storage-mode-comparison.md`.
 
 ## Validation Run
 
-Latest local validation completed on 2026-05-17:
+Latest local validation completed on 2026-05-18:
 
 ```bash
 make test
@@ -108,6 +111,9 @@ goreleaser check --config .goreleaser.yaml
 goreleaser release --snapshot --clean --skip=docker
 goreleaser release --snapshot --clean --skip=publish,archive
 ./scripts/benchmark-agent-vs-kubectl.sh kubeinsight.db <kubectl-context> testdata/generated/agent-vs-kubectl-review-20260517
+make mcp-sql-first-smoke
+make release-artifact-smoke
+make live-service-vs-kubectl
 make open-source-check
 git diff --check
 find cmd internal -name '*.go' -print0 | xargs -0 wc -l | awk '$2 != "total" && $1 > 800 {print}'
@@ -127,6 +133,15 @@ Each chDB archive was inspected and contains:
 The Docker snapshot built default and chDB Linux amd64/arm64 images locally
 without publishing. Snapshot mode appends temporary `-amd64` and `-arm64` tags;
 release mode publishes the configured multi-architecture tags.
+
+The release artifact smoke unpacked the local Linux amd64 default and chDB
+snapshot archives, then ran `version`, `config validate`, `ingest`, `query
+schema`, and `query sql` from the extracted binaries.
+
+The live same-target Service comparison used the current kubeconfig context and
+target `8004scan-production/production-8004scan-backend-api`: kube-insight
+ClickHouse SQL/API completed in `481.150 ms` total, while the comparable raw
+`kubectl` calls completed in `3,229.201 ms` total.
 
 ## Release Notes
 
@@ -160,8 +175,9 @@ release mode publishes the configured multi-architecture tags.
   `docs/dev/` and user-facing backend positioning in `README.md`,
   `docs/quickstart.md`, and `docs/configuration/configuration.md`.
 - `docs/validation/storage-mode-comparison.md` is the user-facing evidence,
-  kubectl comparison, and storage-mode benchmark doc for retained kube-insight
-  evidence versus repeated broad live `kubectl` calls.
+  kubectl comparison, live same-target Service comparison, and storage-mode
+  benchmark doc for retained kube-insight evidence versus repeated broad live
+  `kubectl` calls.
 - The stale pre-MVP `scripts/benchmark-insight-vs-kubectl.sh` helper was removed;
   `scripts/benchmark-agent-vs-kubectl.sh` is the canonical agent-vs-kubectl
   benchmark script.
@@ -237,6 +253,9 @@ is squashed, but they are useful for staging and review.
 - [x] `make release-chdb-check`
 - [x] `goreleaser release --snapshot --clean --skip=docker`
 - [x] `goreleaser release --snapshot --clean --skip=publish,archive`
+- [x] `make mcp-sql-first-smoke`
+- [x] `make release-artifact-smoke`
+- [x] `make live-service-vs-kubectl`
 - [x] `make open-source-check`
 - [x] `git diff --check`
 - [x] Go 800-line rule

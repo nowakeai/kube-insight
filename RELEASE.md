@@ -20,8 +20,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The default `release` workflow publishes both the default pure-Go build and the
-chDB-enabled variant from `.goreleaser.yaml`:
+The default `release` workflow builds categorized GitHub Release notes with
+`mikepenz/release-changelog-builder-action`, appends an artifact summary, and
+then passes those notes to GoReleaser with `--release-notes`. The same workflow
+publishes both the default pure-Go build and the chDB-enabled variant from
+`.goreleaser.yaml`:
 
 - GitHub Release artifacts for default Linux, macOS, and Windows amd64 binaries,
   plus default Linux and macOS arm64 binaries, with no storage-backend suffix.
@@ -61,6 +64,13 @@ under `build/chdb-runtime/` and validates the merged `.goreleaser.yaml`.
 `make build-chdb-image` stages `bin/kube-insight-chdb` and the local amd64
 `libchdb.so` into `dist/chdb-image/`, then builds a local single-architecture
 `kube-insight-chdb:local` image.
+
+## Release Notes
+
+Tag releases use commit-mode changelog generation. Conventional commit prefixes
+are grouped into Features, Performance, Fixes, Documentation, CI and
+Maintenance, and Other Changes. Review the generated GitHub Release body after
+publish to confirm user-facing changes and artifact links are clear.
 
 ## Snapshot Checks
 

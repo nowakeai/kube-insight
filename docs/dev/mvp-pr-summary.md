@@ -78,6 +78,8 @@ and release packaging for default and chDB-enabled artifacts. ClickHouse mainten
   need target-architecture `RUN` execution.
 - Stages official chDB `libchdb` runtimes for Linux/macOS amd64/arm64 before
   release.
+- Builds categorized GitHub Release notes with the changelog builder action,
+  appends artifact guidance, and passes the generated notes to GoReleaser.
 
 ## Notable Files
 

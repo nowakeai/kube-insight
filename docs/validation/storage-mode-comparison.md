@@ -1,4 +1,4 @@
-# Storage Modes And Performance Positioning
+# Storage Modes And Performance
 
 Last updated: 2026-05-18.
 

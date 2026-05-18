@@ -255,6 +255,13 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
   current SQLite/ClickHouse/chDB positioning. Latest structure pass on
   2026-05-18 also checked release docs, Makefile targets, ignored local
   artifacts, and agent skill backend-detection guidance.
+- [x] Consolidate validation docs so `docs/validation/` only contains the
+  user-facing storage/performance summary, while closeout notes, benchmark
+  plans, acceptance plans, and open-source readiness checklists live under
+  `docs/dev/`.
+- [x] Walk the user documentation path from README to quickstart, storage mode
+  comparison, and agent skill; add the missing ClickHouse service-backend quick
+  start and keep cold-tiering documented as opt-in.
 - [x] Add a short "known limitations" section for the MVP backend.
 
 Acceptance:

@@ -31,6 +31,9 @@ Windows users can download the `.zip` artifact from the
 
 ## Local Storage Variants
 
+For performance numbers and backend tradeoffs, see
+[Storage Modes And Performance](validation/storage-mode-comparison.md).
+
 Use the default `kube-insight` binary for the smallest local install:
 
 ```bash
@@ -58,6 +61,34 @@ requires a compatible `libchdb.so` discoverable through the system dynamic
 linker, `LD_LIBRARY_PATH`, or `CHDB_LIB_PATH`. The default binary does not link
 chDB; selecting `storage.driver: chdb` with it fails with an explicit setup
 error.
+
+## ClickHouse Service Backend
+
+Use ClickHouse when kube-insight should keep continuous central evidence history
+for a team, API service, or MCP service. Start from the example config and pass
+the HTTP DSN through the configured environment variable:
+
+```bash
+export KUBE_INSIGHT_CLICKHOUSE_DSN='http://127.0.0.1:8123/?user=kube_insight&password=...'
+./kube-insight --config config/kube-insight.clickhouse.example.yaml serve \
+  --watch pods services endpointslices.discovery.k8s.io \
+  --api \
+  --mcp \
+  --metrics
+```
+
+For source checkouts, the local Docker Compose workflow starts ClickHouse and a
+dev watcher environment:
+
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+make clickhouse-live-profile
+```
+
+Cold object-storage movement is opt-in. The default example config does not move
+data to S3 or another object store unless a matching ClickHouse storage policy is
+configured explicitly.
 
 ## Watch Current Cluster
 

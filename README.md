@@ -92,7 +92,7 @@ current-state baseline.
 | kube-insight + chDB | You want local ClickHouse-compatible tables without a server. | Requires `libchdb.so`; larger artifact and more runtime packaging complexity. |
 | kube-insight + ClickHouse | You need continuous central evidence history, compression, API/MCP service reads, and future cold-tiering. | Requires operating ClickHouse. |
 
-See [Storage Modes And Performance Positioning](docs/validation/storage-mode-comparison.md)
+See [Storage Modes And Performance](docs/validation/storage-mode-comparison.md)
 for the detailed performance and tradeoff matrix.
 
 ## How It Works

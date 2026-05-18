@@ -197,6 +197,66 @@ func (f *fakeMCPReadStore) ObjectHistory(context.Context, storage.ObjectTarget, 
 	}, nil
 }
 
+func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
+	cases := []struct {
+		name string
+		want []string
+	}{
+		{
+			name: "kube_insight_coverage_first",
+			want: []string{
+				"Default to SQL after schema detection",
+				"kube_insight_sql",
+				"ingestion_offsets is append-only",
+				"argMax(status, updated_at)",
+				"facts and changes",
+				"observations and versions",
+			},
+		},
+		{
+			name: "kube_insight_event_history",
+			want: []string{
+				"kube_insight_sql as the primary interface",
+				"object_facts",
+				"ClickHouse-compatible backends use facts",
+				"object_edges",
+				"ClickHouse-compatible backends use edges",
+				"changes, observations, and versions",
+			},
+		},
+		{
+			name: "kube_insight_object_history",
+			want: []string{
+				"kube_insight_schema first",
+				"kube_insight_sql as the primary investigation interface",
+				"object_facts/object_edges/object_observations/latest_index",
+				"facts/edges/changes/observations/versions",
+				"argMax(status, updated_at)",
+				"Use kube_insight_history after SQL has identified the object",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			text, _, err := promptText(tc.name, map[string]string{
+				"cluster": "c1",
+				"symptom": "pod restarts",
+				"reason":  "FailedScheduling",
+				"keyword": "quota",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(text, want) {
+					t.Fatalf("prompt missing %q:\n%s", want, text)
+				}
+			}
+		})
+	}
+}
+
 func TestServerUsesInjectedReadStore(t *testing.T) {
 	var opened int
 	store := &fakeMCPReadStore{}

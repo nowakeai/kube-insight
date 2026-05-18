@@ -72,7 +72,7 @@ SQL-first loop:
 6. Use typed history/topology/service tools only when they package the final
    evidence more cleanly than another SQL query.
 
-Useful MCP prompts:
+Useful MCP prompts. These prompts should still steer agents through schema detection and SQL-first investigation; typed tools remain support tools for summaries and proof:
 
 - `kube_insight_coverage_first`
 - `kube_insight_event_history`

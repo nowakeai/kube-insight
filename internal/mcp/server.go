@@ -609,13 +609,16 @@ func promptText(name string, args map[string]string) (string, string, error) {
 		cluster := promptArg(args, "cluster", "the relevant cluster")
 		return fmt.Sprintf(`Investigate %s with kube-insight.
 
+Default to SQL after schema detection. Typed tools such as kube_insight_health and kube_insight_history are guardrails and packaged summaries; use kube_insight_sql for discovery, ranking candidates, topology expansion, and proof queries.
+
 Use this order:
-1. Call kube_insight_health for %s. Treat list/watch errors and stale resources as evidence gaps.
-2. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
+1. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
+2. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
 3. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
 4. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
-5. Query facts and edges for candidate resources. Prefer exact fact_key/fact_value predicates before broad text search.
-6. Use kube_insight_history only for the final candidate objects or as proof for claims.
+5. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search.
+6. Query edges with src_id or dst_id around candidates to expand topology.
+7. Query observations and versions for retained proof. Use kube_insight_history only for final candidate objects or when packaged diffs are clearer than raw SQL.
 
 Do not claim absence unless collector coverage is healthy for the resource types involved.`, symptom, cluster), "Coverage-first kube-insight investigation", nil
 	case "kube_insight_event_history":
@@ -624,20 +627,31 @@ Do not claim absence unless collector coverage is healthy for the resource types
 		keyword := promptArg(args, "keyword", "the message keyword")
 		return fmt.Sprintf(`Investigate retained Kubernetes Events in %s.
 
-Use kube_insight_schema first, then use kube_insight_sql with SQL that matches the active backend:
+Use kube_insight_schema first, then use kube_insight_sql as the primary interface with SQL that matches the active backend:
 1. Identify whether schema notes say SQLite or ClickHouse-compatible.
-2. Select a cluster_id using available schema rows or evidence rows.
-3. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
-4. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
-5. Join Event objects through edge tables with event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
-6. Fetch kube_insight_history for the affected resource and the Event when proof is needed.
+2. Check current collector coverage for Event and affected-resource types. For ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at) before trusting current status.
+3. Select a cluster_id using available schema rows or evidence rows.
+4. Query Event facts directly. SQLite uses object_facts; ClickHouse-compatible backends use facts. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
+5. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
+6. Follow Event relationship edges. SQLite uses object_edges; ClickHouse-compatible backends use edges. Look for event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
+7. Query changes, observations, and versions for affected object_ids before making a claim.
+8. Fetch kube_insight_history for the affected resource and the Event only when packaged proof or diffs are needed.
 
 Compare retained Event history with current kubectl only as separate evidence; kubectl shows live apiserver state, not the retained window.`, cluster, reason, keyword), "Retained Event history investigation", nil
 	case "kube_insight_object_history":
 		target := promptObjectTarget(args)
 		return fmt.Sprintf(`Inspect object history for %s.
 
-Use kube_insight_history with the most specific identifier available, preferring uid when known. Include diffs and keep maxVersions/maxObservations bounded at first.
+Use kube_insight_schema first and treat kube_insight_sql as the primary investigation interface. Detect whether the active backend exposes SQLite tables such as object_facts/object_edges/object_observations/latest_index or ClickHouse-compatible tables such as facts/edges/changes/observations/versions.
+
+Start with SQL:
+1. Check coverage for the object's resource type; for ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at).
+2. Locate the object by the most specific identifier available, preferring uid when known.
+3. Query facts and changes for the object_id to explain why it matters.
+4. Query edges where the object is src_id or dst_id to find related causes and dependents.
+5. Query observations and versions for proof timestamps, resource versions, doc_hash values, and retained documents when needed.
+
+Use kube_insight_history after SQL has identified the object. Include diffs and keep maxVersions/maxObservations bounded at first.
 
 Summarize:
 1. First and last observed times.

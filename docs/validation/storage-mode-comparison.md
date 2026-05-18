@@ -80,6 +80,55 @@ Kubernetes evidence for humans and agents. Inside kube-insight, the storage
 backend choice is a tradeoff between simplicity, local ClickHouse compatibility,
 central-service scale, and operational complexity.
 
+## Results That Need Careful Interpretation
+
+Some current numbers look counterintuitive if read as a direct engine shootout.
+They are not direct engine shootout results yet.
+
+| Observation | Why it looks surprising | Current interpretation |
+| --- | --- | --- |
+| ClickHouse shows `28.4x-30.53x` compression while embedded chDB shows about `5.8x`. | chDB and ClickHouse are both ClickHouse-compatible, so users may expect similar compression. | The measurements used different datasets, row counts, merge states, and possibly different filesystem/part accounting. ClickHouse was measured on a long-running watcher dataset with about `1.45M-1.79M` active rows. Embedded chDB was measured on a bounded real-data run with `46,365` active rows. This proves chDB compression works, but does not prove chDB is inherently worse. |
+| chDB service investigation was around `607 ms`, while ClickHouse service investigation ranged from `224 ms` to `801 ms`. | An embedded local engine might be expected to beat a server over HTTP. | The current numbers are different validation runs, not the same service target on the same dataset. Query cost also includes API routing, result materialization, JSON decode/encode, cache warmth, selected topology size, and store/session lifecycle. The result is within the MVP `1s` guardrail, but it is not enough to rank chDB against ClickHouse. |
+| The chDB-enabled API reading the remote ClickHouse backend was faster than the default API in one profile (`224 ms` vs `783 ms` service investigation). | The binary build tag should not make remote ClickHouse queries much faster by itself. | Both profiles read a ClickHouse backend, but the selected service target, row counts, watcher state, cache state, and timing of the run differed. Treat this as evidence that both paths work, not as evidence that one binary is faster. |
+| SQLite benchmark queries are much faster than broad raw `kubectl` calls. | SQLite is not the large-history backend, so users may wonder why ClickHouse is needed. | SQLite can be very fast for a local retained evidence database. ClickHouse is chosen for central service scale, compression, long-running append-heavy history, and future cold-tiering, not because every small local query is faster than SQLite. |
+
+## Optimization Opportunities
+
+There is still query-performance headroom in both ClickHouse and chDB.
+
+ClickHouse opportunities:
+
+- Add same-dataset profiles before making backend ranking claims.
+- Reduce service-investigation round trips by combining or parallelizing
+  independent reads where it does not make the SQL harder to maintain.
+- Add materialized read models or projections for hot paths such as latest
+  object lookup, resource health, service topology fan-out, and recent severe
+  facts.
+- Tune ordering keys, skip indexes, and bloom/text indexes against real query
+  patterns rather than speculative JSON searches.
+- Continue reducing small-part churn through batching, async insert settings,
+  and watcher flush policy; keep `OPTIMIZE` as a benchmark/maintenance tool, not
+  a normal hot-path requirement.
+- Benchmark native ClickHouse `JSON` and JSON subcolumns for hot recent document
+  queries before making them default.
+
+chDB opportunities:
+
+- Keep a process-local chDB session open for API/MCP service reads. The MVP has
+  already moved in this direction for `serve --api`; avoid reopening the local
+  database per request.
+- Measure cold-cache and warm-cache runs separately. Embedded databases can look
+  disproportionately slow when every profile starts from a cold session.
+- Import in larger batches and investigate whether explicit MergeTree merge or
+  `OPTIMIZE` behavior is useful for benchmark datasets.
+- Use the same table schema, codecs, dataset, and active-part accounting as the
+  ClickHouse benchmark before comparing compression.
+- Reduce result-format overhead for typed reads where possible; small queries can
+  be dominated by JSON/result materialization rather than storage scan time.
+- Add a chDB-specific profile that reports active parts, compressed bytes,
+  uncompressed bytes, directory footprint, query timings, and session lifecycle
+  costs in one place.
+
 ## Next Benchmark Gap
 
 The next useful benchmark is a same-dataset matrix:

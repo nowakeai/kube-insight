@@ -78,6 +78,59 @@ func TestBuildEvidenceBatch(t *testing.T) {
 	}
 }
 
+func TestBuildEvidenceBatchInfersEdgeTargetKindFromLogicalID(t *testing.T) {
+	obs := core.Observation{
+		Type:            core.ObservationModified,
+		ObservedAt:      time.Unix(10, 0),
+		ResourceVersion: "10",
+		Ref: core.ResourceRef{
+			ClusterID: "c1",
+			Version:   "v1",
+			Resource:  "pods",
+			Kind:      "Pod",
+			Namespace: "default",
+			Name:      "api-1",
+			UID:       "pod-uid",
+		},
+		Object: map[string]any{"kind": "Pod"},
+	}
+	batch, err := BuildEvidenceBatch("ki", []core.Observation{obs}, nil, []core.Edge{
+		{
+			Type:      "pod_uses_secret",
+			SourceID:  "c1/pod-uid",
+			TargetID:  "c1/secrets/default/api-token",
+			ValidFrom: obs.ObservedAt,
+		},
+		{
+			Type:      "owned_by",
+			SourceID:  "c1/pod-uid",
+			TargetID:  "c1/apps/replicasets/default/api-abc",
+			ValidFrom: obs.ObservedAt,
+		},
+		{
+			Type:      "rbac_allows",
+			SourceID:  "c1/pod-uid",
+			TargetID:  "c1/rbac.authorization.k8s.io/clusterroles/view",
+			ValidFrom: obs.ObservedAt,
+		},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Edges) != 3 {
+		t.Fatalf("edges = %#v", batch.Edges)
+	}
+	assertEdgeKinds := func(index int, srcKind, dstKind string) {
+		t.Helper()
+		if batch.Edges[index]["src_kind"] != srcKind || batch.Edges[index]["dst_kind"] != dstKind {
+			t.Fatalf("edge[%d] kinds = %#v", index, batch.Edges[index])
+		}
+	}
+	assertEdgeKinds(0, "Pod", "Secret")
+	assertEdgeKinds(1, "Pod", "ReplicaSet")
+	assertEdgeKinds(2, "Pod", "ClusterRole")
+}
+
 func TestBuildEvidenceBatchForPendingSkipsUnchangedEvidence(t *testing.T) {
 	obs := core.Observation{
 		Type:            core.ObservationModified,

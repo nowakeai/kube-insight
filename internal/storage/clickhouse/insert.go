@@ -209,6 +209,14 @@ func appendEdgeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, alia
 		dstID := canonicalObjectID(edge.TargetID, aliases)
 		src := refs[srcID]
 		dst := refs[dstID]
+		srcKind := src.Kind
+		if srcKind == "" {
+			srcKind = inferKindFromLogicalID(srcID)
+		}
+		dstKind := dst.Kind
+		if dstKind == "" {
+			dstKind = inferKindFromLogicalID(dstID)
+		}
 		detail, err := jsonString(edge.Detail)
 		if err != nil {
 			return err
@@ -228,8 +236,8 @@ func appendEdgeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, alia
 			"edge_type":     edge.Type,
 			"src_id":        srcID,
 			"dst_id":        dstID,
-			"src_kind":      src.Kind,
-			"dst_kind":      dst.Kind,
+			"src_kind":      srcKind,
+			"dst_kind":      dstKind,
 			"valid_from":    clickHouseTime(edge.ValidFrom),
 			"valid_to":      clickHouseTime(validTo),
 			"valid_from_ms": edge.ValidFrom.UnixMilli(),
@@ -238,6 +246,127 @@ func appendEdgeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, alia
 		})
 	}
 	return nil
+}
+
+func inferKindFromLogicalID(id string) string {
+	parts := strings.Split(id, "/")
+	if len(parts) < 3 {
+		return ""
+	}
+	if kind := kindFromResourceSegment(parts[1]); kind != "" {
+		return kind
+	}
+	if len(parts) >= 4 {
+		return kindFromResourceSegment(parts[2])
+	}
+	return ""
+}
+
+func kindFromResourceSegment(resource string) string {
+	switch resource {
+	case "apiservices":
+		return "APIService"
+	case "applications":
+		return "Application"
+	case "applicationsets":
+		return "ApplicationSet"
+	case "appprojects":
+		return "AppProject"
+	case "certificaterequests":
+		return "CertificateRequest"
+	case "certificates":
+		return "Certificate"
+	case "challenges":
+		return "Challenge"
+	case "clusterissuers":
+		return "ClusterIssuer"
+	case "clusterroles":
+		return "ClusterRole"
+	case "clusterrolebindings":
+		return "ClusterRoleBinding"
+	case "configmaps":
+		return "ConfigMap"
+	case "cronjobs":
+		return "CronJob"
+	case "customresourcedefinitions":
+		return "CustomResourceDefinition"
+	case "daemonsets":
+		return "DaemonSet"
+	case "deployments":
+		return "Deployment"
+	case "endpoints":
+		return "Endpoints"
+	case "endpointslices":
+		return "EndpointSlice"
+	case "events":
+		return "Event"
+	case "gatewayclasses":
+		return "GatewayClass"
+	case "gateways":
+		return "Gateway"
+	case "grpcroutes":
+		return "GRPCRoute"
+	case "helmreleases":
+		return "HelmRelease"
+	case "httproutes":
+		return "HTTPRoute"
+	case "ingresses":
+		return "Ingress"
+	case "issuers":
+		return "Issuer"
+	case "jobs":
+		return "Job"
+	case "kustomizations":
+		return "Kustomization"
+	case "mutatingwebhookconfigurations":
+		return "MutatingWebhookConfiguration"
+	case "namespaces":
+		return "Namespace"
+	case "networkpolicies":
+		return "NetworkPolicy"
+	case "nodes":
+		return "Node"
+	case "orders":
+		return "Order"
+	case "persistentvolumeclaims":
+		return "PersistentVolumeClaim"
+	case "persistentvolumes":
+		return "PersistentVolume"
+	case "pods":
+		return "Pod"
+	case "referencegrants":
+		return "ReferenceGrant"
+	case "replicasets":
+		return "ReplicaSet"
+	case "roles":
+		return "Role"
+	case "rolebindings":
+		return "RoleBinding"
+	case "secrets":
+		return "Secret"
+	case "serviceaccounts":
+		return "ServiceAccount"
+	case "services":
+		return "Service"
+	case "statefulsets":
+		return "StatefulSet"
+	case "storageclasses":
+		return "StorageClass"
+	case "tcproutes":
+		return "TCPRoute"
+	case "tlsroutes":
+		return "TLSRoute"
+	case "udproutes":
+		return "UDPRoute"
+	case "validatingadmissionpolicies":
+		return "ValidatingAdmissionPolicy"
+	case "validatingadmissionpolicybindings":
+		return "ValidatingAdmissionPolicyBinding"
+	case "validatingwebhookconfigurations":
+		return "ValidatingWebhookConfiguration"
+	default:
+		return ""
+	}
 }
 
 func appendChangeRows(batch *EvidenceBatch, refs map[string]core.ResourceRef, aliases map[string]string, changes []core.Change) {

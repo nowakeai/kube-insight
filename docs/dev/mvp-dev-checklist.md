@@ -363,6 +363,19 @@ These are useful but outside the MVP stop line:
 - [x] Added config tests that fail if built-in profile rules reference unknown
   retention policies or extractor sets.
 
+## 2026-05-18 ClickHouse Edge Metadata
+
+- [x] Future ClickHouse edge writes now infer `src_kind` and `dst_kind` from
+  canonical logical IDs when the related object is not present in the same
+  ingestion batch. This covers common core, workload, RBAC, cert-manager,
+  Gateway API, Flux, and Argo CD resource paths.
+- [x] Added focused tests for edge targets such as `Secret`, `ReplicaSet`, and
+  `ClusterRole` where historical live data showed empty `dst_kind` values.
+- [ ] Historical `edges.dst_kind = ''` rows in long-lived dev ClickHouse volumes
+  are known legacy data from before this writer fix. Repair them only with an
+  explicit maintenance command or documented SQL mutation; do not hide that work
+  inside live profiling or normal watcher startup.
+
 ## Next Operating Rule
 
 When choosing what to do next, prefer the first unchecked item in this file. If a

@@ -54,6 +54,33 @@ func TestRunDBClickHouseSchemaSQL(t *testing.T) {
 	}
 }
 
+func TestRunDBClickHouseHelpGroupsMaintenanceCommands(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"db", "clickhouse", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "maintenance") {
+		t.Fatalf("clickhouse help missing maintenance group: %s", out)
+	}
+	for _, hidden := range []string{"backfill-service-facts", "cleanup-repair-artifacts", "repair-edge-kinds", "repair-ingestion-offsets"} {
+		if strings.Contains(out, "  "+hidden+" ") {
+			t.Fatalf("clickhouse help exposed maintenance command %q: %s", hidden, out)
+		}
+	}
+
+	stdout.Reset()
+	if err := Run(context.Background(), []string{"db", "clickhouse", "maintenance", "--help"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	out = stdout.String()
+	for _, want := range []string{"backfill-service-facts", "cleanup-repair-artifacts", "repair-edge-kinds", "repair-ingestion-offsets"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("maintenance help missing %q: %s", want, out)
+		}
+	}
+}
+
 func TestRunDBClickHouseSchemaJSONTypeOutput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{

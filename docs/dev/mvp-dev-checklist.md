@@ -335,7 +335,7 @@ was `kube-insight_0.0.2-next_chdb_linux_amd64.tar.gz` and contained
 measured kube-insight SQL/API at `448.746 ms` total versus raw `kubectl` at
 `3,462.546 ms` total for the same current target. Service LoadBalancer facts
 were added on 2026-05-18, with an append-only
-`db clickhouse backfill-service-facts` command used to backfill the restored
+`db clickhouse maintenance backfill-service-facts` command used to backfill the restored
 svc-mux ClickHouse history so agents can query
 `service.load_balancer.pending` and `service.load_balancer.ingress_ip` directly
 from facts. ClickHouse service investigation now caps per-object facts/changes
@@ -381,7 +381,7 @@ These are useful but outside the MVP stop line:
   `ClusterRole` where historical live data showed empty `dst_kind` values.
 - [x] Historical `edges.dst_kind = ''` rows in long-lived dev ClickHouse volumes
   are known legacy data from before this writer fix. Added explicit
-  `db clickhouse repair-edge-kinds` dry-run/apply maintenance flow; do not hide
+  `db clickhouse maintenance repair-edge-kinds` dry-run/apply maintenance flow; do not hide
   this work inside live profiling or normal watcher startup. Local dry-run on
   2026-05-18 reported `dst kind missing 376,279` and `dst kind repairable
   371,715`, with password redaction intact.

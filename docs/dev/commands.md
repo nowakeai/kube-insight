@@ -120,10 +120,10 @@ KUBE_INSIGHT_CLICKHOUSE_DSN=http://localhost:8123 \
   ./bin/kube-insight db clickhouse init
 ./bin/kube-insight db clickhouse init --endpoint http://localhost:8123
 ./bin/kube-insight db clickhouse status --endpoint http://localhost:8123
-./bin/kube-insight db clickhouse repair-ingestion-offsets --endpoint http://localhost:8123
-./bin/kube-insight db clickhouse repair-ingestion-offsets --endpoint http://localhost:8123 --apply --yes
-./bin/kube-insight db clickhouse cleanup-repair-artifacts --endpoint http://localhost:8123
-./bin/kube-insight db clickhouse cleanup-repair-artifacts --endpoint http://localhost:8123 --yes
+./bin/kube-insight db clickhouse maintenance repair-ingestion-offsets --endpoint http://localhost:8123
+./bin/kube-insight db clickhouse maintenance repair-ingestion-offsets --endpoint http://localhost:8123 --apply --yes
+./bin/kube-insight db clickhouse maintenance cleanup-repair-artifacts --endpoint http://localhost:8123
+./bin/kube-insight db clickhouse maintenance cleanup-repair-artifacts --endpoint http://localhost:8123 --yes
 
 ./bin/kube-insight db clickhouse import \
   --endpoint http://localhost:8123 \
@@ -144,9 +144,9 @@ or after restoring older ClickHouse history. This is append-only and defaults to
 dry-run; it does not rewrite retained `observations` or `versions`:
 
 ```bash
-./bin/kube-insight db clickhouse backfill-service-facts \
+./bin/kube-insight db clickhouse maintenance backfill-service-facts \
   --endpoint http://localhost:8123
-./bin/kube-insight db clickhouse backfill-service-facts \
+./bin/kube-insight db clickhouse maintenance backfill-service-facts \
   --endpoint http://localhost:8123 \
   --namespace svc-mux-eip-test \
   --yes
@@ -158,9 +158,9 @@ defaults to dry-run and uses explicit ClickHouse mutations only when `--yes` is
 set:
 
 ```bash
-./bin/kube-insight db clickhouse repair-edge-kinds \
+./bin/kube-insight db clickhouse maintenance repair-edge-kinds \
   --endpoint http://localhost:8123
-./bin/kube-insight db clickhouse repair-edge-kinds \
+./bin/kube-insight db clickhouse maintenance repair-edge-kinds \
   --endpoint http://localhost:8123 \
   --yes
 ```

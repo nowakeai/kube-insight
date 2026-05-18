@@ -40,13 +40,13 @@ func dbClickHouseBackfillServiceFactsCommand(ctx context.Context, stdout io.Writ
 				endpoint = os.Getenv(rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if endpoint == "" {
-				return fmt.Errorf("clickhouse backfill-service-facts requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
+				return fmt.Errorf("clickhouse maintenance backfill-service-facts requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if database == "" {
 				database = rt.Config.Storage.ClickHouse.Database
 			}
 			if yes {
-				if err := requireWriteRole(rt.Config, "db clickhouse backfill-service-facts"); err != nil {
+				if err := requireWriteRole(rt.Config, "db clickhouse maintenance backfill-service-facts"); err != nil {
 					return err
 				}
 			}
@@ -103,13 +103,13 @@ func dbClickHouseRepairEdgeKindsCommand(ctx context.Context, stdout io.Writer, s
 				endpoint = os.Getenv(rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if endpoint == "" {
-				return fmt.Errorf("clickhouse repair-edge-kinds requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
+				return fmt.Errorf("clickhouse maintenance repair-edge-kinds requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if database == "" {
 				database = rt.Config.Storage.ClickHouse.Database
 			}
 			if yes {
-				if err := requireWriteRole(rt.Config, "db clickhouse repair-edge-kinds"); err != nil {
+				if err := requireWriteRole(rt.Config, "db clickhouse maintenance repair-edge-kinds"); err != nil {
 					return err
 				}
 			}

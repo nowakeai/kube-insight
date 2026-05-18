@@ -181,13 +181,13 @@ clickhouse-status: build
 
 clickhouse-repair-plan: build
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \
-	$(BIN) db clickhouse repair-ingestion-offsets \
+	$(BIN) db clickhouse maintenance repair-ingestion-offsets \
 		--config '$(CLICKHOUSE_DEV_CONFIG)' \
 		--database '$(CLICKHOUSE_DATABASE)'
 
 clickhouse-cleanup-repair-artifacts: build
 	@set -a; [ ! -f .env ] || . ./.env; set +a; \
-	$(BIN) db clickhouse cleanup-repair-artifacts \
+	$(BIN) db clickhouse maintenance cleanup-repair-artifacts \
 		--config '$(CLICKHOUSE_DEV_CONFIG)' \
 		--database '$(CLICKHOUSE_DATABASE)'
 

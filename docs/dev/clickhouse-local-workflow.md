@@ -186,7 +186,7 @@ make clickhouse-repair-plan
 The generated plan creates a new `ReplacingMergeTree(updated_at)` offsets table,
 copies the latest offset per resource/event key with `argMax`, and keeps the old
 table under an `ingestion_offsets_backup_*` name. Applying it is deliberately not
-wrapped in a Make target; run `db clickhouse repair-ingestion-offsets --apply
+wrapped in a Make target; run `db clickhouse maintenance repair-ingestion-offsets --apply
 --yes` only after checking the printed statements and coordinating with the
 running watcher.
 
@@ -196,7 +196,7 @@ After a failed or completed repair, list cleanup candidates with:
 make clickhouse-cleanup-repair-artifacts
 ```
 
-This is read-only. The underlying `db clickhouse cleanup-repair-artifacts --yes`
+This is read-only. The underlying `db clickhouse maintenance cleanup-repair-artifacts --yes`
 command only drops empty `ingestion_offsets_repair_*` scratch tables. Backup
 tables are reported but never dropped automatically.
 

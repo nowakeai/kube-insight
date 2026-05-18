@@ -84,12 +84,25 @@ func dbClickHouseCommand(ctx context.Context, stdout io.Writer, state *cliState)
 	cmd.AddCommand(dbClickHouseSchemaCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseInitCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseStatusCommand(ctx, stdout, state))
-	cmd.AddCommand(dbClickHouseRepairCommand(ctx, stdout, state))
-	cmd.AddCommand(dbClickHouseCleanupCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseImportCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseServiceCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseMaintenanceCommand(ctx, stdout, state))
+	cmd.AddCommand(hiddenCommand(dbClickHouseRepairCommand(ctx, stdout, state)))
+	cmd.AddCommand(hiddenCommand(dbClickHouseCleanupCommand(ctx, stdout, state)))
+	cmd.AddCommand(hiddenCommand(dbClickHouseBackfillServiceFactsCommand(ctx, stdout, state)))
+	cmd.AddCommand(hiddenCommand(dbClickHouseRepairEdgeKindsCommand(ctx, stdout, state)))
+	return cmd
+}
+
+func dbClickHouseMaintenanceCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "maintenance",
+		Short: "Run explicit ClickHouse backfill, repair, and cleanup tasks.",
+	}
 	cmd.AddCommand(dbClickHouseBackfillServiceFactsCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseRepairEdgeKindsCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseRepairCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseCleanupCommand(ctx, stdout, state))
 	return cmd
 }
 
@@ -251,7 +264,7 @@ func dbClickHouseRepairCommand(ctx context.Context, stdout io.Writer, state *cli
 				endpoint = os.Getenv(rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if endpoint == "" {
-				return fmt.Errorf("clickhouse repair-ingestion-offsets requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
+				return fmt.Errorf("clickhouse maintenance repair-ingestion-offsets requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			schemaOpts := clickHouseSchemaOptionsFromCommand(cmd, rt, flags)
 			client := clickhouse.HTTPClient{Endpoint: endpoint}
@@ -273,11 +286,11 @@ func dbClickHouseRepairCommand(ctx context.Context, stdout io.Writer, state *cli
 				Plan:     plan,
 			}
 			if apply && plan.Needed {
-				if err := requireWriteRole(rt.Config, "db clickhouse repair-ingestion-offsets"); err != nil {
+				if err := requireWriteRole(rt.Config, "db clickhouse maintenance repair-ingestion-offsets"); err != nil {
 					return err
 				}
 				if !yes {
-					return fmt.Errorf("clickhouse repair-ingestion-offsets requires --yes with --apply")
+					return fmt.Errorf("clickhouse maintenance repair-ingestion-offsets requires --yes with --apply")
 				}
 				result, err := client.ApplySchema(ctx, plan.Statements)
 				out.Applied = result.Applied
@@ -320,7 +333,7 @@ func dbClickHouseCleanupCommand(ctx context.Context, stdout io.Writer, state *cl
 				endpoint = os.Getenv(rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			if endpoint == "" {
-				return fmt.Errorf("clickhouse cleanup-repair-artifacts requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
+				return fmt.Errorf("clickhouse maintenance cleanup-repair-artifacts requires --endpoint or env %s", rt.Config.Storage.ClickHouse.DSNEnv)
 			}
 			schemaOpts := clickHouseSchemaOptionsFromCommand(cmd, rt, flags)
 			client := clickhouse.HTTPClient{Endpoint: endpoint}
@@ -339,7 +352,7 @@ func dbClickHouseCleanupCommand(ctx context.Context, stdout io.Writer, state *cl
 				Plan:     plan,
 			}
 			if yes && len(plan.Statements) > 0 {
-				if err := requireWriteRole(rt.Config, "db clickhouse cleanup-repair-artifacts"); err != nil {
+				if err := requireWriteRole(rt.Config, "db clickhouse maintenance cleanup-repair-artifacts"); err != nil {
 					return err
 				}
 				result, err := client.ApplySchema(ctx, plan.Statements)

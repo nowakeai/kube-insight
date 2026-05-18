@@ -1,8 +1,9 @@
 # Agent SQL Cookbook
 
-Agents should start with `query schema`, then use read-only SQL to find
-candidates. Wrapper commands and typed MCP/API tools are convenience shortcuts;
-SQL remains the flexible investigation primitive.
+Agents should start with `query schema`, then use read-only SQL to investigate.
+Wrapper commands and typed MCP/API tools are convenience shortcuts; SQL is the
+primary interface because it lets agents compose new joins, rank candidates, and
+ask follow-up questions without waiting for product-specific endpoints.
 
 The active storage backend changes the SQL shape. SQLite exposes tables such as
 `object_facts`, `object_edges`, `object_changes`, `object_observations`,
@@ -46,6 +47,24 @@ ClickHouse-compatible section when schema notes report ClickHouse or chDB.
 For SQLite, use `latest_raw_documents` for the latest observed sanitized cluster
 snapshot, and `latest_documents` for the latest retained/normalized proof
 document.
+
+## SQL-First Investigation Loop
+
+Use typed API/MCP endpoints as guardrails and summaries, not as the main
+investigation surface. A reliable agent loop is:
+
+1. Detect backend with schema.
+2. Check collector coverage from `ingestion_offsets`.
+3. Select one `cluster_id` and keep it in every query.
+4. Inventory available `fact_key` values before guessing what to search.
+5. Query `facts` and `changes` to rank candidate objects.
+6. Query `edges` to expand topology around candidate `object_id` values.
+7. Query `observations` and `versions` for proof timestamps, resource versions,
+   document hashes, and retained JSON when needed.
+
+For ClickHouse-compatible backends, `ingestion_offsets` is append-only. Always
+collapse it with `argMax(..., updated_at)` before judging current coverage. A
+plain `group by status` mixes old and current states.
 
 ## Cluster Scope Pattern
 
@@ -109,19 +128,75 @@ for the chDB-enabled local variant.
 Check collector coverage with the current-state offset table:
 
 ```sql
-select
-  cluster_id,
-  api_group,
-  api_version,
-  resource,
-  kind,
-  argMax(status, updated_at) as status,
-  argMax(error, updated_at) as error,
-  max(updated_at) as updated_at
-from ingestion_offsets
-group by cluster_id, api_group, api_version, resource, kind
-having status in ('retrying', 'list_error', 'watch_error')
-order by updated_at desc
+with latest as (
+  select
+    cluster_id,
+    api_group,
+    api_version,
+    resource,
+    kind,
+    argMax(status, updated_at) as status,
+    argMax(error, updated_at) as error,
+    max(updated_at) as latest_update
+  from ingestion_offsets
+  group by cluster_id, api_group, api_version, resource, kind
+)
+select cluster_id, status, count() as resources, max(latest_update) as latest_update
+from latest
+group by cluster_id, status
+order by resources desc;
+```
+
+Show only degraded resources:
+
+```sql
+with latest as (
+  select
+    cluster_id, api_group, api_version, resource, kind,
+    argMax(status, updated_at) as status,
+    argMax(error, updated_at) as error,
+    max(updated_at) as latest_update
+  from ingestion_offsets
+  group by cluster_id, api_group, api_version, resource, kind
+)
+select cluster_id, api_group, api_version, resource, kind, status, error, latest_update
+from latest
+where status in ('retrying', 'list_error', 'watch_error')
+order by latest_update desc
+limit 50;
+```
+
+Inventory available facts before choosing a predicate:
+
+```sql
+select kind, fact_key, severity, count() as rows, max(ts) as latest
+from facts
+where cluster_id = 'c1'
+group by kind, fact_key, severity
+order by severity desc, rows desc
+limit 100;
+```
+
+Find high-severity Pod candidates:
+
+```sql
+select ts, object_id, namespace, name, fact_key, fact_value, severity
+from facts
+where cluster_id = 'c1'
+  and kind = 'Pod'
+  and severity >= 90
+order by ts desc
+limit 50;
+```
+
+Compare status changes for the same candidates:
+
+```sql
+select ts, object_id, kind, namespace, name, change_family, path, op, old_scalar, new_scalar, severity
+from changes
+where cluster_id = 'c1'
+  and severity >= 90
+order by ts desc
 limit 50;
 ```
 
@@ -153,10 +228,17 @@ order by valid_from desc
 limit 100;
 ```
 
-Pull proof versions after narrowing candidates:
+Pull proof observations and versions after narrowing candidates:
 
 ```sql
-select object_id, kind, namespace, name, observed_at, resource_version, doc_hash
+select observed_at, observation_type, resource, kind, namespace, name, resource_version, partial
+from observations
+where cluster_id = 'c1'
+  and uid = 'example-uid'
+order by observed_at desc
+limit 20;
+
+select object_id, kind, namespace, name, observed_at, resource_version, doc_hash, raw_size, stored_size
 from versions
 where cluster_id = 'c1'
   and object_id = 'c1/example-uid'
@@ -164,9 +246,10 @@ order by observed_at desc
 limit 10;
 ```
 
-Prefer typed commands or MCP tools for object history and service investigation
-when they are available; they hide backend-specific joins and return the same
-product DTO across SQLite, ClickHouse, and chDB.
+Use typed commands or MCP tools for object history and service investigation
+when they package the final answer more cleanly. They hide backend-specific
+joins and return the same product DTO across SQLite, ClickHouse, and chDB, but
+SQL remains the main exploratory interface.
 
 ## Webhook Broke GitOps
 
@@ -189,6 +272,18 @@ where ok.kind in ('ValidatingWebhookConfiguration', 'MutatingWebhookConfiguratio
   and f.cluster_id = 1
   and f.fact_key in ('admission_webhook.failure_policy', 'admission_webhook.service')
 order by f.severity desc, f.ts desc
+limit 100;
+```
+
+ClickHouse-compatible version:
+
+```sql
+select ts, object_id, kind, namespace, name, fact_key, fact_value, severity
+from facts
+where cluster_id = 'c1'
+  and kind in ('ValidatingWebhookConfiguration', 'MutatingWebhookConfiguration')
+  and fact_key in ('admission_webhook.failure_policy', 'admission_webhook.service')
+order by severity desc, ts desc
 limit 100;
 ```
 

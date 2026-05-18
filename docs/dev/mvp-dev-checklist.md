@@ -262,6 +262,11 @@ but it is now correct and still inside the MVP `1s` service-query guardrail.
 - [x] Walk the user documentation path from README to quickstart, storage mode
   comparison, and agent skill; add the missing ClickHouse service-backend quick
   start and keep cold-tiering documented as opt-in.
+- [x] Validate the agent skill against the live local ClickHouse dev API with
+  SQL-first queries for coverage, cluster scope, fact inventory, high-severity
+  candidates, changes, topology edges, observations, versions, and webhook
+  evidence; document SQL as the primary agent interface and typed APIs as
+  supporting summaries.
 - [x] Add a short "known limitations" section for the MVP backend.
 
 Acceptance:

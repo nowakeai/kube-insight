@@ -14,6 +14,9 @@ kubectl output compares with retained historical evidence.
 - Start with coverage. A missing fact is not meaningful until collector health
   is healthy for the resource types involved.
 - Determine cluster scope first and keep the selected `cluster_id` in follow-up SQL.
+- Use SQL as the primary investigation interface. Typed API/MCP tools are
+  shortcuts for health, history, topology, and service summaries after SQL has
+  identified the question and candidate objects.
 - Use facts and edges to find candidate objects; use retained versions as proof.
 - Treat `object_observations` as the observation trail and `versions` as retained
   content changes.
@@ -38,14 +41,18 @@ Agents should not guess the SQL shape from memory. Detect it at runtime:
 - ClickHouse/chDB schema notes say `Active SQL backend: ClickHouse-compatible`
   and expose tables such as `facts`, `edges`, `changes`, `observations`,
   `versions`, `api_resources`, and `ingestion_offsets`.
-- Prefer typed tools (`kube_insight_health`, `kube_insight_history`, API search,
-  API topology, and service investigation) when available; use raw SQL for
-  custom joins and exploratory evidence queries.
+- Prefer `kube_insight_sql` or `query sql` for discovery and investigation. Use
+  typed tools (`kube_insight_health`, `kube_insight_history`, API search, API
+  topology, and service investigation) as guardrails or summaries when they save
+  work, but do not stop at typed summaries if custom SQL can answer the question
+  more directly.
 
 ## MCP Tools
 
-Prefer MCP tools when connected to a running kube-insight MCP server. MCP follows
-the configured `storage.driver` for SQLite, ClickHouse, and chDB-enabled builds:
+Prefer MCP tools when connected to a running kube-insight MCP server. Use
+`kube_insight_sql` as the default investigation tool after schema detection; the
+other typed tools are support tools. MCP follows the configured `storage.driver`
+for SQLite, ClickHouse, and chDB-enabled builds:
 
 - `kube_insight_health`: check coverage, errors, stale resources, and skipped
   resource types.
@@ -54,6 +61,16 @@ the configured `storage.driver` for SQLite, ClickHouse, and chDB-enabled builds:
 - `kube_insight_sql`: run read-only evidence SQL for the active backend.
 - `kube_insight_history`: fetch retained versions, observations, and diffs for a
   specific object.
+
+SQL-first loop:
+
+1. `kube_insight_schema` to detect backend and tables.
+2. `kube_insight_sql` against health/coverage tables.
+3. `kube_insight_sql` against facts and changes to find candidates.
+4. `kube_insight_sql` against edges to expand topology.
+5. `kube_insight_sql` against versions and observations for proof.
+6. Use typed history/topology/service tools only when they package the final
+   evidence more cleanly than another SQL query.
 
 Useful MCP prompts:
 
@@ -72,6 +89,23 @@ When MCP is not available, use the CLI:
 ./bin/kube-insight query history --db kubeinsight.db --kind Pod --namespace default --name example --max-versions 10 --max-observations 50
 ```
 
+## What To Query
+
+For ClickHouse-compatible backends, use these tables directly through
+`kube_insight_sql`:
+
+| Question | Table(s) | Pattern |
+| --- | --- | --- |
+| Is coverage trustworthy? | `ingestion_offsets` | Collapse append-only rows with `argMax(status, updated_at)` before judging current state. |
+| Which cluster should I query? | `versions`, `facts`, `edges` | `group by cluster_id`, then keep that `cluster_id` in every query. |
+| What evidence types exist? | `facts` | `group by kind, fact_key, severity` to discover useful predicates. |
+| What changed recently? | `changes` | Filter by `cluster_id`, `kind`, `severity`, `path`, or `object_id`. |
+| Which objects are related? | `edges` | Filter where `src_id` or `dst_id` equals a candidate `object_id`. |
+| What proof can I cite? | `versions`, `observations` | Use `versions` for retained content and `observations` for the watch/list timeline. |
+
+Do not guess joins first. Inventory facts and changes, choose candidate
+`object_id` values, then expand edges and proof.
+
 ## Investigation Flow
 
 0. Detect active backend:
@@ -82,8 +116,8 @@ schema exposes object_facts/object_edges. Use ClickHouse examples when the
 schema exposes facts/edges/versions.
 ```
 
-1. Check health. Prefer `kube_insight_health`; when using SQL, choose the
-   backend-specific shape:
+1. Check health with SQL first. `kube_insight_health` is useful as a typed
+   summary, but SQL exposes the exact resources and latest offset states:
 
 ```sql
 -- SQLite
@@ -99,12 +133,18 @@ order by status, ar.api_group, ar.resource
 limit 50;
 
 -- ClickHouse-compatible
-select cluster_id, api_group, api_version, resource, kind,
-       argMax(status, updated_at) as status, argMax(error, updated_at) as error
-from ingestion_offsets
-group by cluster_id, api_group, api_version, resource, kind
-having status in ('retrying','list_error','watch_error')
-order by cluster_id, api_group, resource
+with latest as (
+  select cluster_id, api_group, api_version, resource, kind,
+         argMax(status, updated_at) as status,
+         argMax(error, updated_at) as error,
+         max(updated_at) as latest_update
+  from ingestion_offsets
+  group by cluster_id, api_group, api_version, resource, kind
+)
+select cluster_id, api_group, api_version, resource, kind, status, error, latest_update
+from latest
+where status in ('retrying','list_error','watch_error')
+order by latest_update desc
 limit 50;
 ```
 
@@ -164,8 +204,25 @@ order by valid_from desc
 limit 50;
 ```
 
-5. Pull retained history for proof with `kube_insight_history` or
-   `query history`.
+5. Pull retained proof with SQL first; use `kube_insight_history` or
+   `query history` when you need packaged diffs:
+
+```sql
+-- ClickHouse-compatible
+select observed_at, observation_type, resource, kind, namespace, name, resource_version, partial
+from observations
+where cluster_id = 'c1'
+  and uid = 'example-uid'
+order by observed_at desc
+limit 20;
+
+select object_id, kind, namespace, name, observed_at, resource_version, doc_hash
+from versions
+where cluster_id = 'c1'
+  and object_id = 'c1/example-uid'
+order by observed_at desc
+limit 10;
+```
 
 ## Output Style
 

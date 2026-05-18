@@ -1,6 +1,6 @@
 # ClickHouse MVP Closeout
 
-Status date: 2026-05-17
+Status date: 2026-05-18
 
 ## Current Decision
 
@@ -72,17 +72,23 @@ Default API on `127.0.0.1:8080`:
 - Live profile selected a real Service and a recent Pod from the running dev
   watcher dataset.
 - Active business-table storage efficiency after the compose watcher/API rebuild:
-  latest threshold-enabled profile reported `1,792,264` rows, `58.25 MiB`
-  active bytes on disk, `58.05 MiB` compressed, `1.61 GiB` uncompressed,
-  `28.4x` compression ratio, and `33.96` compressed bytes per row.
+  latest threshold-enabled profile reported `3,635,326` rows, `108.21 MiB`
+  active bytes on disk, `107.91 MiB` compressed, `3.12 GiB` uncompressed,
+  `29.58x` compression ratio, and `31.13` compressed bytes per row.
 - After rebuilding the compose watcher/API on 2026-05-17, API timings stayed
   inside MVP thresholds: latest threshold-enabled profile reported health
-  `93.497 ms`, search `84.622 ms`, history `70.040 ms`, topology `106.344 ms`,
-  and service investigation `783.779 ms`.
+  `113.257 ms`, search `91.010 ms`, history `46.262 ms`, topology
+  `103.208 ms`, and service investigation `262.618 ms` after capping
+  per-object facts/changes in service investigation bundles.
 - `make clickhouse-live-profile` now writes `thresholds.tsv` and fails by
   default when active-table compression or representative API latency falls
   outside the MVP guardrails. `make clickhouse-api-smoke` also writes
   `thresholds.tsv` and failed-threshold API calls fail the smoke test.
+- A 2026-05-18 live profile caught a real service-investigation regression: old
+  repeated facts/changes made the selected 20-object service bundle about
+  `1.3 MiB` and `1,390.750 ms`. The ClickHouse service read path now caps
+  service-investigation facts/changes per object, and the rerun passed at
+  `262.618 ms` with the same object/version guardrail shape.
 
 chDB-enabled API on `127.0.0.1:18081` reading the same ClickHouse backend:
 
@@ -98,10 +104,11 @@ chDB-enabled API on `127.0.0.1:18081` reading the same ClickHouse backend:
 Watcher and footprint observations:
 
 - Offset status in the latest default profile immediately after the compose
-  watcher/API rebuild was `237 / 241` listed and `4 / 241` watching. API health
-  reported `241 / 241` healthy resources with `0` errors and `0` queued. The
-  latest chDB-enabled profile before that rebuild was `228 / 241` bookmark,
-  `6 / 241` watching, and `7 / 241` retrying.
+  watcher/API rebuild was `229 / 241` listed and `12 / 241` watching. API health
+  reported `240 / 241` healthy resources with `0` errors and `0` queued during
+  startup, then continued converging. The latest chDB-enabled profile before
+  that rebuild was `228 / 241` bookmark, `6 / 241` watching, and `7 / 241`
+  retrying.
 - `make clickhouse-cleanup-repair-artifacts` reported `droppable 0`; the retained
   `ingestion_offsets_backup_20260516_195840` table remains visible but is not
   eligible for automatic cleanup.

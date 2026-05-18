@@ -43,12 +43,13 @@ func (s *Store) factsByObject(ctx context.Context, objectIDs []string, opts stor
 	if len(objectIDs) == 0 {
 		return out, nil
 	}
+	limit := boundedLimit(opts.MaxFactsPerObject, 1000, 5000)
 	query := fmt.Sprintf(`
 SELECT ts, object_id, fact_key, fact_value, numeric_value, severity, detail
 FROM %s.facts
 WHERE object_id IN (%s)%s
 ORDER BY object_id ASC, ts DESC, fact_key ASC
-LIMIT 1000 BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To))
+LIMIT %d BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To), limit)
 	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
@@ -69,12 +70,13 @@ func (s *Store) changesByObject(ctx context.Context, objectIDs []string, opts st
 	if len(objectIDs) == 0 {
 		return out, nil
 	}
+	limit := boundedLimit(opts.MaxChangesPerObject, 1000, 5000)
 	query := fmt.Sprintf(`
 SELECT ts, object_id, change_family, path, op, old_scalar, new_scalar, severity
 FROM %s.changes
 WHERE object_id IN (%s)%s
 ORDER BY object_id ASC, ts DESC, path ASC
-LIMIT 1000 BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To))
+LIMIT %d BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To), limit)
 	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err

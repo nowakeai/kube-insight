@@ -82,6 +82,8 @@ type InvestigationOptions struct {
 	To                   time.Time
 	MaxEvidenceObjects   int
 	MaxVersionsPerObject int
+	MaxFactsPerObject    int
+	MaxChangesPerObject  int
 }
 
 type ObjectInvestigationStore interface {

@@ -331,9 +331,17 @@ investigation was `801.255 ms`, still inside the MVP `1s` guardrail. The release
 was `kube-insight_0.0.2-next_chdb_linux_amd64.tar.gz` and contained
 `kube-insight`, `libchdb.so`, and `config/kube-insight.chdb.example.yaml`. On
 2026-05-18, `make mcp-sql-first-smoke`, `make release-artifact-smoke`, and
-`make live-service-vs-kubectl` also passed; the live Service case measured
-kube-insight SQL/API at `481.150 ms` total versus raw `kubectl` at
-`3,229.201 ms` total for the same current target. Service LoadBalancer facts were added on 2026-05-18, with an append-only `db clickhouse backfill-service-facts` command used to backfill the restored svc-mux ClickHouse history so agents can query `service.load_balancer.pending` and `service.load_balancer.ingress_ip` directly from facts.
+`make live-service-vs-kubectl` also passed; the latest live Service case
+measured kube-insight SQL/API at `448.746 ms` total versus raw `kubectl` at
+`3,462.546 ms` total for the same current target. Service LoadBalancer facts
+were added on 2026-05-18, with an append-only
+`db clickhouse backfill-service-facts` command used to backfill the restored
+svc-mux ClickHouse history so agents can query
+`service.load_balancer.pending` and `service.load_balancer.ingress_ip` directly
+from facts. ClickHouse service investigation now caps per-object facts/changes
+inside service bundles, reducing the latest live profile from a failed
+`1,390.750 ms` run to `262.618 ms` while preserving the 20-object and
+3-version guardrail shape.
 
 ## Explicitly Deferred
 

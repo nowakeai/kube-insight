@@ -102,6 +102,8 @@ func (s *Store) InvestigateServiceWithOptions(ctx context.Context, target storag
 func investigationBundleOptions(opts storage.InvestigationOptions) storage.InvestigationOptions {
 	out := opts
 	out.MaxVersionsPerObject = boundedLimit(out.MaxVersionsPerObject, 3, 100)
+	out.MaxFactsPerObject = boundedLimit(out.MaxFactsPerObject, 100, 1000)
+	out.MaxChangesPerObject = boundedLimit(out.MaxChangesPerObject, 100, 1000)
 	return out
 }
 

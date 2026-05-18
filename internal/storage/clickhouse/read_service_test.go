@@ -12,6 +12,8 @@ import (
 )
 
 func TestStoreInvestigateServiceExpandsTopologyAndEvidence(t *testing.T) {
+	var factQuery string
+	var changeQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -31,8 +33,10 @@ func TestStoreInvestigateServiceExpandsTopologyAndEvidence(t *testing.T) {
 			case strings.Contains(query, "SELECT object_id, doc"):
 				writeTSV(w, "object_id	doc", `c1/svc-uid	{"kind":"Service"}`, `c1/eps-uid	{"kind":"EndpointSlice"}`, `c1/pod-uid	{"kind":"Pod"}`, `c1/node-uid	{"kind":"Node"}`)
 			case strings.Contains(query, "SELECT ts, object_id, fact_key"):
+				factQuery = query
 				writeTSV(w, "ts	object_id	fact_key	fact_value	numeric_value	severity	detail", `1970-01-01 00:00:20.000	c1/pod-uid	pod_status.phase	Running		10	{}`)
 			case strings.Contains(query, "SELECT ts, object_id, change_family"):
+				changeQuery = query
 				writeEmptyTSV(w, "ts	object_id	change_family	path	op	old_scalar	new_scalar	severity")
 			case strings.Contains(query, "SELECT object_id, alias_id"):
 				writeEmptyTSV(w, "object_id	alias_id")
@@ -84,5 +88,8 @@ func TestStoreInvestigateServiceExpandsTopologyAndEvidence(t *testing.T) {
 	}
 	if len(result.Objects) != 3 || result.Objects[0].Summary.Rank == 0 {
 		t.Fatalf("objects = %#v", result.Objects)
+	}
+	if !strings.Contains(factQuery, "LIMIT 100 BY object_id") || !strings.Contains(changeQuery, "LIMIT 100 BY object_id") {
+		t.Fatalf("service evidence limits not applied; fact query=%s change query=%s", factQuery, changeQuery)
 	}
 }

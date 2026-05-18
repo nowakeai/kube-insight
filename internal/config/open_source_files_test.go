@@ -96,6 +96,7 @@ func TestReleaseWorkflowUsesGoReleaserAndGHCR(t *testing.T) {
 		"mikepenz/release-changelog-builder-action",
 		"--release-notes=RELEASE_NOTES.md",
 		"## Artifacts",
+		"docker/setup-buildx-action",
 		"docker/login-action",
 		"registry: ghcr.io",
 		"packages: write",

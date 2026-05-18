@@ -371,10 +371,12 @@ These are useful but outside the MVP stop line:
   Gateway API, Flux, and Argo CD resource paths.
 - [x] Added focused tests for edge targets such as `Secret`, `ReplicaSet`, and
   `ClusterRole` where historical live data showed empty `dst_kind` values.
-- [ ] Historical `edges.dst_kind = ''` rows in long-lived dev ClickHouse volumes
-  are known legacy data from before this writer fix. Repair them only with an
-  explicit maintenance command or documented SQL mutation; do not hide that work
-  inside live profiling or normal watcher startup.
+- [x] Historical `edges.dst_kind = ''` rows in long-lived dev ClickHouse volumes
+  are known legacy data from before this writer fix. Added explicit
+  `db clickhouse repair-edge-kinds` dry-run/apply maintenance flow; do not hide
+  this work inside live profiling or normal watcher startup. Local dry-run on
+  2026-05-18 reported `dst kind missing 376,279` and `dst kind repairable
+  371,715`, with password redaction intact.
 
 ## Next Operating Rule
 

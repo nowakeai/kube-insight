@@ -70,6 +70,12 @@ type clickHouseCleanupOutput struct {
 	Plan     clickhouse.RepairArtifactCleanupPlan `json:"plan"`
 }
 
+type clickHouseEdgeKindRepairOutput struct {
+	Endpoint string                          `json:"endpoint"`
+	Database string                          `json:"database"`
+	Report   clickhouse.EdgeKindRepairReport `json:"report"`
+}
+
 func dbClickHouseCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "clickhouse",
@@ -83,6 +89,7 @@ func dbClickHouseCommand(ctx context.Context, stdout io.Writer, state *cliState)
 	cmd.AddCommand(dbClickHouseImportCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseServiceCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseBackfillServiceFactsCommand(ctx, stdout, state))
+	cmd.AddCommand(dbClickHouseRepairEdgeKindsCommand(ctx, stdout, state))
 	return cmd
 }
 

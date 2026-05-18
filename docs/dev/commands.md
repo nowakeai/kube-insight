@@ -152,6 +152,19 @@ dry-run; it does not rewrite retained `observations` or `versions`:
   --yes
 ```
 
+Repair legacy ClickHouse edge rows where `src_kind` or `dst_kind` is empty. This
+is for old dev/live volumes created before edge kind inference was added. It
+defaults to dry-run and uses explicit ClickHouse mutations only when `--yes` is
+set:
+
+```bash
+./bin/kube-insight db clickhouse repair-edge-kinds \
+  --endpoint http://localhost:8123
+./bin/kube-insight db clickhouse repair-edge-kinds \
+  --endpoint http://localhost:8123 \
+  --yes
+```
+
 Rebuild derived facts, edges, and changes after extractor/profile changes:
 
 ```bash

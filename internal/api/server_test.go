@@ -134,6 +134,33 @@ func TestServerClickHouseReadEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 		query := string(data)
+		if strings.Contains(query, "FORMAT TSVWithNames") {
+			switch {
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id") && strings.Contains(query, "c1/svc-uid"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	src_kind	dst_kind	edge_valid_from	edge_valid_to", `endpointslice_for_service	c1/eps-uid	c1/svc-uid	EndpointSlice	Service	1970-01-01 00:00:20.000	2100-01-01 00:00:00.000`)
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id") && strings.Contains(query, "c1/eps-uid"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	src_kind	dst_kind	edge_valid_from	edge_valid_to", `endpointslice_for_service	c1/eps-uid	c1/svc-uid	EndpointSlice	Service	1970-01-01 00:00:20.000	2100-01-01 00:00:00.000`, `endpointslice_targets_pod	c1/eps-uid	c1/pod-uid	EndpointSlice	Pod	1970-01-01 00:00:20.000	2100-01-01 00:00:00.000`)
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id") && strings.Contains(query, "c1/pod-uid"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	src_kind	dst_kind	edge_valid_from	edge_valid_to", `pod_on_node	c1/pod-uid	c1/node-uid	Pod	Node	1970-01-01 00:00:20.000	2100-01-01 00:00:00.000`)
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	src_kind	dst_kind	edge_valid_from	edge_valid_to")
+			case strings.Contains(query, "SELECT object_id, doc"):
+				writeClickHouseTSV(w, "object_id	doc", `c1/svc-uid	{"kind":"Service"}`, `c1/eps-uid	{"kind":"EndpointSlice"}`, `c1/pod-uid	{"kind":"Pod"}`, `c1/node-uid	{"kind":"Node"}`)
+			case strings.Contains(query, "SELECT ts, object_id, fact_key"):
+				writeClickHouseTSV(w, "ts	object_id	fact_key	fact_value	numeric_value	severity	detail", `1970-01-01 00:00:20.000	c1/pod-uid	pod_status.phase	Running		10	{}`)
+			case strings.Contains(query, "SELECT ts, object_id, change_family"):
+				writeClickHouseTSV(w, "ts	object_id	change_family	path	op	old_scalar	new_scalar	severity")
+			case strings.Contains(query, "SELECT object_id, alias_id"):
+				writeClickHouseTSV(w, "object_id	alias_id")
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id, valid_from"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	valid_from	valid_to	detail")
+			case strings.Contains(query, "SELECT object_id, seq"):
+				writeClickHouseTSV(w, "object_id	seq	observed_at	resource_version	doc_hash	materialization	raw_size	stored_size", `c1/svc-uid	1	1970-01-01 00:00:20.000	20	h1	full	14	14`, `c1/eps-uid	1	1970-01-01 00:00:20.000	20	h1	full	14	14`, `c1/pod-uid	1	1970-01-01 00:00:20.000	20	h1	full	14	14`, `c1/node-uid	1	1970-01-01 00:00:20.000	20	h1	full	14	14`)
+			default:
+				t.Fatalf("unexpected ClickHouse TSV query: %s", query)
+			}
+			return
+		}
 		switch {
 		case strings.Contains(query, "FROM `ki`.versions") && strings.Contains(query, "GROUP BY object_id") && strings.Contains(query, "kind = 'Service'"):
 			writeClickHouseJSON(w, `{"data":[{"object_id":"c1/svc-uid","cluster_id":"c1","api_group":"","api_version":"v1","resource":"services","kind":"Service","namespace":"default","name":"api","uid":"svc-uid","latest_observed_at":"1970-01-01 00:00:20.000"}],"rows":1}`)
@@ -206,4 +233,12 @@ func TestParseServiceInvestigationRequestAcceptsLimitAlias(t *testing.T) {
 func writeClickHouseJSON(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(body))
+}
+
+func writeClickHouseTSV(w http.ResponseWriter, header string, rows ...string) {
+	w.Header().Set("Content-Type", "text/tab-separated-values")
+	_, _ = w.Write([]byte(header + "\n"))
+	for _, row := range rows {
+		_, _ = w.Write([]byte(row + "\n"))
+	}
 }

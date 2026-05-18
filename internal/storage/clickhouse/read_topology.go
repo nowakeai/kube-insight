@@ -82,23 +82,17 @@ FROM %s.edges
 WHERE (src_id IN (%s) OR dst_id IN (%s))%s
 GROUP BY edge_type, src_id, dst_id
 ORDER BY edge_valid_from`, q(s.database()), sqlStringList(rootIDs), sqlStringList(rootIDs), edgeWindowFilter(opts))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]topologyEdgeRow, 0, len(result.Data))
-	for _, row := range result.Data {
-		srcID := stringValue(row["src_id"])
-		dstID := stringValue(row["dst_id"])
-		validFrom := timeValue(row["edge_valid_from"])
-		if validFrom.IsZero() {
-			validFrom = timeValue(row["valid_from"])
-		}
-		validTo := timeValue(row["edge_valid_to"])
-		if validTo.IsZero() {
-			validTo = timeValue(row["valid_to"])
-		}
-		out := topologyEdgeRow{Type: stringValue(row["edge_type"]), SrcID: srcID, DstID: dstID, SrcKind: stringValue(row["src_kind"]), DstKind: stringValue(row["dst_kind"]), ValidFrom: validFrom}
+	rows := make([]topologyEdgeRow, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		srcID := row[1]
+		dstID := row[2]
+		validFrom := timeValue(row[5])
+		validTo := timeValue(row[6])
+		out := topologyEdgeRow{Type: row[0], SrcID: srcID, DstID: dstID, SrcKind: row[3], DstKind: row[4], ValidFrom: validFrom}
 		if !validTo.IsZero() && validTo.Before(farFutureTime()) {
 			out.ValidTo = &validTo
 		}

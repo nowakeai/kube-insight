@@ -159,6 +159,54 @@ func (c *client) QueryJSON(ctx context.Context, query string) (clickhouse.QueryR
 	}, nil
 }
 
+func (c *client) QueryTSV(ctx context.Context, query string) (clickhouse.TSVResult, error) {
+	text := strings.TrimSpace(query)
+	if text == "" {
+		return clickhouse.TSVResult{}, fmt.Errorf("query is required")
+	}
+	result, err := c.execFormat(ctx, text, "JSONCompact")
+	if err != nil {
+		return clickhouse.TSVResult{}, err
+	}
+	if result == nil {
+		return clickhouse.TSVResult{Rows: [][]string{}}, nil
+	}
+	defer result.Free()
+	var raw struct {
+		Meta []clickhouse.QueryMeta `json:"meta"`
+		Data [][]any                `json:"data"`
+	}
+	if err := json.Unmarshal(result.Buf(), &raw); err != nil {
+		return clickhouse.TSVResult{}, err
+	}
+	columns := make([]string, 0, len(raw.Meta))
+	for _, meta := range raw.Meta {
+		columns = append(columns, meta.Name)
+	}
+	rows := make([][]string, 0, len(raw.Data))
+	for _, rawRow := range raw.Data {
+		row := make([]string, len(rawRow))
+		for i, value := range rawRow {
+			row[i] = compactValueString(value)
+		}
+		rows = append(rows, row)
+	}
+	return clickhouse.TSVResult{Columns: columns, Rows: rows}, nil
+}
+
+func compactValueString(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	case json.Number:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
 func (c *client) InsertEvidenceBatch(ctx context.Context, batch clickhouse.EvidenceBatch) (clickhouse.InsertResult, error) {
 	out := clickhouse.InsertResult{Endpoint: c.path, Database: batch.Database, Tables: map[string]int{}}
 	for _, table := range []struct {

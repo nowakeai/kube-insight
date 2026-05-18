@@ -19,6 +19,14 @@ import (
 	"kube-insight/internal/storage/sqlite"
 )
 
+func writeClickHouseTSV(w http.ResponseWriter, header string, rows ...string) {
+	w.Header().Set("Content-Type", "text/tab-separated-values")
+	_, _ = w.Write([]byte(header + "\n"))
+	for _, row := range rows {
+		_, _ = w.Write([]byte(row + "\n"))
+	}
+}
+
 func TestRunDBClickHouseSchemaSQL(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
@@ -412,6 +420,27 @@ func TestRunDBClickHouseService(t *testing.T) {
 			t.Fatal(err)
 		}
 		query := string(data)
+		if strings.Contains(query, "FORMAT TSVWithNames") {
+			switch {
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id") && strings.Contains(query, "argMax"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	src_kind	dst_kind	edge_valid_from	edge_valid_to", `endpointslice_for_service	c1/eps-uid	c1/svc-uid	EndpointSlice	Service	2026-05-17T00:00:00Z	`, `endpointslice_targets_pod	c1/eps-uid	c1/pod-uid	EndpointSlice	Pod	2026-05-17T00:00:00Z	`)
+			case strings.Contains(query, "SELECT object_id, doc"):
+				writeClickHouseTSV(w, "object_id	doc", `c1/svc-uid	{"kind":"Service"}`, `c1/eps-uid	{"kind":"EndpointSlice"}`, `c1/pod-uid	{"kind":"Pod"}`)
+			case strings.Contains(query, "SELECT object_id, alias_id"):
+				writeClickHouseTSV(w, "object_id	alias_id", `c1/svc-uid	c1/services/default/api`, `c1/eps-uid	c1/endpointslices/default/api-abc`, `c1/pod-uid	c1/pods/default/api-0`)
+			case strings.Contains(query, "SELECT edge_type, src_id, dst_id, valid_from"):
+				writeClickHouseTSV(w, "edge_type	src_id	dst_id	valid_from	valid_to	detail", `endpointslice_targets_pod	c1/eps-uid	c1/pod-uid	2026-05-17T00:00:00Z		{}`)
+			case strings.Contains(query, "SELECT object_id, seq"):
+				writeClickHouseTSV(w, "object_id	seq	observed_at	resource_version	doc_hash	materialization	raw_size	stored_size", `c1/svc-uid	1	2026-05-17T00:00:00Z	1	abc	full	10	8`, `c1/eps-uid	1	2026-05-17T00:00:00Z	1	abc	full	10	8`, `c1/pod-uid	1	2026-05-17T00:00:00Z	1	abc	full	10	8`)
+			case strings.Contains(query, "FROM `ki`.facts"):
+				writeClickHouseTSV(w, "ts	object_id	fact_key	fact_value	numeric_value	severity	detail", `2026-05-17T00:00:00Z	c1/pod-uid	pod.phase	Running		10	{}`)
+			case strings.Contains(query, "FROM `ki`.changes"):
+				writeClickHouseTSV(w, "ts	object_id	change_family	path	op	old_scalar	new_scalar	severity")
+			default:
+				t.Fatalf("unexpected TSV query: %s", query)
+			}
+			return
+		}
 		switch {
 		case strings.Contains(query, "FROM `ki`.versions") && strings.Contains(query, "kind = 'Service'"):
 			_, _ = w.Write([]byte(`{"data":[{"cluster_id":"c1","object_id":"c1/svc-uid","api_version":"v1","resource":"services","kind":"Service","namespace":"default","name":"api","uid":"svc-uid","latest_observed_at":"2026-05-17T00:00:00Z"}],"rows":1}`))

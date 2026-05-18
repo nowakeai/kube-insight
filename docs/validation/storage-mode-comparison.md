@@ -160,9 +160,9 @@ STORAGE_BENCH_CLUSTERS=2 STORAGE_BENCH_COPIES=20 make storage-mode-benchmark
 
 | Backend | Ingest | Health | Search | History | Topology | Service investigation | Storage signal |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| SQLite | `18.09 s` | `23.8 ms` | `63.9 ms` | `36.4 ms` | `29.8 ms` | `83.3 ms` | `4.61 MB` database |
-| ClickHouse | `7.72 s` | `62.0 ms` | `65.4 ms` | `56.1 ms` | `90.5 ms` | `187.5 ms` | `598 KiB` active compressed bytes, about `4.9x` active compression |
-| chDB | `1.41 s` | `252.5 ms` | `240.6 ms` | `235.0 ms` | `261.9 ms` | `493.5 ms` | `1.23 MB` directory, about `5.7x` active compression |
+| SQLite | `17.42 s` | `23.8 ms` | `58.1 ms` | `30.4 ms` | `28.8 ms` | `80.6 ms` | `4.61 MB` database |
+| ClickHouse | `7.91 s` | `65.6 ms` | `65.6 ms` | `55.2 ms` | `81.8 ms` | `182.0 ms` | `597 KiB` active compressed bytes, about `4.9x` active compression |
+| chDB | `1.52 s` | `247.5 ms` | `255.7 ms` | `232.3 ms` | `285.7 ms` | `506.9 ms` | `1.23 MB` directory, about `5.7x` active compression |
 
 The larger run had `1,760` versions, `2,280` facts, `2,320` edges, and `1,482`
 latest objects. This is enough to expose fixed per-query overhead, but it is
@@ -174,10 +174,12 @@ still not a large-history benchmark. The result supports these narrower claims:
 - chDB produces ClickHouse-like compressed table storage locally, but its
   current read adapter needs result-format and query-count optimization before
   it should be positioned as the fastest local read path.
-- The latest run includes batched evidence bundle loading and deferred topology
-  object hydration. On this fixture, ClickHouse service investigation improved
-  from the prior `237.0 ms` run to `187.5 ms`, and chDB improved from
-  `555.6 ms` to `493.5 ms`.
+- The latest run includes batched evidence bundle loading, deferred topology
+  object hydration, and lightweight row parsing for ClickHouse HTTP hot paths.
+  On this fixture, ClickHouse service investigation improved from the prior
+  `237.0 ms` run to about `182.0 ms`. chDB remains around `500 ms`, which points
+  to embedded session/query overhead rather than JSON map decoding as the main
+  remaining cost.
 
 ## Remaining Benchmark Gaps
 

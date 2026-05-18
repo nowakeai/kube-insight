@@ -24,14 +24,14 @@ FROM (
   LIMIT 1 BY object_id
 )
 ORDER BY object_id`, q(s.database()), sqlStringList(objectIDs))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		objectID := stringValue(row["object_id"])
+	for _, row := range result.Rows {
+		objectID := row[0]
 		if objectID != "" {
-			out[objectID] = jsonMap(row["doc"])
+			out[objectID] = jsonMap(row[1])
 		}
 	}
 	return out, nil
@@ -49,16 +49,16 @@ FROM %s.facts
 WHERE object_id IN (%s)%s
 ORDER BY object_id ASC, ts DESC, fact_key ASC
 LIMIT 1000 BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		objectID := stringValue(row["object_id"])
+	for _, row := range result.Rows {
+		objectID := row[1]
 		if objectID == "" {
 			continue
 		}
-		out[objectID] = append(out[objectID], core.Fact{Time: timeValue(row["ts"]), ObjectID: objectID, Key: stringValue(row["fact_key"]), Value: stringValue(row["fact_value"]), NumericValue: numericPointer(row["numeric_value"]), Severity: int(int64Value(row["severity"])), Detail: jsonMap(row["detail"])})
+		out[objectID] = append(out[objectID], core.Fact{Time: timeValue(row[0]), ObjectID: objectID, Key: row[2], Value: row[3], NumericValue: numericPointer(row[4]), Severity: int(int64Value(row[5])), Detail: jsonMap(row[6])})
 	}
 	return out, nil
 }
@@ -75,16 +75,16 @@ FROM %s.changes
 WHERE object_id IN (%s)%s
 ORDER BY object_id ASC, ts DESC, path ASC
 LIMIT 1000 BY object_id`, q(s.database()), sqlStringList(objectIDs), timeFilter("ts", opts.From, opts.To))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		objectID := stringValue(row["object_id"])
+	for _, row := range result.Rows {
+		objectID := row[1]
 		if objectID == "" {
 			continue
 		}
-		out[objectID] = append(out[objectID], core.Change{Time: timeValue(row["ts"]), ObjectID: objectID, Family: stringValue(row["change_family"]), Path: stringValue(row["path"]), Op: stringValue(row["op"]), Old: stringValue(row["old_scalar"]), New: stringValue(row["new_scalar"]), Severity: int(int64Value(row["severity"]))})
+		out[objectID] = append(out[objectID], core.Change{Time: timeValue(row[0]), ObjectID: objectID, Family: row[2], Path: row[3], Op: row[4], Old: row[5], New: row[6], Severity: int(int64Value(row[7]))})
 	}
 	return out, nil
 }
@@ -104,13 +104,13 @@ FROM %s.object_aliases
 WHERE object_id IN (%s)
 GROUP BY object_id, alias_id
 ORDER BY object_id, alias_id`, q(s.database()), sqlStringList(objectIDs))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		objectID := stringValue(row["object_id"])
-		aliasID := stringValue(row["alias_id"])
+	for _, row := range result.Rows {
+		objectID := row[0]
+		aliasID := row[1]
 		if objectID != "" && aliasID != "" {
 			out[objectID] = append(out[objectID], aliasID)
 		}
@@ -148,18 +148,18 @@ SELECT edge_type, src_id, dst_id, valid_from, if(valid_to_ms >= 9223372036854770
 FROM %s.edges
 WHERE src_id IN (%s)
 ORDER BY src_id ASC, valid_from ASC, edge_type ASC, dst_id ASC`, q(s.database()), sqlStringList(allSourceIDs))
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		sourceID := stringValue(row["src_id"])
+	for _, row := range result.Rows {
+		sourceID := row[1]
 		ownerID := ownerBySourceID[sourceID]
 		if ownerID == "" {
 			continue
 		}
-		edge := core.Edge{Type: stringValue(row["edge_type"]), SourceID: sourceID, TargetID: stringValue(row["dst_id"]), ValidFrom: timeValue(row["valid_from"]), Detail: jsonMap(row["detail"])}
-		if validTo := timeValue(row["valid_to"]); !validTo.IsZero() {
+		edge := core.Edge{Type: row[0], SourceID: sourceID, TargetID: row[2], ValidFrom: timeValue(row[3]), Detail: jsonMap(row[5])}
+		if validTo := timeValue(row[4]); !validTo.IsZero() {
 			edge.ValidTo = &validTo
 		}
 		out[ownerID] = append(out[ownerID], edge)
@@ -184,17 +184,17 @@ FROM (
 )
 WHERE rn <= %d
 ORDER BY object_id ASC, observed_at DESC, seq DESC`, q(s.database()), sqlStringList(objectIDs), timeFilter("observed_at", opts.From, opts.To), maxVersions)
-	result, err := s.client().QueryJSON(ctx, query)
+	result, err := s.client().QueryTSV(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range result.Data {
-		objectID := stringValue(row["object_id"])
+	for _, row := range result.Rows {
+		objectID := row[0]
 		if objectID == "" {
 			continue
 		}
-		seq := int64Value(row["seq"])
-		out[objectID] = append(out[objectID], storage.VersionEvidence{ID: seq, Sequence: seq, ObservedAt: timeValue(row["observed_at"]), ResourceVersion: stringValue(row["resource_version"]), DocumentHash: stringValue(row["doc_hash"]), Materialization: stringValue(row["materialization"]), Strategy: "full"})
+		seq := int64Value(row[1])
+		out[objectID] = append(out[objectID], storage.VersionEvidence{ID: seq, Sequence: seq, ObservedAt: timeValue(row[2]), ResourceVersion: row[3], DocumentHash: row[4], Materialization: row[5], Strategy: "full"})
 	}
 	return out, nil
 }

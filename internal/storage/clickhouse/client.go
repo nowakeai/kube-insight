@@ -20,6 +20,10 @@ type QueryRunner interface {
 	QueryJSON(ctx context.Context, query string) (QueryResult, error)
 }
 
+type RowQueryRunner interface {
+	QueryTSV(ctx context.Context, query string) (TSVResult, error)
+}
+
 type EvidenceWriter interface {
 	InsertEvidenceBatch(ctx context.Context, batch EvidenceBatch) (InsertResult, error)
 	InsertRows(ctx context.Context, database, table string, rows []map[string]any) error
@@ -31,6 +35,7 @@ type SchemaApplier interface {
 
 type Client interface {
 	QueryRunner
+	RowQueryRunner
 	EvidenceWriter
 	SchemaApplier
 }

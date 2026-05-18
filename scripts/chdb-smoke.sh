@@ -20,10 +20,6 @@ find_chdb_lib() {
     return 1
   fi
 
-  if command -v libchdb.so >/dev/null 2>&1; then
-    command -v libchdb.so
-    return 0
-  fi
 
   for candidate in \
     /usr/local/lib/libchdb.so \

@@ -7,28 +7,30 @@ import (
 )
 
 type Stats struct {
-	Clusters               int64
-	APIResources           int64
-	Objects                int64
-	DeletedObjects         int64
-	Observations           int64
-	Versions               int64
-	Facts                  int64
-	Edges                  int64
-	Changes                int64
-	LatestRows             int64
-	IngestionOffsets       int64
-	OffsetLagMS            int64
-	RawBytes               int64
-	StoredBytes            int64
-	CompressedBytes        int64
-	UncompressedBytes      int64
-	ProofCompressedBytes   int64
-	DerivedCompressedBytes int64
-	CompressedBytesPerRow  float64
-	CompressionRatio       float64
-	TableParts             []TablePartStats
-	Footprint              []FootprintStats
+	Clusters                   int64
+	APIResources               int64
+	Objects                    int64
+	DeletedObjects             int64
+	Observations               int64
+	ContentChangedObservations int64
+	UnchangedObservations      int64
+	Versions                   int64
+	Facts                      int64
+	Edges                      int64
+	Changes                    int64
+	LatestRows                 int64
+	IngestionOffsets           int64
+	OffsetLagMS                int64
+	RawBytes                   int64
+	StoredBytes                int64
+	CompressedBytes            int64
+	UncompressedBytes          int64
+	ProofCompressedBytes       int64
+	DerivedCompressedBytes     int64
+	CompressedBytesPerRow      float64
+	CompressionRatio           float64
+	TableParts                 []TablePartStats
+	Footprint                  []FootprintStats
 }
 
 type TablePartStats struct {
@@ -78,6 +80,11 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		}
 		*item.dst = value
 	}
+	out.ContentChangedObservations = out.Versions
+	if out.ContentChangedObservations > out.Observations {
+		out.ContentChangedObservations = out.Observations
+	}
+	out.UnchangedObservations = out.Observations - out.ContentChangedObservations
 	objects, deleted, err := s.objectStateCounts(ctx)
 	if err != nil {
 		return Stats{}, err

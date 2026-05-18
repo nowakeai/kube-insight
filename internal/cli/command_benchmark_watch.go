@@ -228,9 +228,10 @@ func watchResourceCommand(ctx context.Context, stdout, stderr io.Writer, state *
 			}
 			opts.Logf = newWatchLogf(logger)
 			var store storage.Store
-			dbPath := "clickhouse:" + rt.Config.Storage.ClickHouse.Database
+			dbPath := ""
 			switch storageDriver(rt.Config) {
 			case "clickhouse":
+				dbPath = "clickhouse:" + rt.Config.Storage.ClickHouse.Database
 				store, err = newClickHouseStore(runCtx, rt.Config)
 				if err != nil {
 					return err
@@ -390,10 +391,11 @@ func runWatchContexts(ctx context.Context, cmd *cobra.Command, state *cliState, 
 		Results:  make([]watchContextResult, len(contexts)),
 	}
 	var sharedStore storage.Store
-	sharedDBPath := "clickhouse:" + rt.Config.Storage.ClickHouse.Database
+	sharedDBPath := ""
 	var err error
 	switch storageDriver(rt.Config) {
 	case "clickhouse":
+		sharedDBPath = "clickhouse:" + rt.Config.Storage.ClickHouse.Database
 		sharedStore, err = newClickHouseStore(ctx, rt.Config)
 		if err != nil {
 			return out, err

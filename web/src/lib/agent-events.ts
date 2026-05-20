@@ -1,4 +1,5 @@
 import { AgentAPIError, agentFetch, agentURL, type AgentAPIOptions, type AgentRunEventDTO } from "@/lib/agent-api"
+import { parseAgentRunEvent } from "@/lib/agent-schemas"
 
 export type AgentRunEventStreamOptions = AgentAPIOptions & {
   runId: string
@@ -98,7 +99,7 @@ function dispatchCompleteFrames(
   for (const frameText of frames) {
     const frame = parseSSEFrame(frameText)
     if (!frame.data) continue
-    const event = JSON.parse(frame.data) as AgentRunEventDTO
+    const event = parseAgentRunEvent(JSON.parse(frame.data))
     const key = event.sequence ? `${event.runId}:${event.sequence}` : event.id
     if (seen.has(key)) continue
     seen.add(key)

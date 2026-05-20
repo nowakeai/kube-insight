@@ -1,49 +1,15 @@
 import type { QueryFunctionContext } from "@tanstack/react-query"
 
-import type { AgentRunStatus } from "@/lib/agent-store"
+import {
+  parseAgentRun,
+  parseAgentRunEvent,
+  parseAgentSession,
+  type AgentRunDTO,
+  type AgentRunEventDTO,
+  type AgentSessionDTO,
+} from "@/lib/agent-schemas"
 
-export type AgentMessageDTO = {
-  id: string
-  role: "user" | "assistant" | "system" | "tool"
-  content: string
-  runId?: string
-  createdAt: string
-  metadata?: unknown
-}
-
-export type AgentRunDTO = {
-  id: string
-  sessionId: string
-  status: AgentRunStatus
-  input: string
-  provider?: string
-  model?: string
-  createdAt: string
-  startedAt?: string
-  completedAt?: string
-  error?: string
-  metadata?: unknown
-}
-
-export type AgentSessionDTO = {
-  id: string
-  title?: string
-  provider?: string
-  model?: string
-  createdAt: string
-  updatedAt: string
-  messages?: AgentMessageDTO[]
-  runs?: AgentRunDTO[]
-}
-
-export type AgentRunEventDTO = {
-  id: string
-  runId: string
-  sequence: number
-  type: string
-  createdAt: string
-  data?: unknown
-}
+export type { AgentMessageDTO, AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 export type CreateAgentSessionRequest = {
   title?: string
@@ -63,6 +29,8 @@ export type AgentAPIOptions = {
   signal?: AbortSignal
   fetcher?: typeof fetch
 }
+
+type AgentResponseParser<T> = (value: unknown) => T
 
 export class AgentAPIError extends Error {
   readonly status: number
@@ -85,31 +53,47 @@ export const agentQueryKeys = {
 }
 
 export function createAgentSession(input: CreateAgentSessionRequest = {}, options?: AgentAPIOptions) {
-  return agentRequestJSON<AgentSessionDTO>("/api/v1/agent/sessions", {
-    ...options,
-    method: "POST",
-    body: input,
-  })
+  return agentRequestJSON<AgentSessionDTO>(
+    "/api/v1/agent/sessions",
+    {
+      ...options,
+      method: "POST",
+      body: input,
+    },
+    parseAgentSession,
+  )
 }
 
 export function getAgentSession(sessionId: string, options?: AgentAPIOptions) {
-  return agentRequestJSON<AgentSessionDTO>(`/api/v1/agent/sessions/${encodeURIComponent(sessionId)}`, options)
+  return agentRequestJSON<AgentSessionDTO>(
+    `/api/v1/agent/sessions/${encodeURIComponent(sessionId)}`,
+    options,
+    parseAgentSession,
+  )
 }
 
 export function createAgentRun(sessionId: string, input: CreateAgentRunRequest, options?: AgentAPIOptions) {
-  return agentRequestJSON<AgentRunDTO>(`/api/v1/agent/sessions/${encodeURIComponent(sessionId)}/runs`, {
-    ...options,
-    method: "POST",
-    body: input,
-  })
+  return agentRequestJSON<AgentRunDTO>(
+    `/api/v1/agent/sessions/${encodeURIComponent(sessionId)}/runs`,
+    {
+      ...options,
+      method: "POST",
+      body: input,
+    },
+    parseAgentRun,
+  )
 }
 
 export function cancelAgentRun(runId: string, options?: AgentAPIOptions) {
-  return agentRequestJSON<AgentRunDTO>(`/api/v1/agent/runs/${encodeURIComponent(runId)}/cancel`, {
-    ...options,
-    method: "POST",
-    body: {},
-  })
+  return agentRequestJSON<AgentRunDTO>(
+    `/api/v1/agent/runs/${encodeURIComponent(runId)}/cancel`,
+    {
+      ...options,
+      method: "POST",
+      body: {},
+    },
+    parseAgentRun,
+  )
 }
 
 export async function getAgentRunEvents(runId: string, options?: AgentAPIOptions) {
@@ -136,12 +120,14 @@ export function agentRunEventsQuery(runId: string, options?: AgentAPIOptions) {
 export async function agentRequestJSON<T>(
   path: string,
   options: AgentAPIOptions & { method?: string; body?: unknown } = {},
+  parse?: AgentResponseParser<T>,
 ): Promise<T> {
   const response = await agentFetch(path, options)
   const text = await response.text()
   if (!response.ok) throw new AgentAPIError(response.status, text)
   if (!text) return undefined as T
-  return JSON.parse(text) as T
+  const value = JSON.parse(text) as unknown
+  return parse ? parse(value) : (value as T)
 }
 
 export function parseRunEventsSSE(text: string) {
@@ -152,7 +138,7 @@ export function parseRunEventsSSE(text: string) {
       .filter((line) => line.startsWith("data:"))
       .map((line) => line.slice("data:".length).trimStart())
     if (dataLines.length === 0) continue
-    events.push(JSON.parse(dataLines.join("\n")) as AgentRunEventDTO)
+    events.push(parseAgentRunEvent(JSON.parse(dataLines.join("\n"))))
   }
   return events
 }

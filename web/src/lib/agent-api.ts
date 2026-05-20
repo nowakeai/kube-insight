@@ -157,7 +157,7 @@ export function parseRunEventsSSE(text: string) {
   return events
 }
 
-async function agentFetch(path: string, options: AgentAPIOptions & { method?: string; body?: unknown } = {}) {
+export async function agentFetch(path: string, options: AgentAPIOptions & { method?: string; body?: unknown } = {}) {
   const fetcher = options.fetcher ?? fetch
   const response = await fetcher(agentURL(path, options.baseURL), {
     method: options.method ?? "GET",
@@ -168,7 +168,7 @@ async function agentFetch(path: string, options: AgentAPIOptions & { method?: st
   return response
 }
 
-function agentURL(path: string, baseURL = defaultAgentBaseURL()) {
+export function agentURL(path: string, baseURL = defaultAgentBaseURL()) {
   const normalizedBase = baseURL.replace(/\/$/, "")
   return `${normalizedBase}${path}`
 }

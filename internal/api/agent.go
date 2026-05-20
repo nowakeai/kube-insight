@@ -71,11 +71,11 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = s.agentStore.AppendRunEvent(r.Context(), run.ID, agent.AppendEventInput{
-		Type: "run.created",
-		Data: mustJSON(map[string]any{
-			"runId":     run.ID,
-			"sessionId": run.SessionID,
-			"status":    run.Status,
+		Type: agent.EventRunCreated,
+		Data: mustJSON(agent.RunStatusEventData{
+			RunID:     run.ID,
+			SessionID: run.SessionID,
+			Status:    run.Status,
 		}),
 	})
 	if err != nil {
@@ -112,10 +112,11 @@ func (s *Server) handleCancelAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, err = s.agentStore.AppendRunEvent(r.Context(), run.ID, agent.AppendEventInput{
-		Type: "run.cancelled",
-		Data: mustJSON(map[string]any{
-			"runId":  run.ID,
-			"status": run.Status,
+		Type: agent.EventRunCancelled,
+		Data: mustJSON(agent.RunStatusEventData{
+			RunID:     run.ID,
+			SessionID: run.SessionID,
+			Status:    run.Status,
 		}),
 	})
 	if err != nil {

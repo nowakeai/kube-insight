@@ -47,7 +47,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add `POST /api/v1/agent/sessions/{session_id}/runs`.
 - [x] Add `GET /api/v1/agent/runs/{run_id}/events` with SSE.
 - [x] Add `POST /api/v1/agent/runs/{run_id}/cancel`.
-- [ ] Define replayable run event types for messages, tool calls, artifacts,
+- [x] Define replayable run event types for messages, tool calls, artifacts,
   citations, status, errors, and final answers.
 - [x] Add focused API tests for session/run lifecycle and SSE event formatting.
 

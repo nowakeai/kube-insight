@@ -62,7 +62,7 @@ type RunEvent struct {
 	ID        string          `json:"id"`
 	RunID     string          `json:"runId"`
 	Sequence  int64           `json:"sequence"`
-	Type      string          `json:"type"`
+	Type      RunEventType    `json:"type"`
 	CreatedAt time.Time       `json:"createdAt"`
 	Data      json.RawMessage `json:"data,omitempty"`
 }
@@ -81,6 +81,6 @@ type CreateRunInput struct {
 }
 
 type AppendEventInput struct {
-	Type string
+	Type RunEventType
 	Data json.RawMessage
 }

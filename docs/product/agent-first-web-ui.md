@@ -220,6 +220,31 @@ Example event sketch:
 The exact event field names can be finalized during implementation, but events
 should remain typed, append-only, and easy to replay into UI state.
 
+The initial replayable event contract uses these event names:
+
+| Event | Purpose |
+| --- | --- |
+| `run.created` | Run record was created and queued. |
+| `run.started` | Agent execution started. |
+| `run.status` | Run status changed without a terminal result. |
+| `run.completed` | Run completed successfully. |
+| `run.failed` | Run failed with an error. |
+| `run.cancelled` | Run was cancelled. |
+| `message.created` | Assistant/user/tool message was created. |
+| `message.delta` | Streaming text delta for a message. |
+| `message.completed` | Message content is complete. |
+| `answer.final` | Final assistant answer for the run. |
+| `tool.started` | Tool call started. |
+| `tool.completed` | Tool call completed with output summary. |
+| `tool.failed` | Tool call failed. |
+| `artifact.created` | Typed artifact was created. |
+| `artifact.updated` | Existing artifact changed, such as history travel state. |
+| `citation.created` | Citation target was created. |
+| `error` | Non-tool runtime or provider error. |
+
+Payload shapes live in the `internal/agent` package so API handlers, the Eino
+runner, SSE replay, and the React event store share one contract.
+
 ## Provider And Key Strategy
 
 The server should support a default provider configured by environment variables

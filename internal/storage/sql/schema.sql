@@ -271,6 +271,39 @@ create table if not exists maintenance_runs (
   error text
 );
 
+create table if not exists agent_sessions (
+  id text primary key,
+  title text,
+  provider text,
+  model text,
+  created_at integer not null,
+  updated_at integer not null
+);
+
+create table if not exists agent_runs (
+  id text primary key,
+  session_id text not null references agent_sessions(id) on delete cascade,
+  status text not null,
+  input text not null,
+  provider text,
+  model text,
+  created_at integer not null,
+  started_at integer,
+  completed_at integer,
+  error text,
+  metadata blob
+);
+
+create table if not exists agent_run_events (
+  id text primary key,
+  run_id text not null references agent_runs(id) on delete cascade,
+  sequence integer not null,
+  type text not null,
+  created_at integer not null,
+  data blob,
+  unique(run_id, sequence)
+);
+
 create index if not exists latest_kind_ns_name_idx
 on latest_index(cluster_id, kind_id, namespace, name);
 
@@ -352,3 +385,15 @@ on filter_decision_rollups(cluster_name, resource, bucket_start desc);
 
 create index if not exists filter_decision_rollups_outcome_time_idx
 on filter_decision_rollups(outcome, bucket_start desc);
+
+create index if not exists agent_sessions_updated_idx
+on agent_sessions(updated_at desc);
+
+create index if not exists agent_runs_session_time_idx
+on agent_runs(session_id, created_at desc);
+
+create index if not exists agent_runs_status_time_idx
+on agent_runs(status, created_at desc);
+
+create index if not exists agent_run_events_run_sequence_idx
+on agent_run_events(run_id, sequence);

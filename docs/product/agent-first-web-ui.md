@@ -95,8 +95,9 @@ GET  /api/v1/agent/runs/{run_id}/events
 POST /api/v1/agent/runs/{run_id}/cancel
 ```
 
-The first implementation can use an in-memory store for spike work, but the API
-and data model should assume persistence. SQLite is the preferred persistence
+The implementation persists sessions, runs, and replayable run events in SQLite
+when the API server has a database path. The in-memory store remains available
+for narrow tests and no-database spikes. SQLite is the preferred persistence
 backend for session/run control-plane metadata because this state is small and
 local-first. Evidence history remains in the existing evidence store.
 
@@ -286,15 +287,14 @@ embedded.
 
 1. Replace the static Web UI spike with a formal `web/` React project and build
    pipeline.
-2. Add agent session/run API skeleton with in-memory storage and SSE events.
+2. Add agent session/run API skeleton with SSE events and SQLite persistence.
 3. Integrate Eino ADK with one or two kube-insight read tools in a spike run.
 4. Add assistant-ui chat home and run page backed by server events.
 5. Add Markdown, Kubernetes resource, topology, and history artifact renderers.
 6. Add the compact server dashboard backed by existing health/schema/metrics
    endpoints and later agent run status.
-7. Add persistent session/run metadata in SQLite.
-8. Add provider config and then optional BYOK.
-9. Harden cancellation, retries, errors, audit records, and citation validation.
+7. Add provider config and then optional BYOK.
+8. Harden cancellation, retries, errors, audit records, and citation validation.
 
 ## Open Implementation Details
 

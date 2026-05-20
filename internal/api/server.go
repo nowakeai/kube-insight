@@ -56,10 +56,19 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		openStore = sqliteStoreOpener(opts.DBPath)
 	}
 	agentStore := opts.AgentStore
+	closeFunc := opts.Close
+	if agentStore == nil && opts.DBPath != "" {
+		persistentAgentStore, err := sqlite.Open(opts.DBPath)
+		if err != nil {
+			return nil, err
+		}
+		agentStore = persistentAgentStore
+		closeFunc = joinClose(closeFunc, persistentAgentStore.Close)
+	}
 	if agentStore == nil {
 		agentStore = agent.NewMemoryStore()
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: opts.Close, agentStore: agentStore, mux: http.NewServeMux()}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }
@@ -67,6 +76,18 @@ func NewServer(opts ServerOptions) (*Server, error) {
 func sqliteStoreOpener(path string) StoreOpener {
 	return func(context.Context) (ReadStore, error) {
 		return sqlite.OpenReadOnly(path)
+	}
+}
+
+func joinClose(first, second func() error) func() error {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return func() error {
+		return errors.Join(first(), second())
 	}
 }
 

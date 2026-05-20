@@ -111,7 +111,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 ## Persistence And Hardening
 
-- [ ] Add SQLite persistence for sessions and runs.
+- [x] Add SQLite persistence for sessions, runs, and run events.
 - [ ] Add cancellation propagation from API to Eino run context.
 - [ ] Add retry semantics for failed runs.
 - [ ] Add structured audit records for agent tool calls.

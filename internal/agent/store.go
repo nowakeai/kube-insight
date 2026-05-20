@@ -48,7 +48,7 @@ func (s *MemoryStore) CreateSession(ctx context.Context, input CreateSessionInpu
 	}
 	now := s.now().UTC()
 	session := Session{
-		ID:        newID("sess"),
+		ID:        NewSessionID(),
 		Title:     input.Title,
 		Provider:  input.Provider,
 		Model:     input.Model,
@@ -85,7 +85,7 @@ func (s *MemoryStore) CreateRun(ctx context.Context, sessionID string, input Cre
 	}
 	now := s.now().UTC()
 	run := Run{
-		ID:        newID("run"),
+		ID:        NewRunID(),
 		SessionID: sessionID,
 		Status:    RunQueued,
 		Input:     input.Input,
@@ -157,7 +157,7 @@ func (s *MemoryStore) AppendRunEvent(ctx context.Context, runID string, input Ap
 		return RunEvent{}, ErrRunNotFound
 	}
 	event := RunEvent{
-		ID:        newID("evt"),
+		ID:        NewEventID(),
 		RunID:     runID,
 		Sequence:  int64(len(s.events[runID]) + 1),
 		Type:      input.Type,
@@ -195,6 +195,18 @@ func newID(prefix string) string {
 		panic(fmt.Sprintf("generate %s id: %v", prefix, err))
 	}
 	return prefix + "_" + hex.EncodeToString(b[:])
+}
+
+func NewSessionID() string {
+	return newID("sess")
+}
+
+func NewRunID() string {
+	return newID("run")
+}
+
+func NewEventID() string {
+	return newID("evt")
 }
 
 func cloneSession(in Session) Session {

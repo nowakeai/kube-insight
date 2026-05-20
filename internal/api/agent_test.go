@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,36 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
 	}
+}
+
+func TestAgentSessionEndpointsPersistWithDBPath(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "kube-insight.db")
+	handler, err := NewServer(ServerOptions{DBPath: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{"title":"persist me"}`, http.StatusCreated, &session)
+	if session.ID == "" {
+		t.Fatalf("session = %#v", session)
+	}
+	server.Close()
+	if err := handler.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewServer(ServerOptions{DBPath: dbPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	reopenedServer := httptest.NewServer(reopened)
+	defer reopenedServer.Close()
+	assertGETContains(t, reopenedServer.URL+"/api/v1/agent/sessions/"+session.ID, `"title": "persist me"`)
 }
 
 func TestAgentEndpointsValidateInputAndMissingIDs(t *testing.T) {

@@ -60,7 +60,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [ ] Add history, topology, service investigation, and guarded SQL tools.
   - [x] Wrap `kube_insight_history`.
   - [x] Wrap `kube_insight_topology`.
-  - [ ] Wrap `kube_insight_service_investigation`.
+  - [x] Wrap `kube_insight_service_investigation`.
   - [ ] Wrap guarded `kube_insight_sql`.
 - [ ] Map Eino events/tool callbacks into kube-insight run events.
 - [ ] Enforce answer citation expectations through prompt/tool descriptions and

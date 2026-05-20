@@ -13,6 +13,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
+import { useAgentProjectionStore } from "@/lib/agent-store"
 
 const starterPrompts = [
   "Is the API service healthy right now?",
@@ -23,10 +24,25 @@ const starterPrompts = [
 export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const activeRunCount = useAgentProjectionStore((state) => {
+    if (!state.activeSessionId) return 0
+    return state.sessions[state.activeSessionId]?.runIds.length ?? 0
+  })
+  const ensureSession = useAgentProjectionStore((state) => state.ensureSession)
+  const startRun = useAgentProjectionStore((state) => state.startRun)
+  const appendRunEvent = useAgentProjectionStore((state) => state.appendRunEvent)
+  const completeRun = useAgentProjectionStore((state) => state.completeRun)
+  const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
+  const upsertArtifact = useAgentProjectionStore((state) => state.upsertArtifact)
+  const addCitation = useAgentProjectionStore((state) => state.addCitation)
 
   const onNew = useCallback(async (message: AppendMessage) => {
     const text = appendMessageText(message)
     if (!text) return
+
+    const sessionID = ensureSession(text)
+    const runID = startRun(sessionID, text)
+    appendRunEvent(runID, { type: "message.created", data: { role: "user", content: text } })
 
     const assistantID = newMessageID("assistant")
     setIsRunning(true)
@@ -38,19 +54,27 @@ export function AgentChat() {
 
     await delay(350)
 
+    const answer = demoAgentAnswer(text)
+    const artifactID = upsertArtifact(runID, {
+      kind: "markdown",
+      title: "Demo answer",
+      data: { markdown: answer },
+    })
+    addCitation(runID, {
+      artifactId: artifactID,
+      text: "Demo runtime",
+      target: { kind: "artifact", id: artifactID },
+    })
+    appendRunEvent(runID, { type: "message.created", data: { role: "assistant", content: answer } })
+    completeRun(runID, answer)
+
     setMessages((current) =>
       current.map((item) =>
-        item.id === assistantID
-          ? assistantMessage(
-              assistantID,
-              demoAgentAnswer(text),
-              "complete",
-            )
-          : item,
+        item.id === assistantID ? assistantMessage(assistantID, answer, "complete") : item,
       ),
     )
     setIsRunning(false)
-  }, [])
+  }, [addCitation, appendRunEvent, completeRun, ensureSession, startRun, upsertArtifact])
 
   const onCancel = useCallback(async () => {
     setIsRunning(false)
@@ -61,7 +85,9 @@ export function AgentChat() {
           : item,
       ),
     )
-  }, [])
+    const latestRunningRun = latestRunningRunID()
+    if (latestRunningRun) cancelRun(latestRunningRun)
+  }, [cancelRun])
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -84,7 +110,7 @@ export function AgentChat() {
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Server className="size-4" aria-hidden="true" />
-              <span>local agent</span>
+              <span>{activeRunCount > 0 ? `${activeRunCount} run${activeRunCount === 1 ? "" : "s"}` : "local agent"}</span>
             </div>
           </header>
 
@@ -273,6 +299,16 @@ function assistantMessage(
       custom: {},
     },
   }
+}
+
+function latestRunningRunID() {
+  const state = useAgentProjectionStore.getState()
+  const activeSession = state.activeSessionId ? state.sessions[state.activeSessionId] : undefined
+  if (!activeSession) return undefined
+  for (const runID of [...activeSession.runIds].reverse()) {
+    if (state.runs[runID]?.status === "running") return runID
+  }
+  return undefined
 }
 
 function demoAgentAnswer(question: string) {

@@ -73,7 +73,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Create `web/` React + TypeScript + Vite project.
 - [x] Install and configure Tailwind and shadcn/ui.
 - [x] Add assistant-ui and baseline chat thread/composer components.
-- [ ] Add Zustand store for session/run/artifact projection.
+- [x] Add Zustand store for session/run/artifact projection.
 - [ ] Add TanStack Query client and API helpers.
 - [ ] Add SSE client helper with reconnect and cancellation behavior.
 - [ ] Add Zod schemas for run events and artifact payloads.

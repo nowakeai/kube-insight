@@ -82,7 +82,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 ## Chat Experience
 
-- [ ] Implement search-style chat home page.
+- [x] Implement search-style chat home page.
 - [ ] Implement run page with chat thread and composer.
 - [ ] Implement stop, retry, continue, and new session controls.
 - [ ] Implement tool timeline with input summary, output summary, status, duration,
@@ -131,6 +131,6 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Run `make build`.
 - [x] Run `git diff --check`.
 - [x] Run the 800-line Go file check.
-- [ ] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
+- [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
 - [x] Verify the embedded binary serves the built React app.
 - [ ] Verify dashboard health calls work with and without metrics enabled.

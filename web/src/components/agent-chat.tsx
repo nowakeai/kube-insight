@@ -7,7 +7,7 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, Bot, CircleStop, Server, Sparkles, UserRound } from "lucide-react"
+import { ArrowUp, Bot, CircleStop, Search, Server, Sparkles, UserRound } from "lucide-react"
 import { useCallback, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -19,6 +19,7 @@ const starterPrompts = [
   "Is the API service healthy right now?",
   "Show recent changes for default/api",
   "Find pods with restart evidence",
+  "Map topology for namespace default",
 ]
 
 export function AgentChat() {
@@ -117,24 +118,25 @@ export function AgentChat() {
           <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
             <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth py-6">
               <ThreadPrimitive.Empty>
-                <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-6 pb-12 pt-8">
-                  <div className="space-y-3">
-                    <h1 className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">
-                      Ask kube-insight
+                <div className="mx-auto flex min-h-[calc(100svh-6.5rem)] w-full max-w-3xl flex-col justify-center gap-5 pb-16 pt-10">
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <h1 className="text-4xl font-semibold tracking-normal text-foreground sm:text-5xl">
+                      kube-insight
                     </h1>
-                    <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-                      Query Kubernetes state, history, topology, and evidence from the local server.
-                    </p>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
+                      <span>{activeRunCount > 0 ? `${activeRunCount} active run${activeRunCount === 1 ? "" : "s"}` : "local agent ready"}</span>
+                    </div>
                   </div>
-                  <ChatComposer autoFocus />
-                  <div className="flex flex-wrap gap-2">
+                  <ChatComposer autoFocus variant="home" />
+                  <div className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
                     {starterPrompts.map((prompt) => (
                       <ThreadPrimitive.Suggestion
                         key={prompt}
                         prompt={prompt}
                         method="replace"
                         autoSend={false}
-                        className="rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                        className="min-h-10 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/40 hover:bg-muted hover:text-foreground"
                       >
                         {prompt}
                       </ThreadPrimitive.Suggestion>
@@ -192,26 +194,44 @@ function ChatMessage() {
   )
 }
 
-function ChatComposer({ autoFocus = false }: { autoFocus?: boolean }) {
+function ChatComposer({
+  autoFocus = false,
+  variant = "thread",
+}: {
+  autoFocus?: boolean
+  variant?: "home" | "thread"
+}) {
+  const isHome = variant === "home"
   return (
-    <ComposerPrimitive.Root className="flex min-h-14 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-sm">
+    <ComposerPrimitive.Root
+      className={
+        isHome
+          ? "flex min-h-16 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-md shadow-muted/40"
+          : "flex min-h-14 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
+      }
+    >
+      {isHome ? <Search className="mb-3 ml-2 size-5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
       <ComposerPrimitive.Input
         autoFocus={autoFocus}
         rows={1}
         submitMode="enter"
         placeholder="Ask about a Service, Pod, namespace, topology, or recent change"
-        className="max-h-44 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+        className={
+          isHome
+            ? "max-h-44 min-h-12 flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 outline-none placeholder:text-muted-foreground"
+            : "max-h-44 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+        }
       />
       <ThreadPrimitive.If running={false}>
         <ComposerPrimitive.Send asChild>
-          <Button type="submit" size="icon" aria-label="Send message">
+          <Button type="submit" size="icon" aria-label="Send message" className={isHome ? "size-11" : undefined}>
             <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
         </ComposerPrimitive.Send>
       </ThreadPrimitive.If>
       <ThreadPrimitive.If running>
         <ComposerPrimitive.Cancel asChild>
-          <Button type="button" size="icon" variant="secondary" aria-label="Cancel run">
+          <Button type="button" size="icon" variant="secondary" aria-label="Cancel run" className={isHome ? "size-11" : undefined}>
             <CircleStop className="size-4" aria-hidden="true" />
           </Button>
         </ComposerPrimitive.Cancel>

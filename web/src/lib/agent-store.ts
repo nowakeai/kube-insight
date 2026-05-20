@@ -99,6 +99,7 @@ type AgentProjectionState = {
   upsertArtifact: (runId: string, input: UpsertArtifactInput) => string
   addCitation: (runId: string, input: AddCitationInput) => string
   selectArtifact: (artifactId?: string) => void
+  startNewSession: () => void
   reset: () => void
 }
 
@@ -297,6 +298,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
   },
 
   selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
+  startNewSession: () => set({ activeSessionId: undefined, selectedArtifactId: undefined }),
   reset: () => set(initialProjection),
 }))
 

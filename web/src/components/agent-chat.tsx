@@ -7,7 +7,7 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, Bot, CircleStop, Search, Server, Sparkles, UserRound } from "lucide-react"
+import { ArrowUp, Bot, CircleStop, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -37,6 +37,7 @@ export function AgentChat() {
   const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
   const upsertArtifact = useAgentProjectionStore((state) => state.upsertArtifact)
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
+  const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
 
   useEffect(() => {
@@ -45,27 +46,27 @@ export function AgentChat() {
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
 
-  const onNew = useCallback(async (message: AppendMessage) => {
-    const text = appendMessageText(message)
-    if (!text) return
+  const runPrompt = useCallback(async (text: string) => {
+    const prompt = text.trim()
+    if (!prompt) return
 
-    const sessionID = ensureSession(text)
-    const runID = startRun(sessionID, text)
+    const sessionID = ensureSession(prompt)
+    const runID = startRun(sessionID, prompt)
     openRunPage(sessionID, runID)
     setRouteRun({ sessionID, runID })
-    appendRunEvent(runID, { type: "message.created", data: { role: "user", content: text } })
+    appendRunEvent(runID, { type: "message.created", data: { role: "user", content: prompt } })
 
     const assistantID = newMessageID("assistant")
     setIsRunning(true)
     setMessages((current) => [
       ...current,
-      userMessage(text),
+      userMessage(prompt),
       assistantMessage(assistantID, "", "running"),
     ])
 
     await delay(350)
 
-    const answer = demoAgentAnswer(text)
+    const answer = demoAgentAnswer(prompt)
     const artifactID = upsertArtifact(runID, {
       kind: "markdown",
       title: "Demo answer",
@@ -87,6 +88,10 @@ export function AgentChat() {
     setIsRunning(false)
   }, [addCitation, appendRunEvent, completeRun, ensureSession, startRun, upsertArtifact])
 
+  const onNew = useCallback(async (message: AppendMessage) => {
+    await runPrompt(appendMessageText(message))
+  }, [runPrompt])
+
   const onCancel = useCallback(async () => {
     setIsRunning(false)
     setMessages((current) =>
@@ -99,6 +104,24 @@ export function AgentChat() {
     const latestRunningRun = latestRunningRunID()
     if (latestRunningRun) cancelRun(latestRunningRun)
   }, [cancelRun])
+
+  const handleNewSession = useCallback(() => {
+    startNewSession()
+    setMessages([])
+    setIsRunning(false)
+    setRouteRun(undefined)
+    if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
+  }, [startNewSession])
+
+  const handleRetry = useCallback(() => {
+    if (!activeRun || isRunning) return
+    void runPrompt(activeRun.input)
+  }, [activeRun, isRunning, runPrompt])
+
+  const handleContinue = useCallback(() => {
+    if (isRunning) return
+    void runPrompt("Continue the investigation")
+  }, [isRunning, runPrompt])
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -119,9 +142,15 @@ export function AgentChat() {
               </span>
               <span>kube-insight</span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Server className="size-4" aria-hidden="true" />
-              <span>{activeRunCount > 0 ? `${activeRunCount} run${activeRunCount === 1 ? "" : "s"}` : "local agent"}</span>
+            <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+                <Server className="size-4" aria-hidden="true" />
+                <span>{activeRunCount > 0 ? `${activeRunCount} run${activeRunCount === 1 ? "" : "s"}` : "local agent"}</span>
+              </div>
+              <Button type="button" size="sm" variant="outline" onClick={handleNewSession} disabled={isRunning}>
+                <Plus className="size-3.5" aria-hidden="true" />
+                New
+              </Button>
             </div>
           </header>
 
@@ -156,7 +185,15 @@ export function AgentChat() {
               </ThreadPrimitive.Empty>
 
               <ThreadPrimitive.If empty={false}>
-                <RunPageHeader routeRun={routeRun} status={activeRun?.status ?? (isRunning ? "running" : "completed")} />
+                <RunPageHeader
+                  routeRun={routeRun}
+                  status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                  isRunning={isRunning}
+                  canRetry={Boolean(activeRun)}
+                  onStop={onCancel}
+                  onRetry={handleRetry}
+                  onContinue={handleContinue}
+                />
               </ThreadPrimitive.If>
 
               <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
@@ -178,17 +215,38 @@ export function AgentChat() {
 function RunPageHeader({
   routeRun,
   status,
+  isRunning,
+  canRetry,
+  onStop,
+  onRetry,
+  onContinue,
 }: {
   routeRun?: AgentRunRoute
   status: string
+  isRunning: boolean
+  canRetry: boolean
+  onStop: () => void
+  onRetry: () => void
+  onContinue: () => void
 }) {
   return (
-    <div className="sticky top-0 z-10 mb-2 flex items-center justify-between border-b border-border/80 bg-background/95 py-3 text-xs text-muted-foreground backdrop-blur">
+    <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-3 border-b border-border/80 bg-background/95 py-3 text-xs text-muted-foreground backdrop-blur">
       <div className="flex min-w-0 items-center gap-2">
         <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
         <span className="truncate">{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
+        <span className="rounded-md border border-border px-2 py-1 capitalize">{status}</span>
       </div>
-      <span className="rounded-md border border-border px-2 py-1 capitalize">{status}</span>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button type="button" size="icon-sm" variant="ghost" title="Retry" aria-label="Retry run" onClick={onRetry} disabled={!canRetry || isRunning}>
+          <RotateCcw className="size-3.5" aria-hidden="true" />
+        </Button>
+        <Button type="button" size="icon-sm" variant="ghost" title="Continue" aria-label="Continue run" onClick={onContinue} disabled={isRunning}>
+          <Play className="size-3.5" aria-hidden="true" />
+        </Button>
+        <Button type="button" size="icon-sm" variant="ghost" title="Stop" aria-label="Stop run" onClick={onStop} disabled={!isRunning}>
+          <CircleStop className="size-3.5" aria-hidden="true" />
+        </Button>
+      </div>
     </div>
   )
 }

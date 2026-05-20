@@ -84,7 +84,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 - [x] Implement search-style chat home page.
 - [x] Implement run page with chat thread and composer.
-- [ ] Implement stop, retry, continue, and new session controls.
+- [x] Implement stop, retry, continue, and new session controls.
 - [ ] Implement tool timeline with input summary, output summary, status, duration,
   and error display.
 - [ ] Render markdown answers with GFM tables and code blocks.

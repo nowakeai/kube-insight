@@ -62,7 +62,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - [x] Wrap `kube_insight_topology`.
   - [x] Wrap `kube_insight_service_investigation`.
   - [x] Wrap guarded `kube_insight_sql`.
-- [ ] Map Eino events/tool callbacks into kube-insight run events.
+- [x] Map Eino events/tool callbacks into kube-insight run events.
 - [ ] Enforce answer citation expectations through prompt/tool descriptions and
   artifact contracts.
 - [ ] Document fallback criteria for switching to Fantasy if Eino integration

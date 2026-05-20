@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -31,6 +32,8 @@ type EinoRunner struct {
 
 type EinoRunInput struct {
 	Messages []Message
+	Store    Store
+	RunID    string
 }
 
 type EinoRunResult struct {
@@ -67,6 +70,10 @@ func (r *EinoRunner) Run(ctx context.Context, input EinoRunInput) (EinoRunResult
 	if r == nil || r.runner == nil {
 		return EinoRunResult{}, errors.New("eino runner is not initialized")
 	}
+	recorder := newEinoRunRecorder(input.Store, input.RunID)
+	if err := recorder.Start(ctx); err != nil {
+		return EinoRunResult{}, err
+	}
 	messages := make([]adk.Message, 0, len(input.Messages))
 	for _, message := range input.Messages {
 		messages = append(messages, einoMessage(message))
@@ -76,6 +83,9 @@ func (r *EinoRunner) Run(ctx context.Context, input EinoRunInput) (EinoRunResult
 	for {
 		event, ok := iter.Next()
 		if !ok {
+			if err := recorder.Complete(ctx, result.FinalAnswer); err != nil {
+				return result, err
+			}
 			return result, nil
 		}
 		result.Events++
@@ -83,7 +93,13 @@ func (r *EinoRunner) Run(ctx context.Context, input EinoRunInput) (EinoRunResult
 			continue
 		}
 		if event.Err != nil {
+			if err := recorder.Fail(ctx, event.Err); err != nil {
+				return result, err
+			}
 			return result, event.Err
+		}
+		if err := recorder.Record(ctx, event); err != nil {
+			return result, err
 		}
 		if event.Output == nil || event.Output.MessageOutput == nil || event.Output.MessageOutput.Message == nil {
 			continue
@@ -110,4 +126,152 @@ func einoMessage(message Message) adk.Message {
 	default:
 		return schema.UserMessage(fmt.Sprintf("%s", message.Content))
 	}
+}
+
+type einoRunRecorder struct {
+	store Store
+	runID string
+}
+
+func newEinoRunRecorder(store Store, runID string) einoRunRecorder {
+	if store == nil || runID == "" {
+		return einoRunRecorder{}
+	}
+	return einoRunRecorder{store: store, runID: runID}
+}
+
+func (r einoRunRecorder) enabled() bool {
+	return r.store != nil && r.runID != ""
+}
+
+func (r einoRunRecorder) Start(ctx context.Context) error {
+	if !r.enabled() {
+		return nil
+	}
+	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunRunning, "")
+	if err != nil {
+		return err
+	}
+	return r.append(ctx, EventRunStarted, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status})
+}
+
+func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error {
+	if !r.enabled() {
+		return nil
+	}
+	if finalAnswer != "" {
+		if err := r.append(ctx, EventFinalAnswer, MessageEventData{MessageID: NewMessageID(), Role: RoleAssistant, Content: finalAnswer}); err != nil {
+			return err
+		}
+	}
+	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunCompleted, "")
+	if err != nil {
+		return err
+	}
+	return r.append(ctx, EventRunCompleted, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status})
+}
+
+func (r einoRunRecorder) Fail(ctx context.Context, runErr error) error {
+	if !r.enabled() {
+		return nil
+	}
+	message := ""
+	if runErr != nil {
+		message = runErr.Error()
+	}
+	if err := r.append(ctx, EventError, ErrorEventData{Message: message}); err != nil {
+		return err
+	}
+	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunFailed, message)
+	if err != nil {
+		return err
+	}
+	return r.append(ctx, EventRunFailed, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status, Error: message})
+}
+
+func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) error {
+	if !r.enabled() || event == nil || event.Output == nil || event.Output.MessageOutput == nil || event.Output.MessageOutput.Message == nil {
+		return nil
+	}
+	output := event.Output.MessageOutput
+	msg := output.Message
+	role := messageRoleFromEino(output.Role, msg.Role)
+	if msg.Content != "" {
+		if err := r.append(ctx, EventMessageCreated, MessageEventData{MessageID: NewMessageID(), Role: role, Content: msg.Content}); err != nil {
+			return err
+		}
+	}
+	for _, call := range msg.ToolCalls {
+		input := json.RawMessage(call.Function.Arguments)
+		if !json.Valid(input) {
+			input = jsonRaw(map[string]string{"arguments": call.Function.Arguments})
+		}
+		if err := r.append(ctx, EventToolStarted, ToolCallEventData{ToolCallID: call.ID, Name: call.Function.Name, Status: "started", Input: input}); err != nil {
+			return err
+		}
+	}
+	if role == RoleTool {
+		outputData := toolOutputData(msg.Content)
+		name := firstNonEmptyString(output.ToolName, msg.ToolName)
+		if err := r.append(ctx, EventToolCompleted, ToolCallEventData{ToolCallID: msg.ToolCallID, Name: name, Status: "completed", Output: outputData}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r einoRunRecorder) append(ctx context.Context, eventType RunEventType, data any) error {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	_, err = r.store.AppendRunEvent(ctx, r.runID, AppendEventInput{Type: eventType, Data: encoded})
+	return err
+}
+
+func messageRoleFromEino(outputRole schema.RoleType, messageRole schema.RoleType) MessageRole {
+	role := outputRole
+	if role == "" {
+		role = messageRole
+	}
+	switch role {
+	case schema.Assistant:
+		return RoleAssistant
+	case schema.System:
+		return RoleSystem
+	case schema.Tool:
+		return RoleTool
+	case schema.User:
+		return RoleUser
+	default:
+		return RoleAssistant
+	}
+}
+
+func toolOutputData(content string) json.RawMessage {
+	if content == "" {
+		return nil
+	}
+	data := json.RawMessage(content)
+	if json.Valid(data) {
+		return data
+	}
+	return jsonRaw(map[string]string{"content": content})
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func jsonRaw(value any) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return data
 }

@@ -209,6 +209,10 @@ func NewEventID() string {
 	return newID("evt")
 }
 
+func NewMessageID() string {
+	return newID("msg")
+}
+
 func cloneSession(in Session) Session {
 	in.Messages = append([]Message(nil), in.Messages...)
 	in.Runs = cloneRuns(in.Runs)

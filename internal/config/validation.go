@@ -79,8 +79,13 @@ func (c Config) Validate() error {
 	if err := validateProcessing(c.Processing); err != nil {
 		return err
 	}
-	if c.Server.Chat.Enabled && c.Server.Chat.OpenAIAPIKeyEnv == "" {
-		return errors.New("server.chat.openaiApiKeyEnv is required when chat is enabled")
+	if c.Server.Chat.Enabled {
+		if c.Server.Chat.Provider == "" {
+			return errors.New("server.chat.provider is required when chat is enabled")
+		}
+		if c.Server.Chat.EffectiveAPIKeyEnv() == "" {
+			return errors.New("server.chat.apiKeyEnv is required when chat is enabled")
+		}
 	}
 	return nil
 }

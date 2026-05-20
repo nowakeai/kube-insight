@@ -26,13 +26,25 @@ kube-insight query service checkout --namespace default --from ... --to ...
 
 ## Web And Chat
 
-Planned web mode:
+The first Web UI milestone is agent-first. The opening screen is a search-style
+question box; after a question is submitted, the server runs an autonomous agent
+that calls kube-insight tools and streams answers, tool progress, citations, and
+artifacts back to the browser.
 
-- timeline view,
-- Service-centric topology graph,
-- evidence ranking table,
-- exact version and diff panel,
-- chat panel backed by OpenAI when `OPENAI_API_KEY` is available.
+Initial web mode:
+
+- agent chat home page and run view,
+- server-managed sessions, runs, cancellation, and event streaming,
+- autonomous Eino ADK ChatModelAgent with kube-insight read tools,
+- assistant-ui based React chat surface,
+- Markdown answers with evidence citations,
+- Kubernetes resource artifact rendering,
+- topology artifact rendering,
+- resource and topology history travel artifacts.
+
+Standalone evidence search, Service investigation pages, topology explorers,
+diff workbenches, dashboards, and free-form SQL UI are later surfaces. They can
+still exist as agent tools or artifacts during the first milestone.
 
 Configuration shape:
 
@@ -43,12 +55,17 @@ server:
     listen: 127.0.0.1:8081
   chat:
     enabled: true
-    openaiApiKeyEnv: OPENAI_API_KEY
+    provider: openai
+    apiKeyEnv: OPENAI_API_KEY
     model: gpt-5.2
 ```
 
-The chat layer must call structured investigation APIs first. It should cite
-object IDs, facts, changes, versions, and diffs rather than inventing answers.
+The built-in agent runtime is server-side. The primary runtime choice is
+CloudWeGo Eino ADK; charmbracelet/fantasy is the fallback if Eino integration
+complexity becomes disproportionate. The chat layer must call structured
+investigation APIs as tools and cite object IDs, facts, changes, versions, and
+diffs rather than inventing answers. See [Agent-First Web UI Design](agent-first-web-ui.md)
+for the milestone design.
 
 ## API
 
@@ -76,7 +93,8 @@ The first agent-facing API surface should stay deliberately small:
 - `history`: expose one object's retained content versions, observation trail,
   and diffs without requiring agents to hand-write the joins.
 
-The CLI command is:
+The API can be served on its own, or through the embedded Web UI under the
+same-origin `/api/v1/` path. The CLI command is:
 
 ```bash
 kube-insight serve api --db kubeinsight.db --listen 127.0.0.1:8080

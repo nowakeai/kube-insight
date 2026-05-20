@@ -17,8 +17,10 @@ ClickHouse-compatible local storage for users who accept the larger runtime
 dependency.
 
 The MVP baseline is complete for SQLite default local mode, the chDB-enabled
-local variant, and the core MCP read surface. The next product milestones are
-Web UI and Kubernetes RBAC support.
+local variant, and the core MCP read surface. The next Web UI milestone is
+agent-first: an embedded chat surface backed by a server-side autonomous agent,
+typed Kubernetes artifacts, and the existing read API. Kubernetes RBAC support
+remains the next major security milestone.
 
 ## Completed Foundation
 
@@ -42,10 +44,10 @@ Web UI and Kubernetes RBAC support.
 ## Next Milestones
 
 1. Web UI.
-   Build the first human operator surface on top of the existing API: service
-   and workload search, investigation result page, evidence timeline,
-   topology-at-time graph, resource diff panel, and clear links from candidate
-   facts/edges to retained proof versions.
+   Build an agent-first human operator surface: a search-style chat entry,
+   server-managed sessions and runs, an autonomous Eino-backed agent using
+   kube-insight tools, Markdown answers with citations, Kubernetes resource
+   artifacts, topology artifacts, and resource/topology history travel.
 
 2. Kubernetes RBAC support.
    Add Kubernetes authn/authz-aware service access so API, MCP, and future UI
@@ -87,6 +89,8 @@ Web UI and Kubernetes RBAC support.
   storage-cost strategy, and storage acceptance metrics.
 - [Agent And UI Roadmap](../product/agent-and-ui-roadmap.md): CLI, API, MCP,
   web/chat, and agent skill direction.
+- [Agent-First Web UI Design](../product/agent-first-web-ui.md): first Web UI
+  milestone scope, agent runtime, frontend stack, artifacts, and packaging.
 - [Kubernetes RBAC Inheritance](../security/kubernetes-rbac-inheritance.md):
   Kubernetes authorization model and historical RBAC inheritance notes.
 - [Agent SQL RBAC Filtering](../security/agent-rbac-sql-filtering.md): SQL and

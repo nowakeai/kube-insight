@@ -43,6 +43,7 @@ These documents explain the system shape and current implementation direction:
 - [Global Watcher Design](ingestion/global-watcher-design.md)
 - [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
 - [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
+- [Agent-First Web UI Design](product/agent-first-web-ui.md)
 - [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
 - [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
 - [Backend Strategy](research/backend-strategy.md)
@@ -61,6 +62,7 @@ workflow records live under `docs/dev/` so user-facing docs stay focused.
 - [PoC And Benchmark Plan](dev/poc-and-benchmark-plan.md)
 - [Test Acceptance Plan](dev/test-acceptance-plan.md)
 - [ClickHouse MVP Closeout](dev/clickhouse-mvp-closeout.md)
+- [Agent-First Web UI Checklist](dev/agent-first-web-ui-checklist.md)
 - [Open Source Readiness](dev/open-source-readiness.md)
 
 ## Community And Release

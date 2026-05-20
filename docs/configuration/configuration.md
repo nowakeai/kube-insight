@@ -212,6 +212,23 @@ Supported roles:
 - `writer`: discovery/watch/ingest only; API/Web/MCP listeners disabled.
 - `api`: query/API/Web/MCP only; collection/watch disabled.
 
+Agent chat configuration is server-side. The first Web UI milestone uses a
+server-owned agent runtime, so provider and model defaults live under
+`server.chat`:
+
+```yaml
+server:
+  chat:
+    enabled: true
+    provider: openai
+    apiKeyEnv: OPENAI_API_KEY
+    model: gpt-5.2
+```
+
+The deprecated `openaiApiKeyEnv` key is still accepted for compatibility, but new
+configs should use `apiKeyEnv` so non-OpenAI-compatible providers can share the
+same shape later.
+
 ## Supported Running Modes
 
 Kube-insight supports these operational shapes:

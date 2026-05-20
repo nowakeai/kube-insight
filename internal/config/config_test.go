@@ -52,6 +52,9 @@ func TestLoadExampleConfig(t *testing.T) {
 	if len(cfg.ProfileRules()) == 0 {
 		t.Fatalf("profile rules missing")
 	}
+	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.Model == "" {
+		t.Fatalf("chat = %#v", cfg.Server.Chat)
+	}
 	for _, want := range []string{"resource_version", "status_condition_timestamps", "leader_election_configmap", "report_skip"} {
 		if !hasProcessingFilter(cfg.Processing.Filters, want) {
 			t.Fatalf("filter %q missing: %#v", want, cfg.Processing.Filters)
@@ -193,6 +196,9 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	t.Setenv("KUBE_INSIGHT_COLLECTION_WATCH_MAX_BACKOFF_MILLIS", "12000")
 	t.Setenv("KUBE_INSIGHT_LOGGING_LEVEL", "debug")
 	t.Setenv("KUBE_INSIGHT_LOGGING_FORMAT", "json")
+	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_PROVIDER", "openai-compatible")
+	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_API_KEY_ENV", "ALT_OPENAI_API_KEY")
+	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_MODEL", "gpt-5.2-mini")
 	t.Setenv("KUBE_INSIGHT_STORAGE_MAINTENANCE_MIN_WAL_BYTES", "1048576")
 	t.Setenv("KUBE_INSIGHT_PROCESSING_FILTERS", `{managed_fields: {type: builtin, action: keep_modified, removePaths: [/metadata/managedFields]}}`)
 	t.Setenv("KUBE_INSIGHT_PROCESSING_FILTER_CHAINS", `{default: [managed_fields]}`)
@@ -218,6 +224,9 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	}
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" {
 		t.Fatalf("logging = %#v", cfg.Logging)
+	}
+	if cfg.Server.Chat.Provider != "openai-compatible" || cfg.Server.Chat.APIKeyEnv != "ALT_OPENAI_API_KEY" || cfg.Server.Chat.Model != "gpt-5.2-mini" {
+		t.Fatalf("chat = %#v", cfg.Server.Chat)
 	}
 	if cfg.Storage.Maintenance.IntervalSeconds != 60 || cfg.Storage.Maintenance.MinWalBytes != 1048576 {
 		t.Fatalf("maintenance = %#v", cfg.Storage.Maintenance)
@@ -371,12 +380,38 @@ func TestValidateRejectsWriterInstanceWithListeners(t *testing.T) {
 			SQLite: SQLiteConfig{Path: "kube-insight.db"},
 		},
 		Server: ServerConfig{
-			Chat: ChatConfig{Enabled: true, OpenAIAPIKeyEnv: "OPENAI_API_KEY"},
+			Chat: ChatConfig{Enabled: true, Provider: "openai", APIKeyEnv: "OPENAI_API_KEY"},
 		},
 	}
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "api/metrics/web/chat/mcp") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateRejectsChatWithoutAPIKeyEnv(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Chat.Enabled = true
+	cfg.Server.Chat.Provider = "openai"
+	cfg.Server.Chat.APIKeyEnv = ""
+	cfg.Server.Chat.OpenAIAPIKeyEnv = ""
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "server.chat.apiKeyEnv") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateAcceptsLegacyOpenAIAPIKeyEnv(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Chat.Enabled = true
+	cfg.Server.Chat.Provider = "openai"
+	cfg.Server.Chat.APIKeyEnv = ""
+	cfg.Server.Chat.OpenAIAPIKeyEnv = "OPENAI_API_KEY"
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.Chat.EffectiveAPIKeyEnv() != "OPENAI_API_KEY" {
+		t.Fatalf("api key env = %q", cfg.Server.Chat.EffectiveAPIKeyEnv())
 	}
 }
 

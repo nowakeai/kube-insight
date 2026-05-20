@@ -206,8 +206,17 @@ type ListenerConfig struct {
 
 type ChatConfig struct {
 	Enabled         bool   `yaml:"enabled" json:"enabled"`
-	OpenAIAPIKeyEnv string `yaml:"openaiApiKeyEnv" json:"openaiApiKeyEnv"`
+	Provider        string `yaml:"provider" json:"provider"`
+	APIKeyEnv       string `yaml:"apiKeyEnv" json:"apiKeyEnv"`
 	Model           string `yaml:"model" json:"model"`
+	OpenAIAPIKeyEnv string `yaml:"openaiApiKeyEnv" json:"openaiApiKeyEnv,omitempty"`
+}
+
+func (c ChatConfig) EffectiveAPIKeyEnv() string {
+	if c.APIKeyEnv != "" {
+		return c.APIKeyEnv
+	}
+	return c.OpenAIAPIKeyEnv
 }
 
 type MCPConfig struct {

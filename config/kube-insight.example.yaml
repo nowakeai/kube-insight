@@ -336,7 +336,8 @@ server:
     listen: 127.0.0.1:8081
   chat:
     enabled: false
-    openaiApiKeyEnv: OPENAI_API_KEY
+    provider: openai
+    apiKeyEnv: OPENAI_API_KEY
     model: gpt-5.2
 
 mcp:

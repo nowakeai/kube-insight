@@ -46,7 +46,7 @@ func NewHistoryTool(store storage.ObjectHistoryStore) *HistoryTool {
 func (t *HistoryTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: HistoryToolName,
-		Desc: "Load retained versions, observations, diffs, and proof metadata for one Kubernetes object. Use this after search identifies a target object that needs timeline or history proof.",
+		Desc: "Load retained versions, observations, diffs, and proof metadata for one Kubernetes object. Use this after search identifies a target object that needs timeline or history proof." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"clusterId":       {Type: schema.String, Desc: "Optional cluster name."},
 			"kind":            {Type: schema.String, Desc: "Kubernetes kind, such as Pod, Service, Event, Node, or Deployment.", Required: true},

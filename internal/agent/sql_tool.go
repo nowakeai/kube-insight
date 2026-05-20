@@ -36,7 +36,7 @@ func NewSQLTool(store storage.SQLQueryStore) *SQLTool {
 func (t *SQLTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: SQLToolName,
-		Desc: "Run guarded read-only SQL against kube-insight evidence tables for advanced joins and proof queries. Use only SELECT, WITH, or EXPLAIN, prefer indexed tables such as object_facts, object_edges, object_changes, latest_index, object_observations, and versions before scanning blobs.",
+		Desc: "Run guarded read-only SQL against kube-insight evidence tables for advanced joins and proof queries. Use only SELECT, WITH, or EXPLAIN, prefer indexed tables such as object_facts, object_edges, object_changes, latest_index, object_observations, and versions before scanning blobs." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"sql":     {Type: schema.String, Desc: "Single read-only SELECT/WITH/EXPLAIN statement.", Required: true},
 			"maxRows": {Type: schema.Integer, Desc: fmt.Sprintf("Maximum rows to return. Defaults to %d and caps at %d.", defaultSQLToolMaxRows, maxSQLToolMaxRows)},

@@ -61,7 +61,7 @@ func NewSearchTool(store storage.EvidenceSearchStore, opts SearchToolOptions) *S
 func (t *SearchTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: SearchToolName,
-		Desc: "Search kube-insight evidence to find candidate Kubernetes objects from facts, changes, retained documents, and indexed evidence. Use after kube_insight_health when you need relevant objects to investigate.",
+		Desc: "Search kube-insight evidence to find candidate Kubernetes objects from facts, changes, retained documents, and indexed evidence. Use after kube_insight_health when you need relevant objects to investigate." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"query":                {Type: schema.String, Desc: "Search terms, symptoms, object names, labels, statuses, error text, or other evidence keywords.", Required: true},
 			"clusterId":            {Type: schema.String, Desc: "Optional cluster name to search."},

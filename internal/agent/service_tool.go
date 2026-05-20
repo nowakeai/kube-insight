@@ -48,7 +48,7 @@ func NewServiceInvestigationTool(store storage.ServiceInvestigationStore) *Servi
 func (t *ServiceInvestigationTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: ServiceInvestigationToolName,
-		Desc: "Load a typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use this when the target Kubernetes object is a Service.",
+		Desc: "Load a typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use this when the target Kubernetes object is a Service." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"clusterId":            {Type: schema.String, Desc: "Optional cluster name."},
 			"namespace":            {Type: schema.String, Desc: "Service namespace.", Required: true},

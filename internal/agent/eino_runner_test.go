@@ -35,6 +35,24 @@ func TestEinoRunnerRunsChatModelAgent(t *testing.T) {
 	}
 }
 
+func TestEinoRunnerUsesDefaultInstruction(t *testing.T) {
+	ctx := context.Background()
+	fake := &fakeEinoModel{answer: "checked cluster health"}
+	runner, err := NewEinoRunner(ctx, EinoRunnerConfig{Model: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(ctx, EinoRunInput{Messages: []Message{{Role: RoleUser, Content: "what changed?"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.inputs) != 2 || fake.inputs[0].Role != schema.System {
+		t.Fatalf("model inputs = %#v", fake.inputs)
+	}
+	if !strings.Contains(fake.inputs[0].Content, "kube-insight Kubernetes investigation agent") || !strings.Contains(fake.inputs[0].Content, "cite the exact proof") {
+		t.Fatalf("default system instruction = %q", fake.inputs[0].Content)
+	}
+}
+
 func TestEinoRunnerRecordsRunEvents(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

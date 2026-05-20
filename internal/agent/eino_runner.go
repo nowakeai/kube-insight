@@ -49,10 +49,14 @@ func NewEinoRunner(ctx context.Context, cfg EinoRunnerConfig) (*EinoRunner, erro
 	if name == "" {
 		name = defaultEinoAgentName
 	}
+	instruction := cfg.Instruction
+	if instruction == "" {
+		instruction = DefaultAgentInstruction()
+	}
 	agentConfig := &adk.ChatModelAgentConfig{
 		Name:          name,
 		Description:   cfg.Description,
-		Instruction:   cfg.Instruction,
+		Instruction:   instruction,
 		Model:         cfg.Model,
 		MaxIterations: cfg.MaxIterations,
 	}

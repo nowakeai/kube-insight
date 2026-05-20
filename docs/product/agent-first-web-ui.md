@@ -75,6 +75,24 @@ and an allowlist of kube-insight tools. It should decide which tools to call and
 when to stop. The product-specific constraints live in tool descriptions,
 artifact schemas, and citation requirements rather than in a hand-coded workflow.
 
+Fallback criteria for switching from Eino to Fantasy:
+
+- Eino cannot expose enough run/tool/model events to maintain replayable
+  `run.events` without brittle private hooks.
+- Eino tool schemas require disproportionate adapter code compared with the
+  kube-insight API/tool surface.
+- Eino dependency shape conflicts with local-first binary size, release builds,
+  or provider configuration in a way that is hard to isolate.
+- Debugging failed or stalled agent runs is materially harder than with a
+  simpler embeddable runtime.
+- The autonomous loop becomes dominated by Eino-specific workarounds instead of
+  kube-insight tool quality.
+
+Do not switch only because Fantasy has a smaller API or because Eino needs thin
+adapters. The switch is justified when integration cost threatens the first
+milestone: server-owned agent chat with sessions, replayable events, evidence
+citations, and typed artifacts.
+
 ## Session And Run Model
 
 Because the agent loop runs on the server, sessions and runs are also owned by

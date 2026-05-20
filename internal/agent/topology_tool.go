@@ -35,7 +35,7 @@ func NewTopologyTool(store storage.TopologyStore) *TopologyTool {
 func (t *TopologyTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: TopologyToolName,
-		Desc: "Load the retained topology graph around one Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search identifies a target.",
+		Desc: "Load the retained topology graph around one Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search identifies a target." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"clusterId": {Type: schema.String, Desc: "Optional cluster name."},
 			"kind":      {Type: schema.String, Desc: "Kubernetes kind, such as Service, Pod, Node, Deployment, or Event.", Required: true},

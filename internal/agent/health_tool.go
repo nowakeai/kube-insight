@@ -55,7 +55,7 @@ func NewHealthTool(store storage.ResourceHealthStore, opts HealthToolOptions) *H
 func (t *HealthTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: HealthToolName,
-		Desc: "Check kube-insight collector coverage and freshness before making current-state Kubernetes claims. Use this first when a question depends on whether watched resources are current.",
+		Desc: "Check kube-insight collector coverage and freshness before making current-state Kubernetes claims. Use this first when a question depends on whether watched resources are current." + toolCitationGuidance(),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"clusterId":        {Type: schema.String, Desc: "Optional cluster name to inspect."},
 			"status":           {Type: schema.String, Desc: "Optional status filter such as watching, bookmark, queued, retrying, list_error, watch_error, or not_started."},

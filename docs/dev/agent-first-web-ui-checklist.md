@@ -74,7 +74,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Install and configure Tailwind and shadcn/ui.
 - [x] Add assistant-ui and baseline chat thread/composer components.
 - [x] Add Zustand store for session/run/artifact projection.
-- [ ] Add TanStack Query client and API helpers.
+- [x] Add TanStack Query client and API helpers.
 - [ ] Add SSE client helper with reconnect and cancellation behavior.
 - [ ] Add Zod schemas for run events and artifact payloads.
 - [x] Add build command that outputs `web/dist`.

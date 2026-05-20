@@ -8,7 +8,7 @@ import {
   type ThreadMessage,
 } from "@assistant-ui/react"
 import { ArrowUp, Bot, CircleStop, Search, Server, Sparkles, UserRound } from "lucide-react"
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
@@ -25,6 +25,7 @@ const starterPrompts = [
 export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [isRunning, setIsRunning] = useState(false)
+  const [routeRun, setRouteRun] = useState(readRouteRun)
   const activeRunCount = useAgentProjectionStore((state) => {
     if (!state.activeSessionId) return 0
     return state.sessions[state.activeSessionId]?.runIds.length ?? 0
@@ -36,6 +37,13 @@ export function AgentChat() {
   const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
   const upsertArtifact = useAgentProjectionStore((state) => state.upsertArtifact)
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
+  const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
+
+  useEffect(() => {
+    const onPopState = () => setRouteRun(readRouteRun())
+    window.addEventListener("popstate", onPopState)
+    return () => window.removeEventListener("popstate", onPopState)
+  }, [])
 
   const onNew = useCallback(async (message: AppendMessage) => {
     const text = appendMessageText(message)
@@ -43,6 +51,8 @@ export function AgentChat() {
 
     const sessionID = ensureSession(text)
     const runID = startRun(sessionID, text)
+    openRunPage(sessionID, runID)
+    setRouteRun({ sessionID, runID })
     appendRunEvent(runID, { type: "message.created", data: { role: "user", content: text } })
 
     const assistantID = newMessageID("assistant")
@@ -145,6 +155,10 @@ export function AgentChat() {
                 </div>
               </ThreadPrimitive.Empty>
 
+              <ThreadPrimitive.If empty={false}>
+                <RunPageHeader routeRun={routeRun} status={activeRun?.status ?? (isRunning ? "running" : "completed")} />
+              </ThreadPrimitive.If>
+
               <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
 
               <ThreadPrimitive.If empty={false}>
@@ -157,6 +171,25 @@ export function AgentChat() {
         </div>
       </main>
     </AssistantRuntimeProvider>
+  )
+}
+
+
+function RunPageHeader({
+  routeRun,
+  status,
+}: {
+  routeRun?: AgentRunRoute
+  status: string
+}) {
+  return (
+    <div className="sticky top-0 z-10 mb-2 flex items-center justify-between border-b border-border/80 bg-background/95 py-3 text-xs text-muted-foreground backdrop-blur">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
+        <span className="truncate">{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
+      </div>
+      <span className="rounded-md border border-border px-2 py-1 capitalize">{status}</span>
+    </div>
   )
 }
 
@@ -357,4 +390,29 @@ function escapeMarkdown(value: string) {
   return Array.from(value, (char) =>
     markdownEscapeChars.has(char) ? `\\${char}` : char,
   ).join("")
+}
+
+type AgentRunRoute = {
+  sessionID: string
+  runID: string
+}
+
+function readRouteRun(): AgentRunRoute | undefined {
+  const match = window.location.pathname.match(/^\/sessions\/([^/]+)\/runs\/([^/]+)$/)
+  if (!match) return undefined
+  return {
+    sessionID: decodeURIComponent(match[1]),
+    runID: decodeURIComponent(match[2]),
+  }
+}
+
+function openRunPage(sessionID: string, runID: string) {
+  const nextPath = `/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}`
+  if (window.location.pathname === nextPath) return
+  window.history.pushState({}, "", nextPath)
+}
+
+function shortID(value: string) {
+  const normalized = value.replace(/^[^_]+_/, "")
+  return normalized.length > 8 ? normalized.slice(0, 8) : normalized
 }

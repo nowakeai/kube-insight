@@ -3,6 +3,7 @@
 -include .env
 
 BIN ?= bin/kube-insight
+GO_TEST_PACKAGES ?= ./cmd/... ./internal/...
 CHDB_BIN ?= bin/kube-insight-chdb
 CHDB_VERSION ?= 3.7.2
 CHDB_LIB ?= /usr/local/lib/libchdb.so
@@ -26,7 +27,7 @@ COMPOSE_DEV_LOCAL := $(wildcard compose.dev.local.yaml)
 COMPOSE_DEV_FILES := -f compose.dev.yaml $(if $(COMPOSE_DEV_LOCAL),-f $(COMPOSE_DEV_LOCAL))
 
 test: check-lines
-	go test ./...
+	go test $(GO_TEST_PACKAGES)
 
 check-lines:
 	@overs="$$(wc -l $$(rg --files -g '*.go' cmd internal) | awk '$$1 > 800 && $$2 != "total" {print}')"; \

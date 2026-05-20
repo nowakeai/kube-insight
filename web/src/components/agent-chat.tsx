@@ -13,7 +13,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 
 import { Button } from "@/components/ui/button"
-import { useAgentProjectionStore } from "@/lib/agent-store"
+import { useAgentProjectionStore, type AgentRunEvent } from "@/lib/agent-store"
 
 const starterPrompts = [
   "Is the API service healthy right now?",
@@ -21,6 +21,8 @@ const starterPrompts = [
   "Find pods with restart evidence",
   "Map topology for namespace default",
 ]
+
+const emptyEventIds: string[] = []
 
 export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
@@ -39,6 +41,14 @@ export function AgentChat() {
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
+  const activeRunEventIds = useAgentProjectionStore((state) => {
+    if (!routeRun) return emptyEventIds
+    return state.runs[routeRun.runID]?.eventIds ?? emptyEventIds
+  })
+  const eventsById = useAgentProjectionStore((state) => state.events)
+  const activeRunEvents = activeRunEventIds
+    .map((eventID) => eventsById[eventID])
+    .filter((event): event is AgentRunEvent => Boolean(event))
 
   useEffect(() => {
     const onPopState = () => setRouteRun(readRouteRun())
@@ -64,7 +74,29 @@ export function AgentChat() {
       assistantMessage(assistantID, "", "running"),
     ])
 
+    const toolCallID = newMessageID("tool")
+    appendRunEvent(runID, {
+      type: "tool.started",
+      data: {
+        toolCallId: toolCallID,
+        name: "kube_insight_demo_search",
+        status: "started",
+        input: { query: prompt },
+      },
+    })
+
     await delay(350)
+
+    appendRunEvent(runID, {
+      type: "tool.completed",
+      data: {
+        toolCallId: toolCallID,
+        name: "kube_insight_demo_search",
+        status: "completed",
+        output: { summary: "Demo evidence projection created" },
+        durationMs: 350,
+      },
+    })
 
     const answer = demoAgentAnswer(prompt)
     const artifactID = upsertArtifact(runID, {
@@ -194,6 +226,7 @@ export function AgentChat() {
                   onRetry={handleRetry}
                   onContinue={handleContinue}
                 />
+                <RunTimeline events={activeRunEvents} />
               </ThreadPrimitive.If>
 
               <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
@@ -246,6 +279,41 @@ function RunPageHeader({
         <Button type="button" size="icon-sm" variant="ghost" title="Stop" aria-label="Stop run" onClick={onStop} disabled={!isRunning}>
           <CircleStop className="size-3.5" aria-hidden="true" />
         </Button>
+      </div>
+    </div>
+  )
+}
+
+
+function RunTimeline({ events }: { events: AgentRunEvent[] }) {
+  const toolEvents = events.filter((event) => event.type.startsWith("tool."))
+  if (toolEvents.length === 0) return null
+  return (
+    <div className="mb-4 border-b border-border/80 pb-3">
+      <div className="flex flex-col gap-2">
+        {toolEvents.map((event) => (
+          <ToolTimelineRow key={event.id} event={event} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ToolTimelineRow({ event }: { event: AgentRunEvent }) {
+  const data = toolEventData(event.data)
+  const status = data.status || event.type.replace("tool.", "")
+  return (
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 rounded-md border border-border bg-background px-3 py-2 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_5rem]">
+      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        <span className={statusDotClass(status)} aria-hidden="true" />
+        <span className="truncate capitalize">{status}</span>
+      </div>
+      <div className="min-w-0">
+        <div className="truncate font-medium text-foreground">{data.name || "tool"}</div>
+        <div className="truncate text-muted-foreground">{toolEventSummary(data)}</div>
+      </div>
+      <div className="hidden text-right text-muted-foreground sm:block">
+        {typeof data.durationMs === "number" ? `${data.durationMs}ms` : ""}
       </div>
     </div>
   )
@@ -473,4 +541,38 @@ function openRunPage(sessionID: string, runID: string) {
 function shortID(value: string) {
   const normalized = value.replace(/^[^_]+_/, "")
   return normalized.length > 8 ? normalized.slice(0, 8) : normalized
+}
+
+type ToolEventData = {
+  name?: string
+  status?: string
+  input?: unknown
+  output?: unknown
+  durationMs?: number
+  error?: string
+}
+
+function toolEventData(value: unknown): ToolEventData {
+  if (!value || typeof value !== "object") return {}
+  return value as ToolEventData
+}
+
+function toolEventSummary(data: ToolEventData) {
+  if (data.error) return data.error
+  if (data.output !== undefined) return `output ${compactJSON(data.output)}`
+  if (data.input !== undefined) return `input ${compactJSON(data.input)}`
+  return "waiting"
+}
+
+function compactJSON(value: unknown) {
+  const text = typeof value === "string" ? value : JSON.stringify(value)
+  if (!text) return ""
+  return text.length > 96 ? `${text.slice(0, 93)}...` : text
+}
+
+function statusDotClass(status: string) {
+  const base = "size-1.5 shrink-0 rounded-full"
+  if (status === "completed") return `${base} bg-accent`
+  if (status === "failed") return `${base} bg-destructive`
+  return `${base} bg-primary`
 }

@@ -42,14 +42,14 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   and `server.chat.model`.
 - [x] Add agent session and run domain types.
 - [x] Add in-memory session/run store for the first spike.
-- [ ] Add `POST /api/v1/agent/sessions`.
-- [ ] Add `GET /api/v1/agent/sessions/{session_id}`.
-- [ ] Add `POST /api/v1/agent/sessions/{session_id}/runs`.
-- [ ] Add `GET /api/v1/agent/runs/{run_id}/events` with SSE.
-- [ ] Add `POST /api/v1/agent/runs/{run_id}/cancel`.
+- [x] Add `POST /api/v1/agent/sessions`.
+- [x] Add `GET /api/v1/agent/sessions/{session_id}`.
+- [x] Add `POST /api/v1/agent/sessions/{session_id}/runs`.
+- [x] Add `GET /api/v1/agent/runs/{run_id}/events` with SSE.
+- [x] Add `POST /api/v1/agent/runs/{run_id}/cancel`.
 - [ ] Define replayable run event types for messages, tool calls, artifacts,
   citations, status, errors, and final answers.
-- [ ] Add focused API tests for session/run lifecycle and SSE event formatting.
+- [x] Add focused API tests for session/run lifecycle and SSE event formatting.
 
 ## Agent Runtime
 

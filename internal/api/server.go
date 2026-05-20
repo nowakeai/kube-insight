@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"kube-insight/internal/agent"
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
@@ -19,6 +20,7 @@ type ServerOptions struct {
 	OpenStore     StoreOpener
 	KeepStoreOpen bool
 	Close         func() error
+	AgentStore    agent.Store
 }
 
 type StoreOpener func(context.Context) (ReadStore, error)
@@ -32,6 +34,7 @@ type Server struct {
 	openStore           StoreOpener
 	closeStoreOnRequest bool
 	closeFunc           func() error
+	agentStore          agent.Store
 	mux                 *http.ServeMux
 }
 
@@ -52,7 +55,11 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		}
 		openStore = sqliteStoreOpener(opts.DBPath)
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: opts.Close, mux: http.NewServeMux()}
+	agentStore := opts.AgentStore
+	if agentStore == nil {
+		agentStore = agent.NewMemoryStore()
+	}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: opts.Close, agentStore: agentStore, mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }
@@ -89,6 +96,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/search", s.handleSearch)
 	s.mux.HandleFunc("GET /api/v1/services/{namespace}/{name}/investigation", s.handleServiceInvestigation)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
+	s.mux.HandleFunc("POST /api/v1/agent/sessions", s.handleCreateAgentSession)
+	s.mux.HandleFunc("GET /api/v1/agent/sessions/{session_id}", s.handleGetAgentSession)
+	s.mux.HandleFunc("POST /api/v1/agent/sessions/{session_id}/runs", s.handleCreateAgentRun)
+	s.mux.HandleFunc("GET /api/v1/agent/runs/{run_id}/events", s.handleAgentRunEvents)
+	s.mux.HandleFunc("POST /api/v1/agent/runs/{run_id}/cancel", s.handleCancelAgentRun)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

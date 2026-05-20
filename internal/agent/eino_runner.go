@@ -7,6 +7,8 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -19,6 +21,7 @@ type EinoRunnerConfig struct {
 	Description   string
 	Instruction   string
 	Model         model.BaseChatModel
+	Tools         []tool.BaseTool
 	MaxIterations int
 }
 
@@ -43,13 +46,17 @@ func NewEinoRunner(ctx context.Context, cfg EinoRunnerConfig) (*EinoRunner, erro
 	if name == "" {
 		name = defaultEinoAgentName
 	}
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	agentConfig := &adk.ChatModelAgentConfig{
 		Name:          name,
 		Description:   cfg.Description,
 		Instruction:   cfg.Instruction,
 		Model:         cfg.Model,
 		MaxIterations: cfg.MaxIterations,
-	})
+	}
+	if len(cfg.Tools) > 0 {
+		agentConfig.ToolsConfig = adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: cfg.Tools}}
+	}
+	agent, err := adk.NewChatModelAgent(ctx, agentConfig)
 	if err != nil {
 		return nil, err
 	}

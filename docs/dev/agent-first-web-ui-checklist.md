@@ -54,7 +54,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Agent Runtime
 
 - [x] Add Eino dependency after checking the current compatible version.
-- [ ] Build a minimal autonomous ChatModelAgent spike.
+- [x] Build a minimal autonomous ChatModelAgent spike.
 - [ ] Wrap `kube_insight_health` as the first tool.
 - [ ] Wrap `kube_insight_search` as the second tool.
 - [ ] Add history, topology, service investigation, and guarded SQL tools.

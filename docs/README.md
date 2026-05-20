@@ -33,6 +33,7 @@ Read these in order when evaluating or using kube-insight:
 
 These documents explain the system shape and current implementation direction:
 
+- [Roadmap](roadmap/roadmap.md)
 - [System Architecture](architecture/system-architecture.md)
 - [Technology Stack](architecture/technology-stack.md)
 - [Storage, Index, And Query Design](data/storage-index-query.md)

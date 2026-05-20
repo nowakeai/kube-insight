@@ -286,6 +286,7 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Quickstart](docs/quickstart.md)
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)
+- [Roadmap](docs/roadmap/roadmap.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
 - [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
 - [Storage modes and performance](docs/validation/storage-mode-comparison.md)
@@ -297,6 +298,26 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Release process](RELEASE.md)
 - [Full documentation index](docs/README.md)
+
+## Roadmap
+
+The current roadmap is tracked in [Roadmap](docs/roadmap/roadmap.md). In short:
+
+- SQLite default local mode, the chDB-enabled local variant, and the core MCP
+  read surface are complete for the MVP baseline;
+- the next milestone is the Web UI for service/workload search, investigation
+  pages, timelines, topology-at-time, and diffs;
+- the following milestone is Kubernetes RBAC support for authz-aware API, MCP,
+  and future UI reads;
+- ClickHouse cold object-storage tiering and opt-in JSON/index experiments stay
+  measured follow-ups before promotion;
+- production readiness follows after the UI and RBAC service boundaries are in
+  place.
+
+See the detailed [Roadmap And Open Questions](docs/roadmap/roadmap-open-questions.md),
+[Multi Backend Roadmap](docs/data/multi-backend-roadmap.md), and
+[Agent And UI Roadmap](docs/product/agent-and-ui-roadmap.md) for the underlying
+workstreams.
 
 ## Release Status
 

@@ -16,6 +16,7 @@ import (
 	"kube-insight/internal/mcp"
 	"kube-insight/internal/metrics"
 	"kube-insight/internal/storage/clickhouse"
+	webui "kube-insight/web"
 
 	"github.com/spf13/cobra"
 )
@@ -265,9 +266,7 @@ func serveWebUI(ctx context.Context, listen string) error {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writePlain(w, http.StatusOK, "ok\n")
 	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		writePlain(w, http.StatusNotImplemented, "kube-insight web UI is not implemented yet\n")
-	})
+	mux.Handle("GET /", webui.Handler())
 	server := &http.Server{
 		Addr:              listen,
 		Handler:           mux,

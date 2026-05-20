@@ -1,9 +1,11 @@
-.PHONY: test check-lines build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
+.PHONY: test check-lines web-deps web-build web-lint build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-ps open-source-check demo fmt tidy clean
 
 -include .env
 
 BIN ?= bin/kube-insight
-GO_TEST_PACKAGES ?= ./cmd/... ./internal/...
+GO_TEST_PACKAGES ?= ./cmd/... ./internal/... ./web
+WEB_DIR ?= web
+WEB_NODE_MODULES_STAMP ?= $(WEB_DIR)/node_modules/.package-lock.json
 CHDB_BIN ?= bin/kube-insight-chdb
 CHDB_VERSION ?= 3.7.2
 CHDB_LIB ?= /usr/local/lib/libchdb.so
@@ -26,24 +28,36 @@ CLICKHOUSE_DEV_SERVE_FLAGS ?= --api --metrics
 COMPOSE_DEV_LOCAL := $(wildcard compose.dev.local.yaml)
 COMPOSE_DEV_FILES := -f compose.dev.yaml $(if $(COMPOSE_DEV_LOCAL),-f $(COMPOSE_DEV_LOCAL))
 
-test: check-lines
+test: web-build check-lines
 	go test $(GO_TEST_PACKAGES)
 
 check-lines:
-	@overs="$$(wc -l $$(rg --files -g '*.go' cmd internal) | awk '$$1 > 800 && $$2 != "total" {print}')"; \
+	@overs="$$(wc -l $$(rg --files -g '*.go' cmd internal web) | awk '$$1 > 800 && $$2 != "total" {print}')"; \
 	if [ -n "$$overs" ]; then \
 		echo "Go files exceed 800 lines:"; \
 		echo "$$overs"; \
 		exit 1; \
 	fi
 
-build:
+$(WEB_NODE_MODULES_STAMP): $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
+	npm --prefix $(WEB_DIR) ci
+	touch $(WEB_NODE_MODULES_STAMP)
+
+web-deps: $(WEB_NODE_MODULES_STAMP)
+
+web-build: web-deps
+	npm --prefix $(WEB_DIR) run build
+
+web-lint: web-deps
+	npm --prefix $(WEB_DIR) run lint
+
+build: web-build
 	mkdir -p $(dir $(BIN))
 	go build -o $(BIN) ./cmd/kube-insight
 
 build-default: build
 
-build-chdb:
+build-chdb: web-build
 	mkdir -p $(dir $(CHDB_BIN))
 	go build -tags chdb -o $(CHDB_BIN) ./cmd/kube-insight
 
@@ -80,11 +94,11 @@ release-chdb-check: prepare-chdb-runtime
 	command -v goreleaser >/dev/null || (echo "goreleaser is required for release-chdb-check" >&2; exit 1)
 	goreleaser check --config .goreleaser.yaml
 
-validate:
+validate: web-build
 	go run ./cmd/kube-insight config validate --file $(CONFIG)
 	go run ./cmd/kube-insight dev validate poc --fixtures testdata/fixtures/kube --output testdata/generated/poc-validation --db testdata/generated/poc-validation/kube-insight.db --clusters 1 --copies 2 --query-runs 3
 
-chdb-build-check:
+chdb-build-check: web-build
 	go test -c -tags chdb ./internal/storage/chdb -o /tmp/kube-insight-chdb-store.test
 	go test -c -tags chdb ./internal/cli -o /tmp/kube-insight-chdb-cli.test
 	go build -tags chdb -o /tmp/kube-insight-chdb ./cmd/kube-insight

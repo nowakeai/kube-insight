@@ -78,7 +78,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add SSE client helper with reconnect and cancellation behavior.
 - [x] Add Zod schemas for run events and artifact payloads.
 - [x] Add build command that outputs `web/dist`.
-- [ ] Embed `web/dist` in the Go binary.
+- [x] Embed `web/dist` in the Go binary.
 
 ## Chat Experience
 
@@ -126,11 +126,11 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Validation
 
 - [ ] Run focused Go tests for API/session/agent packages.
-- [ ] Run frontend typecheck, lint, and build.
-- [ ] Run `make test`.
-- [ ] Run `make build`.
-- [ ] Run `git diff --check`.
-- [ ] Run the 800-line Go file check.
+- [x] Run frontend typecheck, lint, and build.
+- [x] Run `make test`.
+- [x] Run `make build`.
+- [x] Run `git diff --check`.
+- [x] Run the 800-line Go file check.
 - [ ] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
-- [ ] Verify the embedded binary serves the built React app.
+- [x] Verify the embedded binary serves the built React app.
 - [ ] Verify dashboard health calls work with and without metrics enabled.

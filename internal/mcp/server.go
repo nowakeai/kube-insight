@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,11 +9,11 @@ import (
 	"net/http"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
-
-const protocolVersion = "2025-06-18"
 
 type ServerOptions struct {
 	DBPath        string
@@ -36,35 +35,7 @@ type Server struct {
 	openStore           StoreOpener
 	closeStoreOnRequest bool
 	closeFunc           func() error
-}
-
-type rpcRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      json.RawMessage `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type rpcResponse struct {
-	JSONRPC string    `json:"jsonrpc"`
-	ID      any       `json:"id,omitempty"`
-	Result  any       `json:"result,omitempty"`
-	Error   *rpcError `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type toolCallParams struct {
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments"`
-}
-
-type promptGetParams struct {
-	Name      string            `json:"name"`
-	Arguments map[string]string `json:"arguments,omitempty"`
+	sdkServer           *sdkmcp.Server
 }
 
 type sqlArguments struct {
@@ -96,11 +67,6 @@ type historyArguments struct {
 	Diffs           *bool  `json:"diffs,omitempty"`
 }
 
-type toolContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
 func NewServer(opts ServerOptions) (*Server, error) {
 	openStore := opts.OpenStore
 	if openStore == nil {
@@ -113,13 +79,21 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if name == "" {
 		name = "kube-insight"
 	}
-	return &Server{
+	server := &Server{
 		dbPath:              opts.DBPath,
 		name:                name,
 		openStore:           openStore,
 		closeStoreOnRequest: !opts.KeepStoreOpen,
 		closeFunc:           opts.Close,
-	}, nil
+	}
+	server.sdkServer = sdkmcp.NewServer(&sdkmcp.Implementation{
+		Name:    name,
+		Version: "0.1.0-dev",
+	}, &sdkmcp.ServerOptions{
+		Capabilities: &sdkmcp.ServerCapabilities{},
+	})
+	server.registerSDKFeatures()
+	return server, nil
 }
 
 func sqliteStoreOpener(path string) StoreOpener {
@@ -148,28 +122,16 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 	defer server.Close()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "http"})
+		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "streamable-http+sse"})
 	})
-	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeHTTPJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-		response, ok, err := server.HandleJSONRPC(r.Context(), body)
-		if err != nil {
-			writeHTTPJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-			return
-		}
-		if !ok {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(response)
-	})
+	mux.Handle("/mcp", sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return server.sdkServer
+	}, &sdkmcp.StreamableHTTPOptions{
+		SessionTimeout: 30 * time.Minute,
+	}))
+	mux.Handle("/sse", sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
+		return server.sdkServer
+	}, nil))
 	httpServer := &http.Server{
 		Addr:              listen,
 		Handler:           mux,
@@ -200,48 +162,10 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	for scanner.Scan() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		response, ok, err := s.HandleJSONRPC(ctx, line)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			continue
-		}
-		if _, err := out.Write(response); err != nil {
-			return err
-		}
-		if _, err := out.Write([]byte("\n")); err != nil {
-			return err
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *Server) HandleJSONRPC(ctx context.Context, payload []byte) ([]byte, bool, error) {
-	response := s.handleLine(ctx, payload)
-	if response == nil {
-		return nil, false, nil
-	}
-	data, err := json.Marshal(response)
-	if err != nil {
-		return nil, false, err
-	}
-	return data, true, nil
+	return s.sdkServer.Run(ctx, &sdkmcp.IOTransport{
+		Reader: nopReadCloser{Reader: in},
+		Writer: nopWriteCloser{Writer: out},
+	})
 }
 
 func (s *Server) Close() error {
@@ -261,84 +185,45 @@ func (s *Server) closeReadStore(store ReadStore) {
 	}
 }
 
-func (s *Server) handleLine(ctx context.Context, line []byte) *rpcResponse {
-	var request rpcRequest
-	if err := json.Unmarshal(line, &request); err != nil {
-		return errorResponse(nil, -32700, "parse error")
+func (s *Server) registerSDKFeatures() {
+	for _, tool := range tools() {
+		current := tool
+		s.sdkServer.AddTool(&current, s.callTool)
 	}
-	if len(request.ID) == 0 {
-		return nil
-	}
-	id := rawID(request.ID)
-	if request.JSONRPC != "2.0" {
-		return errorResponse(id, -32600, "invalid JSON-RPC version")
-	}
-	switch request.Method {
-	case "initialize":
-		return resultResponse(id, map[string]any{
-			"protocolVersion": protocolVersion,
-			"capabilities": map[string]any{
-				"tools":   map[string]any{},
-				"prompts": map[string]any{},
-			},
-			"serverInfo": map[string]any{
-				"name":    s.name,
-				"version": "0.1.0-dev",
-			},
-		})
-	case "tools/list":
-		return resultResponse(id, map[string]any{"tools": tools()})
-	case "tools/call":
-		result, err := s.callTool(ctx, request.Params)
-		if err != nil {
-			return errorResponse(id, -32602, err.Error())
-		}
-		return resultResponse(id, result)
-	case "prompts/list":
-		return resultResponse(id, map[string]any{"prompts": prompts()})
-	case "prompts/get":
-		result, err := promptResult(request.Params)
-		if err != nil {
-			return errorResponse(id, -32602, err.Error())
-		}
-		return resultResponse(id, result)
-	default:
-		return errorResponse(id, -32601, "method not found")
+	for _, prompt := range prompts() {
+		current := prompt
+		s.sdkServer.AddPrompt(&current, promptResult)
 	}
 }
 
-func (s *Server) callTool(ctx context.Context, params json.RawMessage) (map[string]any, error) {
-	var input toolCallParams
-	if err := json.Unmarshal(params, &input); err != nil {
-		return nil, fmt.Errorf("invalid tool call params: %w", err)
-	}
-	switch input.Name {
+func (s *Server) callTool(ctx context.Context, request *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+	switch request.Params.Name {
 	case "kube_insight_schema":
 		value, err := s.querySchema(ctx)
 		return toolResult(value, err)
 	case "kube_insight_sql":
 		var args sqlArguments
-		if err := json.Unmarshal(input.Arguments, &args); err != nil {
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid sql arguments: %w", err)
 		}
 		value, err := s.querySQL(ctx, args)
 		return toolResult(value, err)
 	case "kube_insight_health":
 		var args healthArguments
-		if err := json.Unmarshal(input.Arguments, &args); err != nil {
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid health arguments: %w", err)
 		}
 		value, err := s.queryHealth(ctx, args)
 		return toolResult(value, err)
 	case "kube_insight_history":
 		var args historyArguments
-		if err := json.Unmarshal(input.Arguments, &args); err != nil {
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid history arguments: %w", err)
 		}
 		value, err := s.queryHistory(ctx, args)
 		return toolResult(value, err)
 	default:
-		return nil, fmt.Errorf("unknown tool %q", input.Name)
+		return nil, fmt.Errorf("unknown tool %q", request.Params.Name)
 	}
 }
 
@@ -444,12 +329,11 @@ func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, 
 	return historyStore.ObjectHistory(ctx, target, opts)
 }
 
-func toolResult(value any, err error) (map[string]any, error) {
+func toolResult(value any, err error) (*sdkmcp.CallToolResult, error) {
 	if err != nil {
-		return map[string]any{
-			"isError": true,
-			"content": []toolContent{{
-				Type: "text",
+		return &sdkmcp.CallToolResult{
+			IsError: true,
+			Content: []sdkmcp.Content{&sdkmcp.TextContent{
 				Text: err.Error(),
 			}},
 		}, nil
@@ -458,28 +342,27 @@ func toolResult(value any, err error) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"content": []toolContent{{
-			Type: "text",
+	return &sdkmcp.CallToolResult{
+		Content: []sdkmcp.Content{&sdkmcp.TextContent{
 			Text: string(data),
 		}},
 	}, nil
 }
 
-func tools() []map[string]any {
-	return []map[string]any{
+func tools() []sdkmcp.Tool {
+	return []sdkmcp.Tool{
 		{
-			"name":        "kube_insight_schema",
-			"description": "Return the active kube-insight backend schema, SQL dialect notes, tables, columns, indexes, and join hints. Call this before writing SQL because SQLite and ClickHouse table names differ.",
-			"inputSchema": map[string]any{
+			Name:        "kube_insight_schema",
+			Description: "Return the active kube-insight backend schema, SQL dialect notes, tables, columns, indexes, and join hints. Call this before writing SQL because SQLite and ClickHouse table names differ.",
+			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
 			},
 		},
 		{
-			"name":        "kube_insight_sql",
-			"description": "Run read-only SQL against the configured kube-insight evidence store. Use kube_insight_schema first and write SQL for the reported backend/dialect.",
-			"inputSchema": map[string]any{
+			Name:        "kube_insight_sql",
+			Description: "Run read-only SQL against the configured kube-insight evidence store. Use kube_insight_schema first and write SQL for the reported backend/dialect.",
+			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"sql": map[string]any{
@@ -495,9 +378,9 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "kube_insight_health",
-			"description": "Return collector coverage, staleness, and per-resource health.",
-			"inputSchema": map[string]any{
+			Name:        "kube_insight_health",
+			Description: "Return collector coverage, staleness, and per-resource health.",
+			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"cluster": map[string]any{"type": "string"},
@@ -524,9 +407,9 @@ func tools() []map[string]any {
 			},
 		},
 		{
-			"name":        "kube_insight_history",
-			"description": "Return one object's retained content versions, observation trail, and optional version diffs.",
-			"inputSchema": map[string]any{
+			Name:        "kube_insight_history",
+			Description: "Return one object's retained content versions, observation trail, and optional version diffs.",
+			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"cluster":         map[string]any{"type": "string"},
@@ -546,57 +429,50 @@ func tools() []map[string]any {
 	}
 }
 
-func prompts() []map[string]any {
-	return []map[string]any{
+func prompts() []sdkmcp.Prompt {
+	return []sdkmcp.Prompt{
 		{
-			"name":        "kube_insight_coverage_first",
-			"description": "Start an investigation by checking collector health and cluster scope.",
-			"arguments": []map[string]any{
-				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
-				{"name": "symptom", "description": "Short description of the incident or question.", "required": false},
+			Name:        "kube_insight_coverage_first",
+			Description: "Start an investigation by checking collector health and cluster scope.",
+			Arguments: []*sdkmcp.PromptArgument{
+				{Name: "cluster", Description: "Optional kube-insight cluster name.", Required: false},
+				{Name: "symptom", Description: "Short description of the incident or question.", Required: false},
 			},
 		},
 		{
-			"name":        "kube_insight_event_history",
-			"description": "Investigate retained Kubernetes Events and follow Event edges to affected resources.",
-			"arguments": []map[string]any{
-				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
-				{"name": "reason", "description": "Optional Event reason such as PolicyViolation or FailedScheduling.", "required": false},
-				{"name": "keyword", "description": "Optional lowercase keyword to search in message previews.", "required": false},
+			Name:        "kube_insight_event_history",
+			Description: "Investigate retained Kubernetes Events and follow Event edges to affected resources.",
+			Arguments: []*sdkmcp.PromptArgument{
+				{Name: "cluster", Description: "Optional kube-insight cluster name.", Required: false},
+				{Name: "reason", Description: "Optional Event reason such as PolicyViolation or FailedScheduling.", Required: false},
+				{Name: "keyword", Description: "Optional lowercase keyword to search in message previews.", Required: false},
 			},
 		},
 		{
-			"name":        "kube_insight_object_history",
-			"description": "Inspect one object's retained versions, observations, and diffs as proof.",
-			"arguments": []map[string]any{
-				{"name": "cluster", "description": "Optional kube-insight cluster name.", "required": false},
-				{"name": "kind", "description": "Kubernetes Kind.", "required": false},
-				{"name": "namespace", "description": "Namespace for namespaced resources.", "required": false},
-				{"name": "name", "description": "Object name.", "required": false},
-				{"name": "uid", "description": "Object UID when known.", "required": false},
+			Name:        "kube_insight_object_history",
+			Description: "Inspect one object's retained versions, observations, and diffs as proof.",
+			Arguments: []*sdkmcp.PromptArgument{
+				{Name: "cluster", Description: "Optional kube-insight cluster name.", Required: false},
+				{Name: "kind", Description: "Kubernetes Kind.", Required: false},
+				{Name: "namespace", Description: "Namespace for namespaced resources.", Required: false},
+				{Name: "name", Description: "Object name.", Required: false},
+				{Name: "uid", Description: "Object UID when known.", Required: false},
 			},
 		},
 	}
 }
 
-func promptResult(params json.RawMessage) (map[string]any, error) {
-	var input promptGetParams
-	if err := json.Unmarshal(params, &input); err != nil {
-		return nil, fmt.Errorf("invalid prompt params: %w", err)
-	}
-	text, description, err := promptText(input.Name, input.Arguments)
+func promptResult(_ context.Context, request *sdkmcp.GetPromptRequest) (*sdkmcp.GetPromptResult, error) {
+	text, description, err := promptText(request.Params.Name, request.Params.Arguments)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"description": description,
-		"messages": []map[string]any{
+	return &sdkmcp.GetPromptResult{
+		Description: description,
+		Messages: []*sdkmcp.PromptMessage{
 			{
-				"role": "user",
-				"content": map[string]any{
-					"type": "text",
-					"text": text,
-				},
+				Role:    "user",
+				Content: &sdkmcp.TextContent{Text: text},
 			},
 		},
 	}, nil
@@ -694,28 +570,31 @@ func parseHistoryTime(value string) (time.Time, error) {
 	return time.Parse("2006-01-02", value)
 }
 
-func resultResponse(id any, result any) *rpcResponse {
-	return &rpcResponse{JSONRPC: "2.0", ID: id, Result: result}
+func unmarshalToolArguments(raw json.RawMessage, target any) error {
+	if len(raw) == 0 {
+		raw = []byte("{}")
+	}
+	return json.Unmarshal(raw, target)
 }
 
-func errorResponse(id any, code int, message string) *rpcResponse {
-	return &rpcResponse{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error:   &rpcError{Code: code, Message: message},
-	}
+type nopReadCloser struct {
+	io.Reader
+}
+
+func (nopReadCloser) Close() error {
+	return nil
+}
+
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (nopWriteCloser) Close() error {
+	return nil
 }
 
 func writeHTTPJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
-}
-
-func rawID(raw json.RawMessage) any {
-	var id any
-	if err := json.Unmarshal(raw, &id); err != nil {
-		return nil
-	}
-	return id
 }

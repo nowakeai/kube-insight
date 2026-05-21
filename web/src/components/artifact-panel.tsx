@@ -7,6 +7,7 @@ import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact
 import { K8sTopologyArtifact } from "@/components/k8s-topology-artifact"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
+import { UnknownArtifact } from "@/components/unknown-artifact"
 import { type AgentArtifact, useAgentProjectionStore } from "@/lib/agent-store"
 
 export function ArtifactPanel({
@@ -81,11 +82,7 @@ function ArtifactBody({ artifact }: { artifact: AgentArtifact }) {
   if (artifact.kind === "k8s.diff") {
     return <K8sDiffArtifact data={artifact.data} />
   }
-  return (
-    <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-center text-sm text-muted-foreground">
-      Renderer for {artifact.kind} is not implemented yet.
-    </div>
-  )
+  return <UnknownArtifact kind={artifact.kind} data={artifact.data} />
 }
 
 function markdownArtifactText(data: unknown) {

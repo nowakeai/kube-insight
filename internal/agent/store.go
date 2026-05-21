@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -20,6 +21,7 @@ type Store interface {
 	GetSession(context.Context, string) (Session, error)
 	CreateRun(context.Context, string, CreateRunInput) (Run, error)
 	GetRun(context.Context, string) (Run, error)
+	ListRuns(context.Context, ListRunsOptions) (RunList, error)
 	UpdateRunStatus(context.Context, string, RunStatus, string) (Run, error)
 	AppendRunEvent(context.Context, string, AppendEventInput) (RunEvent, error)
 	ListRunEvents(context.Context, string) ([]RunEvent, error)
@@ -117,6 +119,28 @@ func (s *MemoryStore) GetRun(ctx context.Context, id string) (Run, error) {
 		return Run{}, ErrRunNotFound
 	}
 	return cloneRun(run), nil
+}
+
+func (s *MemoryStore) ListRuns(ctx context.Context, opts ListRunsOptions) (RunList, error) {
+	if err := ctx.Err(); err != nil {
+		return RunList{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runs := make([]Run, 0, len(s.runs))
+	summary := RunSummary{}
+	for _, run := range s.runs {
+		summarizeRunStatus(&summary, run.Status)
+		if opts.Status != "" && run.Status != opts.Status {
+			continue
+		}
+		runs = append(runs, run)
+	}
+	sortRunsNewestFirst(runs)
+	if opts.Limit > 0 && len(runs) > opts.Limit {
+		runs = runs[:opts.Limit]
+	}
+	return RunList{Summary: summary, Runs: cloneRuns(runs)}, nil
 }
 
 func (s *MemoryStore) UpdateRunStatus(ctx context.Context, id string, status RunStatus, message string) (Run, error) {
@@ -250,4 +274,29 @@ func cloneRaw(in []byte) []byte {
 		return nil
 	}
 	return append([]byte(nil), in...)
+}
+
+func summarizeRunStatus(summary *RunSummary, status RunStatus) {
+	summary.Total++
+	switch status {
+	case RunQueued:
+		summary.Queued++
+	case RunRunning:
+		summary.Running++
+	case RunCompleted:
+		summary.Completed++
+	case RunFailed:
+		summary.Failed++
+	case RunCancelled:
+		summary.Cancelled++
+	}
+}
+
+func sortRunsNewestFirst(runs []Run) {
+	sort.SliceStable(runs, func(i, j int) bool {
+		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].ID > runs[j].ID
+		}
+		return runs[i].CreatedAt.After(runs[j].CreatedAt)
+	})
 }

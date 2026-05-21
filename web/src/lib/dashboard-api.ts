@@ -8,6 +8,7 @@ export const dashboardQueryKeys = {
   resourceHealth: () => [...dashboardQueryKeys.all, "resource-health"] as const,
   schema: () => [...dashboardQueryKeys.all, "schema"] as const,
   serverInfo: () => [...dashboardQueryKeys.all, "server-info"] as const,
+  agentRuns: () => [...dashboardQueryKeys.all, "agent-runs"] as const,
   metrics: () => [...dashboardQueryKeys.all, "metrics"] as const,
 }
 
@@ -56,6 +57,20 @@ const resourceHealthReportSchema = z.object({
   resources: z.array(resourceHealthRecordSchema).optional().default([]),
 }).passthrough()
 
+const agentRunSummarySchema = z.object({
+  queued: z.number().optional().default(0),
+  running: z.number().optional().default(0),
+  completed: z.number().optional().default(0),
+  failed: z.number().optional().default(0),
+  cancelled: z.number().optional().default(0),
+  total: z.number().optional().default(0),
+}).passthrough()
+
+const agentRunListSchema = z.object({
+  summary: agentRunSummarySchema,
+  runs: z.array(z.unknown()).optional().default([]),
+}).passthrough()
+
 const serverComponentInfoSchema = z.object({
   enabled: z.boolean(),
   listen: z.string().optional(),
@@ -82,6 +97,8 @@ export type HealthzDTO = z.infer<typeof healthzSchema>
 export type ResourceHealthReportDTO = z.infer<typeof resourceHealthReportSchema>
 export type ResourceHealthRecordDTO = z.infer<typeof resourceHealthRecordSchema>
 export type ServerInfoDTO = z.infer<typeof serverInfoSchema>
+export type AgentRunSummaryDTO = z.infer<typeof agentRunSummarySchema>
+export type AgentRunListDTO = z.infer<typeof agentRunListSchema>
 
 export type MetricsProbeDTO = {
   ok: boolean
@@ -107,6 +124,10 @@ export function getSchema(options?: AgentAPIOptions) {
 
 export function getServerInfo(options?: AgentAPIOptions) {
   return agentRequestJSON<ServerInfoDTO>("/api/v1/server/info", options, (value) => serverInfoSchema.parse(value))
+}
+
+export function getAgentRunList(options?: AgentAPIOptions) {
+  return agentRequestJSON<AgentRunListDTO>("/api/v1/agent/runs?limit=20", options, (value) => agentRunListSchema.parse(value))
 }
 
 export async function getMetricsProbe(options?: AgentAPIOptions): Promise<MetricsProbeDTO> {

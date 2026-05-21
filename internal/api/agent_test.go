@@ -46,7 +46,14 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 		t.Fatalf("run = %#v", run)
 	}
 
-	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events", http.StatusOK)
+	body := getBody(t, server.URL+"/api/v1/agent/runs?limit=5", http.StatusOK)
+	for _, want := range []string{`"queued": 1`, `"total": 1`, `"runs": [`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("run list missing %q: %s", want, body)
+		}
+	}
+
+	body = getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events", http.StatusOK)
 	for _, want := range []string{"event: run.created", `"sequence":1`, `"type":"run.created"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events missing %q: %s", want, body)
@@ -106,6 +113,8 @@ func TestAgentEndpointsValidateInputAndMissingIDs(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
+	getBody(t, server.URL+"/api/v1/agent/runs?status=bogus", http.StatusBadRequest)
+	getBody(t, server.URL+"/api/v1/agent/runs?limit=-1", http.StatusBadRequest)
 	assertPOSTStatus(t, server.URL+"/api/v1/agent/sessions/missing/runs", `{"input":"test"}`, http.StatusNotFound)
 	assertPOSTStatus(t, server.URL+"/api/v1/agent/sessions", `{`, http.StatusBadRequest)
 

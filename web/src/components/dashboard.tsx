@@ -5,6 +5,7 @@ import { Activity, ArrowLeft, Database, ExternalLink, Gauge, HardDrive, Radio, R
 import { Button } from "@/components/ui/button"
 import {
   dashboardQueryKeys,
+  getAgentRunList,
   getHealthz,
   getMetricsProbe,
   getResourceHealth,
@@ -12,6 +13,7 @@ import {
   getServerInfo,
   type ResourceHealthRecordDTO,
   type ResourceHealthReportDTO,
+  type AgentRunSummaryDTO,
   type ServerInfoDTO,
 } from "@/lib/dashboard-api"
 import { useAgentProjectionStore, type AgentRunStatus } from "@/lib/agent-store"
@@ -40,6 +42,11 @@ export function Dashboard() {
     queryFn: ({ signal }) => getServerInfo({ signal }),
     refetchInterval: refreshMs,
   })
+  const agentRuns = useQuery({
+    queryKey: dashboardQueryKeys.agentRuns(),
+    queryFn: ({ signal }) => getAgentRunList({ signal }),
+    refetchInterval: refreshMs,
+  })
   const metrics = useQuery({
     queryKey: dashboardQueryKeys.metrics(),
     queryFn: ({ signal }) => getMetricsProbe({ signal }),
@@ -47,6 +54,8 @@ export function Dashboard() {
   })
   const runsById = useAgentProjectionStore((state) => state.runs)
   const runCounts = useMemo(() => countRuns(Object.values(runsById)), [runsById])
+  const displayRunSummary = runSummary(agentRuns.data?.summary, runCounts)
+  const activeRuns = displayRunSummary.running + displayRunSummary.queued
   const health = resourceHealth.data
   const info = serverInfo.data
   const summary = health?.summary
@@ -66,7 +75,7 @@ export function Dashboard() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), schema.refetch(), serverInfo.refetch(), metrics.refetch()])}>
+            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), schema.refetch(), serverInfo.refetch(), agentRuns.refetch(), metrics.refetch()])}>
               <RotateCw className="size-3.5" aria-hidden="true" />
               Refresh
             </Button>
@@ -139,12 +148,12 @@ export function Dashboard() {
           </div>
 
           <aside className="space-y-4">
-            <Panel title="Agent runs" description="Current browser projection until server run listing is exposed.">
+            <Panel title="Agent runs" description={agentRuns.data ? "Server-persisted run summary" : "Browser projection until server run summary is reachable."}>
               <div className="grid grid-cols-2 gap-3">
-                <Metric label="Active" value={String(runCounts.running + runCounts.queued)} tone={runCounts.running + runCounts.queued > 0 ? "good" : "neutral"} />
-                <Metric label="Completed" value={String(runCounts.completed)} />
-                <Metric label="Failed" value={String(runCounts.failed)} tone={runCounts.failed > 0 ? "bad" : "neutral"} />
-                <Metric label="Cancelled" value={String(runCounts.cancelled)} />
+                <Metric label="Active" value={String(activeRuns)} tone={activeRuns > 0 ? "good" : "neutral"} />
+                <Metric label="Completed" value={String(displayRunSummary.completed)} />
+                <Metric label="Failed" value={String(displayRunSummary.failed)} tone={displayRunSummary.failed > 0 ? "bad" : "neutral"} />
+                <Metric label="Cancelled" value={String(displayRunSummary.cancelled)} />
               </div>
             </Panel>
 
@@ -291,11 +300,16 @@ function ResourceTable({
   )
 }
 
-function countRuns(runs: Array<{ status: AgentRunStatus }>) {
-  return runs.reduce<Record<AgentRunStatus, number>>((counts, run) => {
+function countRuns(runs: Array<{ status: AgentRunStatus }>): AgentRunSummaryDTO {
+  return runs.reduce<AgentRunSummaryDTO>((counts, run) => {
     counts[run.status] += 1
+    counts.total += 1
     return counts
-  }, { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 })
+  }, { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0, total: 0 })
+}
+
+function runSummary(server: AgentRunSummaryDTO | undefined, fallback: AgentRunSummaryDTO): AgentRunSummaryDTO {
+  return server ?? fallback
 }
 
 function queryDetail(isPending: boolean, isError: boolean) {

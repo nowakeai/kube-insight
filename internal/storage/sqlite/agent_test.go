@@ -60,6 +60,13 @@ func TestAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	if len(events) != 2 || events[0].Sequence != 1 || events[1].Sequence != 2 || events[1].Type != agent.EventMessageDelta {
 		t.Fatalf("events after reopen = %#v", events)
 	}
+	listed, err := reopened.ListRuns(ctx, agent.ListRunsOptions{Status: agent.RunRunning, Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Summary.Total != 1 || listed.Summary.Running != 1 || len(listed.Runs) != 1 || listed.Runs[0].ID != run.ID {
+		t.Fatalf("listed runs = %#v", listed)
+	}
 }
 
 func TestAgentStoreMissingRecordsUseAgentErrors(t *testing.T) {

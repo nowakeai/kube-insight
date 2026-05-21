@@ -103,6 +103,79 @@ where id = ?`, id)
 	return run, err
 }
 
+func (s *Store) ListRuns(ctx context.Context, opts agent.ListRunsOptions) (agent.RunList, error) {
+	summary, err := s.runSummary(ctx)
+	if err != nil {
+		return agent.RunList{}, err
+	}
+	query := `
+select id, session_id, status, input, provider, model, created_at, started_at, completed_at, error, metadata
+from agent_runs`
+	args := []any{}
+	if opts.Status != "" {
+		query += `
+where status = ?`
+		args = append(args, opts.Status)
+	}
+	query += `
+order by created_at desc, id desc`
+	if opts.Limit > 0 {
+		query += `
+limit ?`
+		args = append(args, opts.Limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return agent.RunList{}, err
+	}
+	defer rows.Close()
+	runs := []agent.Run{}
+	for rows.Next() {
+		run, err := scanAgentRun(rows)
+		if err != nil {
+			return agent.RunList{}, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return agent.RunList{}, err
+	}
+	return agent.RunList{Summary: summary, Runs: runs}, nil
+}
+
+func (s *Store) runSummary(ctx context.Context) (agent.RunSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+select status, count(*)
+from agent_runs
+group by status`)
+	if err != nil {
+		return agent.RunSummary{}, err
+	}
+	defer rows.Close()
+	summary := agent.RunSummary{}
+	for rows.Next() {
+		var status agent.RunStatus
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return agent.RunSummary{}, err
+		}
+		summary.Total += count
+		switch status {
+		case agent.RunQueued:
+			summary.Queued = count
+		case agent.RunRunning:
+			summary.Running = count
+		case agent.RunCompleted:
+			summary.Completed = count
+		case agent.RunFailed:
+			summary.Failed = count
+		case agent.RunCancelled:
+			summary.Cancelled = count
+		}
+	}
+	return summary, rows.Err()
+}
+
 func (s *Store) UpdateRunStatus(ctx context.Context, id string, status agent.RunStatus, message string) (agent.Run, error) {
 	now := time.Now().UTC()
 	run, err := s.GetRun(ctx, id)

@@ -85,6 +85,54 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreListRunsSummaryAndFilters(t *testing.T) {
+	store := NewMemoryStore()
+	current := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return current }
+	session, err := store.CreateSession(context.Background(), CreateSessionInput{Title: "runs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateRun(context.Background(), session.ID, CreateRunInput{Input: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(context.Background(), first.ID, RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(time.Second)
+	second, err := store.CreateRun(context.Background(), session.ID, CreateRunInput{Input: "second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(context.Background(), second.ID, RunRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	current = current.Add(time.Second)
+	third, err := store.CreateRun(context.Background(), session.ID, CreateRunInput{Input: "third"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := store.ListRuns(context.Background(), ListRunsOptions{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Summary.Total != 3 || listed.Summary.Completed != 1 || listed.Summary.Running != 1 || listed.Summary.Queued != 1 {
+		t.Fatalf("summary = %#v", listed.Summary)
+	}
+	if len(listed.Runs) != 2 || listed.Runs[0].ID != third.ID || listed.Runs[1].ID != second.ID {
+		t.Fatalf("runs = %#v", listed.Runs)
+	}
+	running, err := store.ListRuns(context.Background(), ListRunsOptions{Status: RunRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(running.Runs) != 1 || running.Runs[0].ID != second.ID || running.Summary.Total != 3 {
+		t.Fatalf("running list = %#v", running)
+	}
+}
+
 func TestMemoryStoreNotFound(t *testing.T) {
 	store := NewMemoryStore()
 	_, err := store.GetSession(context.Background(), "missing")

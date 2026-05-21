@@ -108,13 +108,16 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Show API/Web UI/MCP/metrics/watcher component status where available.
 - [x] Show storage driver and backend target.
 - [x] Show collector coverage summary from `/api/v1/health`.
-- [x] Show active/completed/failed/cancelled agent run counts after runs exist.
+- [x] Show active/completed/failed/cancelled agent run counts from server-backed
+  run summary, with browser projection fallback.
 - [x] Show provider/model configuration without exposing secrets.
 - [x] Link to `/healthz`, `/api/v1/health`, `/api/v1/schema`, and `/metrics` when
   available.
 - [x] Use TanStack Query polling with conservative refresh intervals.
 - [x] Add `/api/v1/server/info` for secret-safe runtime configuration used by
   the dashboard.
+- [x] Add GET `/api/v1/agent/runs` with status filtering, limits, and run
+  summary counts for the dashboard.
 
 ## Persistence And Hardening
 

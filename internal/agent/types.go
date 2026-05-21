@@ -84,3 +84,22 @@ type AppendEventInput struct {
 	Type RunEventType
 	Data json.RawMessage
 }
+
+type ListRunsOptions struct {
+	Status RunStatus
+	Limit  int
+}
+
+type RunList struct {
+	Summary RunSummary `json:"summary"`
+	Runs    []Run      `json:"runs"`
+}
+
+type RunSummary struct {
+	Queued    int `json:"queued"`
+	Running   int `json:"running"`
+	Completed int `json:"completed"`
+	Failed    int `json:"failed"`
+	Cancelled int `json:"cancelled"`
+	Total     int `json:"total"`
+}

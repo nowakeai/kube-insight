@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"kube-insight/internal/agent"
 )
@@ -83,6 +84,52 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, run)
+}
+
+func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
+	opts, err := parseListAgentRunsOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	runs, err := s.agentStore.ListRuns(r.Context(), opts)
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runs)
+}
+
+func parseListAgentRunsOptions(r *http.Request) (agent.ListRunsOptions, error) {
+	query := r.URL.Query()
+	opts := agent.ListRunsOptions{Limit: 50}
+	if status := query.Get("status"); status != "" {
+		runStatus := agent.RunStatus(status)
+		if !validRunStatus(runStatus) {
+			return agent.ListRunsOptions{}, fmt.Errorf("unsupported status %q", status)
+		}
+		opts.Status = runStatus
+	}
+	if rawLimit := query.Get("limit"); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 0 {
+			return agent.ListRunsOptions{}, fmt.Errorf("limit must be a non-negative integer")
+		}
+		opts.Limit = limit
+	}
+	if opts.Limit > 200 {
+		opts.Limit = 200
+	}
+	return opts, nil
+}
+
+func validRunStatus(status agent.RunStatus) bool {
+	switch status {
+	case agent.RunQueued, agent.RunRunning, agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {

@@ -108,16 +108,21 @@ export function AgentChat() {
     })
 
     const answer = demoAgentAnswer(prompt)
-    const artifactID = upsertArtifact(runID, {
+    const markdownArtifactID = upsertArtifact(runID, {
       kind: "markdown",
       title: "Demo answer",
       data: { markdown: answer },
     })
+    const resourceArtifactID = upsertArtifact(runID, {
+      kind: "k8s.resource",
+      title: "Pod default/api-0",
+      data: demoK8sResourceArtifact(prompt),
+    })
     addCitation(runID, {
       id: "citation_demo_runtime",
-      artifactId: artifactID,
+      artifactId: resourceArtifactID,
       text: "Demo runtime",
-      target: { kind: "artifact", id: artifactID },
+      target: { kind: "artifact", id: resourceArtifactID, relatedArtifactId: markdownArtifactID },
     })
     appendRunEvent(runID, { type: "message.created", data: { role: "assistant", content: answer } })
     completeRun(runID, answer)
@@ -557,6 +562,59 @@ function demoAgentAnswer(question: string) {
     "- Demo runtime: [citation: demo runtime](#citation:citation_demo_runtime).",
     "- Renderer: [react-markdown](https://github.com/remarkjs/react-markdown) with GFM enabled.",
   ].join("\n")
+}
+
+function demoK8sResourceArtifact(question: string) {
+  return {
+    identity: {
+      cluster: "local-demo",
+      apiVersion: "v1",
+      kind: "Pod",
+      namespace: "default",
+      name: "api-0",
+      uid: "demo-pod-api-0",
+      resourceVersion: "48291",
+    },
+    status: {
+      phase: "Running",
+      ready: "True",
+      reason: "ContainersReady",
+      message: "Demo projection rendered from local UI state.",
+    },
+    summary: [
+      `Question: ${question}`,
+      "Pod api-0 is running and all demo containers are ready.",
+      "This renderer accepts typed identity, status, labels, annotations, conditions, and retained object proof.",
+    ],
+    labels: {
+      app: "api",
+      "pod-template-hash": "demo",
+      "kube-insight.io/source": "demo",
+    },
+    annotations: {
+      "kube-insight.io/artifact-kind": "k8s.resource",
+      "kube-insight.io/proof": "retained-object",
+    },
+    object: {
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: {
+        namespace: "default",
+        name: "api-0",
+        uid: "demo-pod-api-0",
+        resourceVersion: "48291",
+        labels: { app: "api", "pod-template-hash": "demo" },
+      },
+      status: {
+        phase: "Running",
+        podIP: "10.42.0.18",
+        conditions: [
+          { type: "PodScheduled", status: "True", reason: "Scheduler", message: "Assigned to demo-node-1" },
+          { type: "Ready", status: "True", reason: "ContainersReady", message: "All containers are ready" },
+        ],
+      },
+    },
+  }
 }
 
 function newMessageID(prefix: string) {

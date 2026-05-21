@@ -93,7 +93,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Artifact Renderers
 
 - [x] Implement `markdown` artifact renderer.
-- [ ] Implement `k8s.resource` renderer.
+- [x] Implement `k8s.resource` renderer.
 - [ ] Implement `k8s.resource_list` renderer.
 - [ ] Implement `k8s.topology` renderer with React Flow.
 - [ ] Implement `k8s.history` renderer with version/history travel controls.

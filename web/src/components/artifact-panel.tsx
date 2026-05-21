@@ -1,5 +1,6 @@
 import { FileText } from "lucide-react"
 
+import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import { type AgentArtifact, useAgentProjectionStore } from "@/lib/agent-store"
@@ -60,6 +61,9 @@ export function ArtifactPanel({
 function ArtifactBody({ artifact }: { artifact: AgentArtifact }) {
   if (artifact.kind === "markdown") {
     return <MarkdownContent text={markdownArtifactText(artifact.data)} />
+  }
+  if (artifact.kind === "k8s.resource") {
+    return <K8sResourceArtifact data={artifact.data} />
   }
   return (
     <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-center text-sm text-muted-foreground">

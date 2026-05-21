@@ -1,5 +1,7 @@
 import { create } from "zustand"
 
+import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+
 export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled"
 
 export type AgentArtifactKind =
@@ -92,6 +94,9 @@ type AgentProjectionState = {
   citations: Record<string, AgentCitation>
   ensureSession: (title: string) => string
   startRun: (sessionId: string, input: string) => string
+  upsertServerSession: (session: AgentSessionDTO) => void
+  upsertServerRun: (run: AgentRunDTO) => void
+  applyServerEvent: (event: AgentRunEventDTO) => void
   appendRunEvent: (runId: string, input: AddRunEventInput) => string
   completeRun: (runId: string, finalAnswer: string) => void
   failRun: (runId: string, error: string) => void
@@ -177,6 +182,122 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     }))
     get().appendRunEvent(id, { type: "run.started", data: { input } })
     return id
+  },
+
+  upsertServerSession: (session) => {
+    set((current) => {
+      const previous = current.sessions[session.id]
+      const runIds = uniqueValues([
+        ...(previous?.runIds ?? []),
+        ...(session.runs ?? []).map((run) => run.id),
+      ])
+      return {
+        activeSessionId: session.id,
+        sessionOrder: uniquePrepend(current.sessionOrder, session.id),
+        sessions: {
+          ...current.sessions,
+          [session.id]: {
+            id: session.id,
+            title: session.title || previous?.title || "New investigation",
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            runIds,
+          },
+        },
+      }
+    })
+    for (const run of session.runs ?? []) get().upsertServerRun(run)
+  },
+
+  upsertServerRun: (run) => {
+    const now = nowISO()
+    set((current) => {
+      const previous = current.runs[run.id]
+      const session = current.sessions[run.sessionId] ?? {
+        id: run.sessionId,
+        title: "Server session",
+        createdAt: run.createdAt,
+        updatedAt: run.createdAt,
+        runIds: [],
+      }
+      return {
+        activeSessionId: run.sessionId,
+        sessionOrder: uniquePrepend(current.sessionOrder, run.sessionId),
+        sessions: {
+          ...current.sessions,
+          [run.sessionId]: {
+            ...session,
+            updatedAt: run.completedAt ?? run.startedAt ?? run.createdAt,
+            runIds: uniqueAppend(session.runIds, run.id),
+          },
+        },
+        runs: {
+          ...current.runs,
+          [run.id]: {
+            id: run.id,
+            sessionId: run.sessionId,
+            status: run.status,
+            input: run.input,
+            error: run.error,
+            createdAt: run.createdAt,
+            updatedAt: run.completedAt ?? run.startedAt ?? now,
+            finalAnswer: previous?.finalAnswer,
+            eventIds: previous?.eventIds ?? [],
+            artifactIds: previous?.artifactIds ?? [],
+            citationIds: previous?.citationIds ?? [],
+          },
+        },
+      }
+    })
+  },
+
+  applyServerEvent: (event) => {
+    set((current) => {
+      if (current.events[event.id]) return current
+      const previousRun = current.runs[event.runId]
+      const status = runStatusFromEvent(event) ?? previousRun?.status ?? "running"
+      const finalAnswer = finalAnswerFromEvent(event) ?? previousRun?.finalAnswer
+      const run: AgentRun = previousRun ?? {
+        id: event.runId,
+        sessionId: runSessionFromEvent(event) ?? "server",
+        status,
+        input: "",
+        createdAt: event.createdAt,
+        updatedAt: event.createdAt,
+        eventIds: [],
+        artifactIds: [],
+        citationIds: [],
+      }
+      const artifact = artifactFromEvent(event)
+      const citation = citationFromEvent(event)
+      return {
+        events: {
+          ...current.events,
+          [event.id]: {
+            id: event.id,
+            runId: event.runId,
+            type: event.type,
+            createdAt: event.createdAt,
+            data: event.data,
+          },
+        },
+        runs: {
+          ...current.runs,
+          [event.runId]: {
+            ...run,
+            status,
+            error: errorFromEvent(event) ?? run.error,
+            finalAnswer,
+            updatedAt: event.createdAt,
+            eventIds: uniqueAppend(run.eventIds, event.id),
+            artifactIds: artifact ? uniqueAppend(run.artifactIds, artifact.id) : run.artifactIds,
+            citationIds: citation ? uniqueAppend(run.citationIds, citation.id) : run.citationIds,
+          },
+        },
+        artifacts: artifact ? { ...current.artifacts, [artifact.id]: artifact } : current.artifacts,
+        citations: citation ? { ...current.citations, [citation.id]: citation } : current.citations,
+      }
+    })
   },
 
   appendRunEvent: (runId, input) => {
@@ -320,4 +441,77 @@ function nowISO() {
 function newProjectionId(prefix: string) {
   if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values))
+}
+
+function uniquePrepend(values: string[], value: string) {
+  return [value, ...values.filter((item) => item !== value)]
+}
+
+function runStatusFromEvent(event: AgentRunEventDTO): AgentRunStatus | undefined {
+  if (!event.type.startsWith("run.")) return undefined
+  const status = eventDataRecord(event.data).status
+  return isRunStatus(status) ? status : undefined
+}
+
+function runSessionFromEvent(event: AgentRunEventDTO) {
+  const sessionId = eventDataRecord(event.data).sessionId
+  return typeof sessionId === "string" ? sessionId : undefined
+}
+
+function errorFromEvent(event: AgentRunEventDTO) {
+  const data = eventDataRecord(event.data)
+  if (typeof data.error === "string") return data.error
+  if (typeof data.message === "string" && event.type === "error") return data.message
+  return undefined
+}
+
+function finalAnswerFromEvent(event: AgentRunEventDTO) {
+  if (event.type !== "answer.final" && event.type !== "run.completed") return undefined
+  const data = eventDataRecord(event.data)
+  if (typeof data.content === "string") return data.content
+  if (typeof data.finalAnswer === "string") return data.finalAnswer
+  return undefined
+}
+
+function artifactFromEvent(event: AgentRunEventDTO): AgentArtifact | undefined {
+  if (event.type !== "artifact.created" && event.type !== "artifact.updated") return undefined
+  const data = eventDataRecord(event.data)
+  const value = eventDataRecord(data.artifact ?? data)
+  if (typeof value.id !== "string" || typeof value.kind !== "string") return undefined
+  return {
+    id: value.id,
+    runId: event.runId,
+    kind: value.kind as AgentArtifactKind,
+    title: typeof value.title === "string" ? value.title : undefined,
+    data: value.data,
+    createdAt: event.createdAt,
+    updatedAt: event.createdAt,
+  }
+}
+
+function citationFromEvent(event: AgentRunEventDTO): AgentCitation | undefined {
+  if (event.type !== "citation.created") return undefined
+  const data = eventDataRecord(event.data)
+  const value = eventDataRecord(data.citation ?? data)
+  if (typeof value.id !== "string") return undefined
+  return {
+    id: value.id,
+    runId: event.runId,
+    artifactId: typeof value.artifactId === "string" ? value.artifactId : undefined,
+    text: typeof value.text === "string" ? value.text : undefined,
+    target: value.target,
+    createdAt: event.createdAt,
+  }
+}
+
+function eventDataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {}
+}
+
+function isRunStatus(value: unknown): value is AgentRunStatus {
+  return value === "queued" || value === "running" || value === "completed" || value === "failed" || value === "cancelled"
 }

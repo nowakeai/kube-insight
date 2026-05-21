@@ -84,6 +84,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Chat Experience
 
 - [x] Implement search-style chat home page.
+- [x] Chat composer submits to server sessions/runs first and replays SSE run
+  events, with local demo fallback when the API origin is unavailable.
 - [x] Implement run page with chat thread and composer.
 - [x] Implement stop, retry, continue, and new session controls.
 - [x] Implement tool timeline with input summary, output summary, status, duration,
@@ -122,6 +124,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Persistence And Hardening
 
 - [x] Add SQLite persistence for sessions, runs, and run events.
+- [ ] Connect API-created runs to the Eino agent runner.
+  - Frontend is server-first now; backend agent execution is still not wired
+    into `POST /api/v1/agent/sessions/{session_id}/runs`.
 - [ ] Add cancellation propagation from API to Eino run context.
 - [ ] Add retry semantics for failed runs.
 - [ ] Add structured audit records for agent tool calls.

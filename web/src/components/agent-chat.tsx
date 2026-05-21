@@ -8,13 +8,16 @@ import {
   type ThreadMessage,
 } from "@assistant-ui/react"
 import { ArrowUp, Bot, CircleStop, ExternalLink, LayoutDashboard, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ArtifactPanel } from "@/components/artifact-panel"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
+import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession } from "@/lib/agent-api"
+import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentRunEvent } from "@/lib/agent-store"
+import type { AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 const starterPrompts = [
   "Is the API service healthy right now?",
@@ -29,12 +32,17 @@ export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [routeRun, setRouteRun] = useState(readRouteRun)
+  const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
+  const activeServerRunRef = useRef<string | undefined>(undefined)
   const activeRunCount = useAgentProjectionStore((state) => {
     if (!state.activeSessionId) return 0
     return state.sessions[state.activeSessionId]?.runIds.length ?? 0
   })
   const ensureSession = useAgentProjectionStore((state) => state.ensureSession)
   const startRun = useAgentProjectionStore((state) => state.startRun)
+  const upsertServerSession = useAgentProjectionStore((state) => state.upsertServerSession)
+  const upsertServerRun = useAgentProjectionStore((state) => state.upsertServerRun)
+  const applyServerEvent = useAgentProjectionStore((state) => state.applyServerEvent)
   const appendRunEvent = useAgentProjectionStore((state) => state.appendRunEvent)
   const completeRun = useAgentProjectionStore((state) => state.completeRun)
   const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
@@ -69,92 +77,32 @@ export function AgentChat() {
   const runPrompt = useCallback(async (text: string) => {
     const prompt = text.trim()
     if (!prompt) return
-
-    const sessionID = ensureSession(prompt)
-    const runID = startRun(sessionID, prompt)
-    openRunPage(sessionID, runID)
-    setRouteRun({ sessionID, runID })
-    appendRunEvent(runID, { type: "message.created", data: { role: "user", content: prompt } })
-
-    const assistantID = newMessageID("assistant")
-    setIsRunning(true)
-    setMessages((current) => [
-      ...current,
-      userMessage(prompt),
-      assistantMessage(assistantID, "", "running"),
-    ])
-
-    const toolCallID = newMessageID("tool")
-    appendRunEvent(runID, {
-      type: "tool.started",
-      data: {
-        toolCallId: toolCallID,
-        name: "kube_insight_demo_search",
-        status: "started",
-        input: { query: prompt },
-      },
-    })
-
-    await delay(350)
-
-    appendRunEvent(runID, {
-      type: "tool.completed",
-      data: {
-        toolCallId: toolCallID,
-        name: "kube_insight_demo_search",
-        status: "completed",
-        output: { summary: "Demo evidence projection created" },
-        durationMs: 350,
-      },
-    })
-
-    const answer = demoAgentAnswer(prompt)
-    const markdownArtifactID = upsertArtifact(runID, {
-      kind: "markdown",
-      title: "Demo answer",
-      data: { markdown: answer },
-    })
-    const resourceArtifactID = upsertArtifact(runID, {
-      kind: "k8s.resource",
-      title: "Pod default/api-0",
-      data: demoK8sResourceArtifact(prompt),
-    })
-    upsertArtifact(runID, {
-      kind: "k8s.resource_list",
-      title: "Demo resource candidates",
-      data: demoK8sResourceListArtifact(prompt),
-    })
-    upsertArtifact(runID, {
-      kind: "k8s.topology",
-      title: "Service default/api topology",
-      data: demoK8sTopologyArtifact(prompt),
-    })
-    upsertArtifact(runID, {
-      kind: "k8s.history",
-      title: "Pod default/api-0 history",
-      data: demoK8sHistoryArtifact(prompt),
-    })
-    upsertArtifact(runID, {
-      kind: "k8s.diff",
-      title: "Pod default/api-0 diff",
-      data: demoK8sDiffArtifact(),
-    })
-    addCitation(runID, {
-      id: "citation_demo_runtime",
-      artifactId: resourceArtifactID,
-      text: "Demo runtime",
-      target: { kind: "artifact", id: resourceArtifactID, relatedArtifactId: markdownArtifactID },
-    })
-    appendRunEvent(runID, { type: "message.created", data: { role: "assistant", content: answer } })
-    completeRun(runID, answer)
-
-    setMessages((current) =>
-      current.map((item) =>
-        item.id === assistantID ? assistantMessage(assistantID, answer, "complete") : item,
-      ),
-    )
-    setIsRunning(false)
-  }, [addCitation, appendRunEvent, completeRun, ensureSession, startRun, upsertArtifact])
+    try {
+      await runServerPrompt(prompt, {
+        activeSessionId: useAgentProjectionStore.getState().activeSessionId,
+        applyServerEvent,
+        eventSubscriptionRef,
+        activeServerRunRef,
+        setIsRunning,
+        setMessages,
+        setRouteRun,
+        upsertServerRun,
+        upsertServerSession,
+      })
+    } catch {
+      await runDemoPrompt(prompt, {
+        addCitation,
+        appendRunEvent,
+        completeRun,
+        ensureSession,
+        setIsRunning,
+        setMessages,
+        setRouteRun,
+        startRun,
+        upsertArtifact,
+      })
+    }
+  }, [addCitation, appendRunEvent, applyServerEvent, completeRun, ensureSession, startRun, upsertArtifact, upsertServerRun, upsertServerSession])
 
   const onNew = useCallback(async (message: AppendMessage) => {
     await runPrompt(appendMessageText(message))
@@ -169,6 +117,9 @@ export function AgentChat() {
           : item,
       ),
     )
+    eventSubscriptionRef.current?.abort()
+    const serverRunID = activeServerRunRef.current
+    if (serverRunID) void cancelAgentRun(serverRunID).catch(() => undefined)
     const latestRunningRun = latestRunningRunID()
     if (latestRunningRun) cancelRun(latestRunningRun)
   }, [cancelRun])
@@ -176,6 +127,8 @@ export function AgentChat() {
   const handleNewSession = useCallback(() => {
     startNewSession()
     setMessages([])
+    eventSubscriptionRef.current?.abort()
+    activeServerRunRef.current = undefined
     setIsRunning(false)
     setRouteRun(undefined)
     if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
@@ -288,6 +241,179 @@ export function AgentChat() {
   )
 }
 
+
+type RunServerPromptOptions = {
+  activeSessionId?: string
+  applyServerEvent: (event: AgentRunEventDTO) => void
+  eventSubscriptionRef: React.MutableRefObject<AgentRunEventSubscription | undefined>
+  activeServerRunRef: React.MutableRefObject<string | undefined>
+  setIsRunning: (value: boolean) => void
+  setMessages: React.Dispatch<React.SetStateAction<ThreadMessage[]>>
+  setRouteRun: React.Dispatch<React.SetStateAction<AgentRunRoute | undefined>>
+  upsertServerRun: ReturnType<typeof useAgentProjectionStore.getState>["upsertServerRun"]
+  upsertServerSession: ReturnType<typeof useAgentProjectionStore.getState>["upsertServerSession"]
+}
+
+async function runServerPrompt(prompt: string, options: RunServerPromptOptions) {
+  const session = await ensureServerSession(prompt, options.activeSessionId)
+  options.upsertServerSession(session)
+  const run = await createAgentRun(session.id, { input: prompt })
+  options.upsertServerRun(run)
+  options.activeServerRunRef.current = run.id
+  openRunPage(session.id, run.id)
+  options.setRouteRun({ sessionID: session.id, runID: run.id })
+
+  const assistantID = newMessageID("assistant")
+  let assistantText = ""
+  let terminal = isTerminalRunStatus(run.status)
+  options.setIsRunning(!terminal)
+  options.setMessages((current) => [
+    ...current,
+    userMessage(prompt),
+    assistantMessage(assistantID, terminal ? queuedRunMessage(run.status) : "", terminal ? "complete" : "running"),
+  ])
+
+  const subscription = streamAgentRunEvents({
+    runId: run.id,
+    onEvent: (event) => {
+      options.applyServerEvent(event)
+      const update = messageUpdateFromEvent(event)
+      if (update.delta) assistantText += update.delta
+      if (update.content) assistantText = update.content
+      if (update.content || update.delta) {
+        options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, assistantText, "running") : item))
+      }
+      const status = statusFromServerEvent(event)
+      if (status && isTerminalRunStatus(status)) {
+        terminal = true
+        options.setIsRunning(false)
+        options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, assistantText || queuedRunMessage(status), status === "cancelled" ? "cancelled" : "complete") : item))
+      }
+    },
+  })
+  options.eventSubscriptionRef.current = subscription
+  await subscription.closed
+  if (!terminal) {
+    options.setIsRunning(false)
+    options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, queuedRunMessage(run.status), "complete") : item))
+  }
+}
+
+async function ensureServerSession(prompt: string, activeSessionId?: string): Promise<AgentSessionDTO> {
+  if (activeSessionId?.startsWith("sess_")) return getExistingServerSession(activeSessionId, prompt)
+  return createAgentSession({ title: prompt })
+}
+
+async function getExistingServerSession(sessionId: string, prompt: string): Promise<AgentSessionDTO> {
+  try {
+    return await getAgentSession(sessionId)
+  } catch {
+    return createAgentSession({ title: prompt })
+  }
+}
+
+type RunDemoPromptOptions = {
+  addCitation: (runId: string, input: { id?: string; artifactId?: string; text?: string; target?: unknown }) => string
+  appendRunEvent: (runId: string, input: { id?: string; type: string; data?: unknown }) => string
+  completeRun: (runId: string, finalAnswer: string) => void
+  ensureSession: (title: string) => string
+  setIsRunning: (value: boolean) => void
+  setMessages: React.Dispatch<React.SetStateAction<ThreadMessage[]>>
+  setRouteRun: React.Dispatch<React.SetStateAction<AgentRunRoute | undefined>>
+  startRun: (sessionId: string, input: string) => string
+  upsertArtifact: (runId: string, input: { id?: string; kind: "markdown" | "k8s.resource" | "k8s.resource_list" | "k8s.topology" | "k8s.history" | "k8s.diff" | "tool_call" | "citation"; title?: string; data?: unknown }) => string
+}
+
+async function runDemoPrompt(prompt: string, options: RunDemoPromptOptions) {
+  const sessionID = options.ensureSession(prompt)
+  const runID = options.startRun(sessionID, prompt)
+  openRunPage(sessionID, runID)
+  options.setRouteRun({ sessionID, runID })
+  options.appendRunEvent(runID, { type: "message.created", data: { role: "user", content: prompt } })
+
+  const assistantID = newMessageID("assistant")
+  options.setIsRunning(true)
+  options.setMessages((current) => [
+    ...current,
+    userMessage(prompt),
+    assistantMessage(assistantID, "", "running"),
+  ])
+
+  const toolCallID = newMessageID("tool")
+  options.appendRunEvent(runID, {
+    type: "tool.started",
+    data: {
+      toolCallId: toolCallID,
+      name: "kube_insight_demo_search",
+      status: "started",
+      input: { query: prompt },
+    },
+  })
+
+  await delay(350)
+
+  options.appendRunEvent(runID, {
+    type: "tool.completed",
+    data: {
+      toolCallId: toolCallID,
+      name: "kube_insight_demo_search",
+      status: "completed",
+      output: { summary: "Demo evidence projection created" },
+      durationMs: 350,
+    },
+  })
+
+  const answer = demoAgentAnswer(prompt)
+  const markdownArtifactID = options.upsertArtifact(runID, {
+    kind: "markdown",
+    title: "Demo answer",
+    data: { markdown: answer },
+  })
+  const resourceArtifactID = options.upsertArtifact(runID, {
+    kind: "k8s.resource",
+    title: "Pod default/api-0",
+    data: demoK8sResourceArtifact(prompt),
+  })
+  options.upsertArtifact(runID, { kind: "k8s.resource_list", title: "Demo resource candidates", data: demoK8sResourceListArtifact(prompt) })
+  options.upsertArtifact(runID, { kind: "k8s.topology", title: "Service default/api topology", data: demoK8sTopologyArtifact(prompt) })
+  options.upsertArtifact(runID, { kind: "k8s.history", title: "Pod default/api-0 history", data: demoK8sHistoryArtifact(prompt) })
+  options.upsertArtifact(runID, { kind: "k8s.diff", title: "Pod default/api-0 diff", data: demoK8sDiffArtifact() })
+  options.addCitation(runID, {
+    id: "citation_demo_runtime",
+    artifactId: resourceArtifactID,
+    text: "Demo runtime",
+    target: { kind: "artifact", id: resourceArtifactID, relatedArtifactId: markdownArtifactID },
+  })
+  options.appendRunEvent(runID, { type: "message.created", data: { role: "assistant", content: answer } })
+  options.completeRun(runID, answer)
+  options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, answer, "complete") : item))
+  options.setIsRunning(false)
+}
+
+function statusFromServerEvent(event: AgentRunEventDTO) {
+  const data = event.data && typeof event.data === "object" ? event.data as { status?: unknown } : {}
+  return typeof data.status === "string" ? data.status : undefined
+}
+
+function isTerminalRunStatus(status: string) {
+  return status === "completed" || status === "failed" || status === "cancelled"
+}
+
+function messageUpdateFromEvent(event: AgentRunEventDTO) {
+  if (event.type !== "message.created" && event.type !== "message.delta" && event.type !== "message.completed" && event.type !== "answer.final") return {}
+  const data = event.data && typeof event.data === "object" ? event.data as { role?: unknown; content?: unknown; delta?: unknown } : {}
+  if (data.role && data.role !== "assistant") return {}
+  return {
+    content: typeof data.content === "string" ? data.content : undefined,
+    delta: typeof data.delta === "string" ? data.delta : undefined,
+  }
+}
+
+function queuedRunMessage(status: string) {
+  if (status === "failed") return "Run failed before an answer was produced."
+  if (status === "cancelled") return "Run cancelled."
+  return "Run accepted by the server. Backend agent execution is not connected yet, so this run is waiting for the next server-side agent loop step."
+}
 
 function RunPageHeader({
   routeRun,

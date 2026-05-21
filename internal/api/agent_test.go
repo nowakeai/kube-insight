@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,6 +117,55 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
 	for _, want := range []string{"event: run.created", "event: run.started", "event: answer.final", "event: run.completed", `"content":"checked cluster health"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("events missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestCancelAgentRunCancelsRunnerContext(t *testing.T) {
+	runner := newBlockingAgentRunner()
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var run struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"long running check"}`, http.StatusCreated, &run)
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	postJSON(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/cancel", `{}`, http.StatusOK, &run)
+	if run.Status != "cancelled" {
+		t.Fatalf("cancelled run = %#v", run)
+	}
+	select {
+	case <-runner.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner context was not cancelled")
+	}
+
+	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events", http.StatusOK)
+	for _, want := range []string{"event: run.started", "event: run.cancelled"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
@@ -290,4 +340,31 @@ type fakeFailingAgentRunner struct {
 
 func (r fakeFailingAgentRunner) Run(context.Context, agent.EinoRunInput) (agent.EinoRunResult, error) {
 	return agent.EinoRunResult{}, r.err
+}
+
+type blockingAgentRunner struct {
+	started   chan struct{}
+	cancelled chan struct{}
+	once      sync.Once
+}
+
+func newBlockingAgentRunner() *blockingAgentRunner {
+	return &blockingAgentRunner{started: make(chan struct{}), cancelled: make(chan struct{})}
+}
+
+func (r *blockingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	run, err := input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunRunning, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunStarted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	r.once.Do(func() { close(r.started) })
+	<-ctx.Done()
+	close(r.cancelled)
+	return agent.EinoRunResult{}, ctx.Err()
 }

@@ -128,7 +128,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - `POST /api/v1/agent/sessions/{session_id}/runs` now starts the server-side
     runner asynchronously, and `GET /api/v1/agent/runs/{run_id}/events?follow=true`
     streams until the run reaches a terminal status.
-- [ ] Add cancellation propagation from API to Eino run context.
+- [x] Add cancellation propagation from API to Eino run context.
+  - Running agent executions are registered by run id and `POST /cancel` now
+    cancels the runner context before recording `run.cancelled`.
 - [ ] Add retry semantics for failed runs.
 - [ ] Add structured audit records for agent tool calls.
 - [x] Add provider configuration validation.

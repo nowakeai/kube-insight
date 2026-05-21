@@ -194,8 +194,11 @@ func (s *Server) startAgentRun(run agent.Run) {
 	if s.agentRunner == nil {
 		return
 	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	s.registerAgentRunCancel(run.ID, cancel)
 	go func() {
-		_, err := s.agentRunner.Run(context.Background(), agent.EinoRunInput{
+		defer s.unregisterAgentRunCancel(run.ID)
+		_, err := s.agentRunner.Run(runCtx, agent.EinoRunInput{
 			Messages: []agent.Message{{Role: agent.RoleUser, Content: run.Input}},
 			Store:    s.agentStore,
 			RunID:    run.ID,
@@ -204,6 +207,44 @@ func (s *Server) startAgentRun(run agent.Run) {
 			s.recordAgentRunFailure(context.Background(), run.ID, err)
 		}
 	}()
+}
+
+func (s *Server) registerAgentRunCancel(runID string, cancel context.CancelFunc) {
+	s.agentRunMu.Lock()
+	defer s.agentRunMu.Unlock()
+	if s.agentRunCancels == nil {
+		s.agentRunCancels = map[string]context.CancelFunc{}
+	}
+	s.agentRunCancels[runID] = cancel
+}
+
+func (s *Server) unregisterAgentRunCancel(runID string) {
+	s.agentRunMu.Lock()
+	defer s.agentRunMu.Unlock()
+	delete(s.agentRunCancels, runID)
+}
+
+func (s *Server) cancelAgentRuns() {
+	s.agentRunMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(s.agentRunCancels))
+	for _, cancel := range s.agentRunCancels {
+		cancels = append(cancels, cancel)
+	}
+	s.agentRunMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
+func (s *Server) cancelAgentRunExecution(runID string) bool {
+	s.agentRunMu.Lock()
+	cancel := s.agentRunCancels[runID]
+	s.agentRunMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (s *Server) recordAgentRunFailure(ctx context.Context, runID string, runErr error) {
@@ -248,7 +289,18 @@ func agentRunStatusTerminal(status agent.RunStatus) bool {
 }
 
 func (s *Server) handleCancelAgentRun(w http.ResponseWriter, r *http.Request) {
-	run, err := s.agentStore.UpdateRunStatus(r.Context(), r.PathValue("run_id"), agent.RunCancelled, "")
+	runID := r.PathValue("run_id")
+	run, err := s.agentStore.GetRun(r.Context(), runID)
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	if agentRunStatusTerminal(run.Status) {
+		writeJSON(w, http.StatusOK, run)
+		return
+	}
+	s.cancelAgentRunExecution(runID)
+	run, err = s.agentStore.UpdateRunStatus(r.Context(), runID, agent.RunCancelled, "")
 	if err != nil {
 		writeAgentStoreError(w, err)
 		return

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"kube-insight/internal/agent"
@@ -42,6 +43,8 @@ type Server struct {
 	closeFunc           func() error
 	agentStore          agent.Store
 	agentRunner         AgentRunner
+	agentRunMu          sync.Mutex
+	agentRunCancels     map[string]context.CancelFunc
 	serverInfo          ServerInfo
 	mux                 *http.ServeMux
 }
@@ -76,7 +79,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if agentStore == nil {
 		agentStore = agent.NewMemoryStore()
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, agentRunCancels: map[string]context.CancelFunc{}, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }
@@ -104,6 +107,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Close() error {
+	s.cancelAgentRuns()
 	if s.closeFunc == nil {
 		return nil
 	}

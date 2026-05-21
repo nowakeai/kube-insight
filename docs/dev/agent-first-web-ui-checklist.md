@@ -104,15 +104,19 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 ## Dashboard
 
-- [ ] Add secondary dashboard route.
-- [ ] Show API/Web UI/MCP/metrics/watcher component status where available.
+- [x] Add secondary dashboard route.
+- [x] Show API/Web UI/MCP/metrics/watcher component status where available.
 - [ ] Show storage driver and backend target.
-- [ ] Show collector coverage summary from `/api/v1/health`.
-- [ ] Show active/completed/failed/cancelled agent run counts after runs exist.
+  - Initial dashboard shows inferred schema/storage status; exact driver and
+    backend target need a server-info endpoint.
+- [x] Show collector coverage summary from `/api/v1/health`.
+- [x] Show active/completed/failed/cancelled agent run counts after runs exist.
 - [ ] Show provider/model configuration without exposing secrets.
-- [ ] Link to `/healthz`, `/api/v1/health`, `/api/v1/schema`, and `/metrics` when
+  - Initial dashboard reserves the provider/model field and never exposes
+    secrets; exact server config needs a server-info endpoint.
+- [x] Link to `/healthz`, `/api/v1/health`, `/api/v1/schema`, and `/metrics` when
   available.
-- [ ] Use TanStack Query polling with conservative refresh intervals.
+- [x] Use TanStack Query polling with conservative refresh intervals.
 
 ## Persistence And Hardening
 
@@ -135,3 +139,5 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
 - [x] Verify the embedded binary serves the built React app.
 - [ ] Verify dashboard health calls work with and without metrics enabled.
+  - Verified without a metrics endpoint on the Vite dev origin; metrics-enabled
+    verification remains.

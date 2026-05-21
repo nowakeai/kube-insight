@@ -7,7 +7,7 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, Bot, CircleStop, ExternalLink, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
+import { ArrowUp, Bot, CircleStop, ExternalLink, LayoutDashboard, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 
 import { ArtifactPanel } from "@/components/artifact-panel"
@@ -215,6 +215,12 @@ export function AgentChat() {
                 <Server className="size-4" aria-hidden="true" />
                 <span>{activeRunCount > 0 ? `${activeRunCount} run${activeRunCount === 1 ? "" : "s"}` : "local agent"}</span>
               </div>
+              <Button size="sm" variant="outline" asChild>
+                <a href="/dashboard">
+                  <LayoutDashboard className="size-3.5" aria-hidden="true" />
+                  Dashboard
+                </a>
+              </Button>
               <Button type="button" size="sm" variant="outline" onClick={handleNewSession} disabled={isRunning}>
                 <Plus className="size-3.5" aria-hidden="true" />
                 New

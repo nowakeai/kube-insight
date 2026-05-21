@@ -73,7 +73,44 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeAgentStoreError(w, err)
 		return
 	}
-	_, err = s.agentStore.AppendRunEvent(r.Context(), run.ID, agent.AppendEventInput{
+	if err := s.recordRunCreated(r.Context(), run); err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	s.startAgentRun(run)
+	writeJSON(w, http.StatusCreated, run)
+}
+
+func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
+	original, err := s.agentStore.GetRun(r.Context(), r.PathValue("run_id"))
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	if original.Status != agent.RunFailed {
+		writeError(w, http.StatusConflict, errors.New("only failed agent runs can be retried"))
+		return
+	}
+	run, err := s.agentStore.CreateRun(r.Context(), original.SessionID, agent.CreateRunInput{
+		Input:    original.Input,
+		Provider: original.Provider,
+		Model:    original.Model,
+		Metadata: retryAgentRunMetadata(original),
+	})
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	if err := s.recordRunCreated(r.Context(), run); err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	s.startAgentRun(run)
+	writeJSON(w, http.StatusCreated, run)
+}
+
+func (s *Server) recordRunCreated(ctx context.Context, run agent.Run) error {
+	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
 		Type: agent.EventRunCreated,
 		Data: mustJSON(agent.RunStatusEventData{
 			RunID:     run.ID,
@@ -81,12 +118,19 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 			Status:    run.Status,
 		}),
 	})
-	if err != nil {
-		writeAgentStoreError(w, err)
-		return
+	return err
+}
+
+func retryAgentRunMetadata(original agent.Run) json.RawMessage {
+	metadata := map[string]any{}
+	if len(original.Metadata) > 0 && json.Valid(original.Metadata) {
+		var existing map[string]any
+		if err := json.Unmarshal(original.Metadata, &existing); err == nil && existing != nil {
+			metadata = existing
+		}
 	}
-	s.startAgentRun(run)
-	writeJSON(w, http.StatusCreated, run)
+	metadata["retryOfRunId"] = original.ID
+	return mustJSON(metadata)
 }
 
 func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {

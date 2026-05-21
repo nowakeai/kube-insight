@@ -131,7 +131,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add cancellation propagation from API to Eino run context.
   - Running agent executions are registered by run id and `POST /cancel` now
     cancels the runner context before recording `run.cancelled`.
-- [ ] Add retry semantics for failed runs.
+- [x] Add retry semantics for failed runs.
+  - `POST /api/v1/agent/runs/{run_id}/retry` creates a new run in the same
+    session, preserves the original run history, copies input/provider/model,
+    and records `retryOfRunId` in the new run metadata.
 - [ ] Add structured audit records for agent tool calls.
 - [x] Add provider configuration validation.
 - [ ] Add optional BYOK after default env-provider path works.

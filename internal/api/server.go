@@ -136,6 +136,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/agent/runs", s.handleListAgentRuns)
 	s.mux.HandleFunc("GET /api/v1/agent/runs/{run_id}/events", s.handleAgentRunEvents)
 	s.mux.HandleFunc("POST /api/v1/agent/runs/{run_id}/cancel", s.handleCancelAgentRun)
+	s.mux.HandleFunc("POST /api/v1/agent/runs/{run_id}/retry", s.handleRetryAgentRun)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {

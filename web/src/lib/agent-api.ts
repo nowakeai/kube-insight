@@ -96,6 +96,18 @@ export function cancelAgentRun(runId: string, options?: AgentAPIOptions) {
   )
 }
 
+export function retryAgentRun(runId: string, options?: AgentAPIOptions) {
+  return agentRequestJSON<AgentRunDTO>(
+    `/api/v1/agent/runs/${encodeURIComponent(runId)}/retry`,
+    {
+      ...options,
+      method: "POST",
+      body: {},
+    },
+    parseAgentRun,
+  )
+}
+
 export async function getAgentRunEvents(runId: string, options?: AgentAPIOptions) {
   const response = await agentFetch(`/api/v1/agent/runs/${encodeURIComponent(runId)}/events`, options)
   const text = await response.text()

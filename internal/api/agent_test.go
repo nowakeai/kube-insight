@@ -123,6 +123,65 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 	}
 }
 
+func TestRetryAgentRunCreatesNewRunFromFailedRun(t *testing.T) {
+	runner := &retryingAgentRunner{}
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var run struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"retry this","provider":"openai-compatible","model":"mimo-v2.5-pro","metadata":{"source":"test"}}`, http.StatusCreated, &run)
+	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
+	if !strings.Contains(body, "event: run.failed") || !strings.Contains(body, "provider temporarily unavailable") {
+		t.Fatalf("failed run events = %s", body)
+	}
+
+	var retried struct {
+		ID        string          `json:"id"`
+		SessionID string          `json:"sessionId"`
+		Status    string          `json:"status"`
+		Input     string          `json:"input"`
+		Provider  string          `json:"provider"`
+		Model     string          `json:"model"`
+		Metadata  json.RawMessage `json:"metadata"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/retry", `{}`, http.StatusCreated, &retried)
+	if retried.ID == "" || retried.ID == run.ID || retried.SessionID != session.ID || retried.Status != "queued" || retried.Input != "retry this" || retried.Provider != "openai-compatible" || retried.Model != "mimo-v2.5-pro" {
+		t.Fatalf("retried run = %#v", retried)
+	}
+	var metadata map[string]string
+	if err := json.Unmarshal(retried.Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata["retryOfRunId"] != run.ID || metadata["source"] != "test" {
+		t.Fatalf("retry metadata = %#v", metadata)
+	}
+
+	body = getBody(t, server.URL+"/api/v1/agent/runs/"+retried.ID+"/events?follow=true", http.StatusOK)
+	for _, want := range []string{"event: run.created", "event: run.started", "event: answer.final", "event: run.completed", "retried successfully"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("retried events missing %q: %s", want, body)
+		}
+	}
+	assertPOSTStatus(t, server.URL+"/api/v1/agent/runs/"+retried.ID+"/retry", `{}`, http.StatusConflict)
+}
+
 func TestCancelAgentRunCancelsRunnerContext(t *testing.T) {
 	runner := newBlockingAgentRunner()
 	handler, err := NewServer(ServerOptions{
@@ -367,4 +426,46 @@ func (r *blockingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput)
 	<-ctx.Done()
 	close(r.cancelled)
 	return agent.EinoRunResult{}, ctx.Err()
+}
+
+type retryingAgentRunner struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (r *retryingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+	if call == 1 {
+		return agent.EinoRunResult{}, errors.New("provider temporarily unavailable")
+	}
+	run, err := input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunRunning, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunStarted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: "retried successfully"}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	run, err = input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunCompleted, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunCompleted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	return agent.EinoRunResult{FinalAnswer: "retried successfully", Events: 1}, nil
 }

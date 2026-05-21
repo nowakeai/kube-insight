@@ -7,8 +7,8 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowRight, Bot, ChevronDown, CircleStop, ExternalLink, LayoutDashboard, Play, Plus, RotateCw, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { ArrowRight, Bot, ChevronDown, CircleStop, ExternalLink, LayoutDashboard, MessageSquareText, Play, Plus, RotateCcw, Search, Sparkles, UserRound } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { MarkdownContent } from "@/components/markdown-content"
@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button"
 import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
-import { useAgentProjectionStore, type AgentRunEvent } from "@/lib/agent-store"
+import { useAgentProjectionStore, type AgentRun, type AgentRunEvent, type AgentSession } from "@/lib/agent-store"
 import type { AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 const starterPrompts = [
@@ -35,10 +35,10 @@ export function AgentChat() {
   const [routeRun, setRouteRun] = useState(readRouteRun)
   const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
   const activeServerRunRef = useRef<string | undefined>(undefined)
-  const activeRunCount = useAgentProjectionStore((state) => {
-    if (!state.activeSessionId) return 0
-    return state.sessions[state.activeSessionId]?.runIds.length ?? 0
-  })
+  const activeSessionId = useAgentProjectionStore((state) => state.activeSessionId)
+  const sessionOrder = useAgentProjectionStore((state) => state.sessionOrder)
+  const sessionsById = useAgentProjectionStore((state) => state.sessions)
+  const runsById = useAgentProjectionStore((state) => state.runs)
   const ensureSession = useAgentProjectionStore((state) => state.ensureSession)
   const startRun = useAgentProjectionStore((state) => state.startRun)
   const upsertServerSession = useAgentProjectionStore((state) => state.upsertServerSession)
@@ -50,6 +50,7 @@ export function AgentChat() {
   const upsertArtifact = useAgentProjectionStore((state) => state.upsertArtifact)
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
+  const selectSession = useAgentProjectionStore((state) => state.selectSession)
   const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
   const activeRunEventIds = useAgentProjectionStore((state) => {
     if (!routeRun) return emptyEventIds
@@ -135,6 +136,27 @@ export function AgentChat() {
     if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
   }, [startNewSession])
 
+  const handleSelectSession = useCallback((sessionId: string) => {
+    const state = useAgentProjectionStore.getState()
+    const session = state.sessions[sessionId]
+    if (!session) return
+    selectSession(sessionId)
+    const runId = session.runIds.at(-1)
+    const run = runId ? state.runs[runId] : undefined
+    eventSubscriptionRef.current?.abort()
+    activeServerRunRef.current = run?.status === "running" ? run.id : undefined
+    setIsRunning(run?.status === "running")
+    if (!run) {
+      setMessages([])
+      setRouteRun(undefined)
+      if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
+      return
+    }
+    openRunPage(run.sessionId, run.id)
+    setRouteRun({ sessionID: run.sessionId, runID: run.id })
+    setMessages(threadMessagesFromRun(run))
+  }, [selectSession])
+
   const handleRetry = useCallback(async () => {
     if (!activeRun || activeRun.status !== "failed" || isRunning) return
     try {
@@ -170,87 +192,86 @@ export function AgentChat() {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <main className="min-h-svh bg-background text-foreground">
-        <div className="mx-auto flex min-h-svh w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-          <header className="flex h-12 items-center justify-between border-b border-border/80">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
+      <main className="h-svh overflow-hidden bg-background text-foreground">
+        <div className="flex h-full min-h-0 flex-col">
+          <header className="flex h-14 shrink-0 items-center justify-between border-b border-border/80 px-4 sm:px-6">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
                 <Sparkles className="size-4" aria-hidden="true" />
               </span>
               <span>kube-insight</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
-                <Server className="size-4" aria-hidden="true" />
-                <span>{activeRunCount > 0 ? `${activeRunCount} run${activeRunCount === 1 ? "" : "s"}` : "local agent"}</span>
-              </div>
-              <Button size="sm" variant="outline" asChild>
-                <a href="/dashboard">
-                  <LayoutDashboard className="size-3.5" aria-hidden="true" />
-                  Dashboard
-                </a>
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={handleNewSession} disabled={isRunning}>
-                <Plus className="size-3.5" aria-hidden="true" />
-                New
-              </Button>
-            </div>
+            <Button size="sm" variant="outline" asChild>
+              <a href="/dashboard">
+                <LayoutDashboard className="size-3.5" aria-hidden="true" />
+                Dashboard
+              </a>
+            </Button>
           </header>
 
-          <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col">
-            <ThreadPrimitive.Viewport className="flex min-h-0 flex-1 flex-col overflow-y-auto scroll-smooth py-6">
-              <ThreadPrimitive.Empty>
-                <div className="mx-auto flex min-h-[calc(100svh-6.5rem)] w-full max-w-3xl flex-col justify-center gap-5 pb-16 pt-10">
-                  <div className="flex flex-col items-center gap-2 text-center">
-                    <h1 className="text-4xl font-semibold tracking-normal text-foreground sm:text-5xl">
-                      kube-insight
-                    </h1>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
-                      <span>{activeRunCount > 0 ? `${activeRunCount} active run${activeRunCount === 1 ? "" : "s"}` : "local agent ready"}</span>
-                    </div>
-                  </div>
-                  <ChatComposer autoFocus variant="home" />
-                  <div className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
-                    {starterPrompts.map((prompt) => (
-                      <ThreadPrimitive.Suggestion
-                        key={prompt}
-                        prompt={prompt}
-                        method="replace"
-                        autoSend={false}
-                        className="min-h-11 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/40 hover:bg-muted hover:text-foreground"
-                      >
-                        {prompt}
-                      </ThreadPrimitive.Suggestion>
-                    ))}
-                  </div>
-                </div>
-              </ThreadPrimitive.Empty>
+          <div className={panelDockCollapsed ? "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_5rem]" : "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_24rem] xl:grid-cols-[18rem_minmax(0,1fr)_28rem]"}>
+            <SessionSidebar
+              activeSessionId={activeSessionId}
+              disabled={isRunning}
+              onNew={handleNewSession}
+              onSelect={handleSelectSession}
+              runs={runsById}
+              sessionOrder={sessionOrder}
+              sessions={sessionsById}
+            />
 
-              <ThreadPrimitive.If empty={false}>
-                <div className={panelDockCollapsed ? "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_5rem]" : "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]"}>
-                  <section className="min-w-0">
-                    <RunPageHeader
+            <ThreadPrimitive.Root className="min-h-0 border-x border-border/80">
+              <ThreadPrimitive.Viewport className="flex h-full min-h-0 flex-col overflow-y-auto scroll-smooth">
+                <ThreadPrimitive.Empty>
+                  <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-10">
+                    <div className="flex flex-col gap-1">
+                      <h1 className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">
+                        Hello there.
+                      </h1>
+                      <p className="text-lg text-muted-foreground">Ask about Kubernetes state, health, topology, or recent changes.</p>
+                    </div>
+                    <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+                      {starterPrompts.map((prompt) => (
+                        <ThreadPrimitive.Suggestion
+                          key={prompt}
+                          prompt={prompt}
+                          method="replace"
+                          autoSend={false}
+                          className="min-h-16 rounded-lg border border-border bg-card px-4 py-3 text-left text-sm transition hover:border-primary/40 hover:bg-muted"
+                        >
+                          <span className="font-medium text-foreground">{prompt}</span>
+                        </ThreadPrimitive.Suggestion>
+                      ))}
+                    </div>
+                    <ChatComposer autoFocus variant="home" />
+                  </div>
+                </ThreadPrimitive.Empty>
+
+                <ThreadPrimitive.If empty={false}>
+                  <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
+                    <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+                    <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
+                    <RunActivity
+                      key={routeRun?.runID ?? "run-activity"}
+                      canRetry={Boolean(activeRun?.status === "failed")}
+                      events={activeRunEvents}
+                      isRunning={isRunning}
+                      onContinue={handleContinue}
+                      onRetry={handleRetry}
+                      onStop={onCancel}
                       routeRun={routeRun}
                       status={activeRun?.status ?? (isRunning ? "running" : "completed")}
-                      isRunning={isRunning}
-                      canRetry={activeRun?.status === "failed"}
-                      onStop={onCancel}
-                      onRetry={handleRetry}
-                      onContinue={handleContinue}
                     />
-                    <RunTimeline events={activeRunEvents} />
-                    <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
-                    <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-                    <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-6 bg-background/95 py-4 backdrop-blur">
+                    <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background/95 py-4 backdrop-blur">
                       <ChatComposer />
                     </ThreadPrimitive.ViewportFooter>
-                  </section>
-                  <ArtifactDock artifacts={activeRunArtifacts} selectedArtifactId={selectedArtifactId} collapsed={panelDockCollapsed} onCollapsedChange={setPanelDockCollapsed} />
-                </div>
-              </ThreadPrimitive.If>
-            </ThreadPrimitive.Viewport>
-          </ThreadPrimitive.Root>
+                  </div>
+                </ThreadPrimitive.If>
+              </ThreadPrimitive.Viewport>
+            </ThreadPrimitive.Root>
+
+            <ArtifactDock artifacts={activeRunArtifacts} selectedArtifactId={selectedArtifactId} collapsed={panelDockCollapsed} onCollapsedChange={setPanelDockCollapsed} />
+          </div>
         </div>
       </main>
     </AssistantRuntimeProvider>
@@ -448,86 +469,170 @@ function queuedRunMessage(status: string, error?: string) {
   return "Run accepted by the server. Backend agent execution is not connected yet, so this run is waiting for the next server-side agent loop step."
 }
 
-function RunPageHeader({
+function SessionSidebar({
+  activeSessionId,
+  disabled,
+  onNew,
+  onSelect,
+  runs,
+  sessionOrder,
+  sessions,
+}: {
+  activeSessionId?: string
+  disabled: boolean
+  onNew: () => void
+  onSelect: (sessionId: string) => void
+  runs: Record<string, AgentRun>
+  sessionOrder: string[]
+  sessions: Record<string, AgentSession>
+}) {
+  const visibleSessions = sessionOrder
+    .map((sessionId) => sessions[sessionId])
+    .filter((session): session is AgentSession => Boolean(session))
+
+  return (
+    <aside className="hidden min-h-0 border-r border-border/80 bg-card/60 lg:flex lg:flex-col" aria-label="Sessions">
+      <div className="border-b border-border/80 p-4">
+        <Button type="button" variant="outline" className="w-full justify-start" onClick={onNew} disabled={disabled}>
+          <Plus className="size-4" aria-hidden="true" />
+          New thread
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {visibleSessions.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-sm text-muted-foreground">
+            Sessions will appear here after the first run.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {visibleSessions.map((session) => {
+              const latestRunId = session.runIds.at(-1)
+              const latestRun = latestRunId ? runs[latestRunId] : undefined
+              const selected = session.id === activeSessionId
+              return (
+                <button
+                  key={session.id}
+                  type="button"
+                  className={
+                    selected
+                      ? "rounded-md border border-border bg-background px-3 py-2 text-left shadow-sm"
+                      : "rounded-md border border-transparent px-3 py-2 text-left text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                  }
+                  onClick={() => onSelect(session.id)}
+                >
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <MessageSquareText className="size-3.5 shrink-0" aria-hidden="true" />
+                    <span className="truncate">{session.title || "New investigation"}</span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
+                    <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
+                    <span>{session.runIds.length} run{session.runIds.length === 1 ? "" : "s"}</span>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function RunActivity({
+  canRetry,
+  events,
+  isRunning,
+  onContinue,
+  onRetry,
+  onStop,
   routeRun,
   status,
-  isRunning,
-  canRetry,
-  onStop,
-  onRetry,
-  onContinue,
 }: {
+  canRetry: boolean
+  events: AgentRunEvent[]
+  isRunning: boolean
+  onContinue: () => void
+  onRetry: () => void
+  onStop: () => void
   routeRun?: AgentRunRoute
   status: string
-  isRunning: boolean
-  canRetry: boolean
-  onStop: () => void
-  onRetry: () => void
-  onContinue: () => void
 }) {
+  const toolCalls = useMemo(() => groupToolCalls(events), [events])
+  const terminal = isTerminalRunStatus(status)
+  const [manualExpanded, setManualExpanded] = useState<boolean | undefined>(undefined)
+  const expanded = manualExpanded ?? !terminal
+
+  if (!routeRun && toolCalls.length === 0) return null
+
   return (
-    <div className="sticky top-0 z-10 mb-2 flex items-center justify-between gap-3 border-b border-border/80 bg-background/95 py-3 text-xs text-muted-foreground backdrop-blur">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
-        <span className="truncate">{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
-        <span className="rounded-md border border-border px-2 py-1 capitalize">{status}</span>
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <Button type="button" size="icon-sm" variant="ghost" title="Retry" aria-label="Retry run" onClick={onRetry} disabled={!canRetry || isRunning}>
-          <RotateCcw className="size-3.5" aria-hidden="true" />
-        </Button>
-        <Button type="button" size="icon-sm" variant="ghost" title="Continue" aria-label="Continue run" onClick={onContinue} disabled={isRunning}>
-          <Play className="size-3.5" aria-hidden="true" />
-        </Button>
-        <Button type="button" size="icon-sm" variant="ghost" title="Stop" aria-label="Stop run" onClick={onStop} disabled={!isRunning}>
-          <CircleStop className="size-3.5" aria-hidden="true" />
-        </Button>
-      </div>
+    <div className="mt-2 rounded-md border border-border bg-card text-sm shadow-sm">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+        onClick={() => setManualExpanded((value) => !(value ?? !terminal))}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={statusDotClass(status)} aria-hidden="true" />
+          <span className="truncate font-medium text-foreground">Agent activity</span>
+          <span className="rounded-md border border-border px-2 py-0.5 text-xs capitalize text-muted-foreground">{runStatusLabel(status)}</span>
+          {toolCalls.length > 0 ? <span className="text-xs text-muted-foreground">{toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}</span> : null}
+        </div>
+        <ChevronDown className={expanded ? "size-4 rotate-180 text-muted-foreground transition" : "size-4 text-muted-foreground transition"} aria-hidden="true" />
+      </button>
+
+      {expanded ? (
+        <div className="border-t border-border px-3 py-3">
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
+            <div className="flex shrink-0 items-center gap-1">
+              <Button type="button" size="icon-sm" variant="ghost" title="Retry" aria-label="Retry run" onClick={onRetry} disabled={!canRetry || isRunning}>
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button type="button" size="icon-sm" variant="ghost" title="Continue" aria-label="Continue run" onClick={onContinue} disabled={isRunning}>
+                <Play className="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button type="button" size="icon-sm" variant="ghost" title="Stop" aria-label="Stop run" onClick={onStop} disabled={!isRunning}>
+                <CircleStop className="size-3.5" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+          {toolCalls.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              {toolCalls.map((call) => (
+                <ToolTimelineRow key={call.id} call={call} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-border bg-background px-3 py-4 text-xs text-muted-foreground">
+              No tool calls recorded for this run.
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
 
-
-function RunTimeline({ events }: { events: AgentRunEvent[] }) {
-  const toolEvents = events.filter((event) => event.type.startsWith("tool."))
-  if (toolEvents.length === 0) return null
-  return (
-    <div className="mb-4 border-b border-border/80 pb-3">
-      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
-        <RotateCw className="size-3.5" aria-hidden="true" />
-        Tool calls
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {toolEvents.map((event) => (
-          <ToolTimelineRow key={event.id} event={event} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ToolTimelineRow({ event }: { event: AgentRunEvent }) {
+function ToolTimelineRow({ call }: { call: ToolCallView }) {
   const [expanded, setExpanded] = useState(false)
-  const data = toolEventData(event.data)
-  const status = data.status || event.type.replace("tool.", "")
-  const detail = toolEventDetail(data)
+  const detail = toolEventDetail(call)
   return (
     <div className="rounded-md border border-border bg-background text-xs">
       <button
         type="button"
-        className="grid w-full grid-cols-[6.5rem_minmax(0,1fr)_1.5rem] gap-3 px-3 py-2 text-left sm:grid-cols-[7rem_minmax(0,1fr)_5rem_1.5rem]"
+        className="grid w-full grid-cols-[5.5rem_minmax(0,1fr)_1.5rem] gap-3 px-3 py-2 text-left sm:grid-cols-[6.5rem_minmax(0,1fr)_5rem_1.5rem]"
         onClick={() => setExpanded((value) => !value)}
       >
         <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-          <span className={statusDotClass(status)} aria-hidden="true" />
-          <span className="truncate capitalize">{status}</span>
+          <span className={statusDotClass(call.status)} aria-hidden="true" />
+          <span className="truncate capitalize">{runStatusLabel(call.status)}</span>
         </div>
         <div className="min-w-0">
-          <div className="truncate font-medium text-foreground">{data.name || "tool"}</div>
-          <div className="truncate text-muted-foreground">{toolEventSummary(data)}</div>
+          <div className="truncate font-medium text-foreground">{call.name || "tool"}</div>
+          <div className="truncate text-muted-foreground">{toolEventSummary(call)}</div>
         </div>
         <div className="hidden text-right text-muted-foreground sm:block">
-          {typeof data.durationMs === "number" ? `${data.durationMs}ms` : ""}
+          {typeof call.durationMs === "number" ? `${call.durationMs}ms` : ""}
         </div>
         <ChevronDown className={expanded ? "mt-1 size-3.5 rotate-180 text-muted-foreground transition" : "mt-1 size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
@@ -695,11 +800,24 @@ function appendMessageText(message: AppendMessage) {
     .trim()
 }
 
+function threadMessagesFromRun(run: AgentRun): ThreadMessage[] {
+  const assistantStatus = run.status === "cancelled" ? "cancelled" : run.status === "running" || run.status === "queued" ? "running" : "complete"
+  const assistantText = run.finalAnswer || (assistantStatus === "running" ? "" : queuedRunMessage(run.status, run.error))
+  return [
+    userMessageWithID(`user_${run.id}`, run.input, run.createdAt),
+    assistantMessage(`assistant_${run.id}`, assistantText, assistantStatus),
+  ]
+}
+
 function userMessage(text: string): ThreadMessage {
+  return userMessageWithID(newMessageID("user"), text)
+}
+
+function userMessageWithID(id: string, text: string, createdAt?: string): ThreadMessage {
   return {
-    id: newMessageID("user"),
+    id,
     role: "user",
-    createdAt: new Date(),
+    createdAt: createdAt ? new Date(createdAt) : new Date(),
     content: [{ type: "text", text }],
     attachments: [],
     metadata: { custom: {} },
@@ -777,12 +895,47 @@ function shortID(value: string) {
 }
 
 type ToolEventData = {
+  toolCallId?: string
   name?: string
   status?: string
   input?: unknown
   output?: unknown
   durationMs?: number
   error?: string
+}
+
+type ToolCallView = Required<Pick<ToolEventData, "status">> & Omit<ToolEventData, "status"> & {
+  id: string
+}
+
+function groupToolCalls(events: AgentRunEvent[]): ToolCallView[] {
+  const calls = new Map<string, ToolCallView>()
+  for (const event of events) {
+    if (!event.type.startsWith("tool.")) continue
+    const data = toolEventData(event.data)
+    const id = data.toolCallId || event.id
+    const previous = calls.get(id)
+    const status = toolStatusFromEvent(event.type, data.status, previous?.status)
+    calls.set(id, {
+      id,
+      toolCallId: data.toolCallId,
+      name: data.name ?? previous?.name,
+      status,
+      input: data.input !== undefined ? data.input : previous?.input,
+      output: data.output !== undefined ? data.output : previous?.output,
+      durationMs: data.durationMs ?? previous?.durationMs,
+      error: data.error ?? previous?.error,
+    })
+  }
+  return Array.from(calls.values())
+}
+
+function toolStatusFromEvent(eventType: string, status?: string, previous = "started") {
+  if (eventType === "tool.failed") return "failed"
+  if (eventType === "tool.completed" || status === "completed") return "completed"
+  if (status) return status
+  if (eventType === "tool.audit") return previous
+  return eventType.replace("tool.", "")
 }
 
 function toolEventData(value: unknown): ToolEventData {
@@ -815,10 +968,21 @@ function compactJSON(value: unknown) {
   return text.length > 96 ? `${text.slice(0, 93)}...` : text
 }
 
+function runStatusLabel(status: string) {
+  if (status === "queued") return "queued"
+  if (status === "running") return "running"
+  if (status === "completed") return "completed"
+  if (status === "failed") return "failed"
+  if (status === "cancelled") return "cancelled"
+  if (status === "started") return "started"
+  return status
+}
+
 function statusDotClass(status: string) {
   const base = "size-1.5 shrink-0 rounded-full"
   if (status === "completed") return `${base} bg-accent`
   if (status === "failed") return `${base} bg-destructive`
+  if (status === "cancelled") return `${base} bg-muted-foreground`
   return `${base} bg-primary`
 }
 

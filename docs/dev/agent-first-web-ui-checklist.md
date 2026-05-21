@@ -109,6 +109,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add secondary dashboard route.
 - [x] Show API/Web UI/MCP/metrics/watcher component status where available.
 - [x] Show storage driver and backend target.
+- [x] Add GET `/api/v1/storage/stats` for storage size, compression, table footprint, and object distribution.
+- [x] Make storage stats the main dashboard section and keep collector coverage compact.
 - [x] Show collector coverage summary from `/api/v1/health`.
 - [x] Show active/completed/failed/cancelled agent run counts from server-backed
   run summary, with browser projection fallback.

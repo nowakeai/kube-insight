@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { useMemo, type ComponentType, type ReactNode } from "react"
-import { Activity, ArrowLeft, Database, ExternalLink, Gauge, HardDrive, Radio, RotateCw, Server, ShieldCheck } from "lucide-react"
+import { Activity, ArrowLeft, Boxes, Database, ExternalLink, Gauge, HardDrive, Radio, RotateCw, Server, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -10,9 +10,13 @@ import {
   getMetricsProbe,
   getResourceHealth,
   getSchema,
+  getStorageStats,
   getServerInfo,
   type ResourceHealthRecordDTO,
   type ResourceHealthReportDTO,
+  type StorageObjectKindStatDTO,
+  type StorageStatsDTO,
+  type StorageTableStatDTO,
   type AgentRunSummaryDTO,
   type ServerInfoDTO,
 } from "@/lib/dashboard-api"
@@ -30,6 +34,11 @@ export function Dashboard() {
   const resourceHealth = useQuery({
     queryKey: dashboardQueryKeys.resourceHealth(),
     queryFn: ({ signal }) => getResourceHealth({ signal }),
+    refetchInterval: refreshMs,
+  })
+  const storageStats = useQuery({
+    queryKey: dashboardQueryKeys.storageStats(),
+    queryFn: ({ signal }) => getStorageStats({ signal }),
     refetchInterval: refreshMs,
   })
   const schema = useQuery({
@@ -60,6 +69,8 @@ export function Dashboard() {
   const info = serverInfo.data
   const summary = health?.summary
   const resources = health?.resources ?? []
+  const storage = storageStats.data
+  const storageSummary = storage?.summary
 
   return (
     <main className="min-h-svh bg-background text-foreground">
@@ -75,7 +86,7 @@ export function Dashboard() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), schema.refetch(), serverInfo.refetch(), agentRuns.refetch(), metrics.refetch()])}>
+            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), storageStats.refetch(), schema.refetch(), serverInfo.refetch(), agentRuns.refetch(), metrics.refetch()])}>
               <RotateCw className="size-3.5" aria-hidden="true" />
               Refresh
             </Button>
@@ -121,29 +132,35 @@ export function Dashboard() {
           />
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(20rem,0.8fr)]">
+        <section className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(20rem,0.75fr)]">
           <div className="space-y-4">
-            <Panel title="Collector coverage" description={health?.checkedAt ? `checked ${formatDate(health.checkedAt)}` : "from /api/v1/health"}>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <Metric label="Resources" value={numberValue(summary?.resources)} />
-                <Metric label="Healthy" value={numberValue(summary?.healthy)} tone="good" />
-                <Metric label="Queued" value={numberValue(summary?.queued)} />
-                <Metric label="Errors" value={numberValue(summary?.errors)} tone={(summary?.errors ?? 0) > 0 ? "bad" : "neutral"} />
-                <Metric label="Stale" value={numberValue(summary?.stale)} tone={(summary?.stale ?? 0) > 0 ? "warn" : "neutral"} />
-                <Metric label="Not started" value={numberValue(summary?.notStarted)} />
-                <Metric label="Skipped" value={numberValue(summary?.skipped)} />
-                <Metric label="Complete" value={summary?.complete ? "yes" : "no"} tone={summary?.complete ? "good" : "warn"} />
-              </div>
-              <ResourceTable resources={resources} loading={resourceHealth.isPending} error={resourceHealth.isError} />
+            <Panel title="Storage overview" description={storage?.checkedAt ? `checked ${formatDate(storage.checkedAt)}` : "from /api/v1/storage/stats"}>
+              {storageStats.isError ? (
+                <p className="text-sm text-destructive">Storage stats are unavailable from this origin.</p>
+              ) : (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <Metric label="On-disk size" value={formatBytes(primaryStorageBytes(storageSummary))} tone={primaryStorageBytes(storageSummary) > 0 ? "good" : "neutral"} />
+                    <Metric label="Table compression" value={formatRatio(storageSummary?.compressionRatio)} tone={(storageSummary?.compressionRatio ?? 0) > 1 ? "good" : "neutral"} />
+                    <Metric label="Active objects" value={numberValue(storageSummary?.objects)} />
+                    <Metric label="Versions" value={numberValue(storageSummary?.versions)} />
+                    <Metric label="Raw docs" value={formatBytes(storageSummary?.rawBytes)} />
+                    <Metric label="Logical docs" value={formatBytes(storageSummary?.storedBytes)} />
+                    <Metric label="Observations" value={numberValue(storageSummary?.observations)} />
+                    <Metric label="Facts" value={numberValue(storageSummary?.facts)} />
+                    <Metric label="Edges" value={numberValue(storageSummary?.edges)} />
+                  </div>
+                  <StorageWarnings warnings={storage?.warnings ?? []} />
+                </>
+              )}
             </Panel>
 
-            <Panel title="Endpoint links" description="Open the underlying server surfaces directly.">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <EndpointLink href="/healthz" label="/healthz" />
-                <EndpointLink href="/api/v1/health?limit=500" label="/api/v1/health" />
-                <EndpointLink href="/api/v1/schema" label="/api/v1/schema" />
-                <EndpointLink href="/metrics" label="/metrics" />
-              </div>
+            <Panel title="Object distribution" description="Top resources by logical retained document bytes and version count.">
+              <ObjectKindTable rows={storage?.objectKinds ?? []} loading={storageStats.isPending} error={storageStats.isError} />
+            </Panel>
+
+            <Panel title="Table footprint" description="Rows and physical bytes when the backend exposes them.">
+              <TableFootprintTable rows={storage?.tables ?? []} loading={storageStats.isPending} error={storageStats.isError} />
             </Panel>
           </div>
 
@@ -157,22 +174,33 @@ export function Dashboard() {
               </div>
             </Panel>
 
-            <Panel title="Storage and schema" description={info?.checkedAt ? `server info ${formatDate(info.checkedAt)}` : "server info plus /api/v1/schema"}>
+            <Panel title="Storage backend" description={info?.checkedAt ? `server info ${formatDate(info.checkedAt)}` : "server info plus /api/v1/schema"}>
               <div className="space-y-3 text-sm">
-                <KeyValue icon={HardDrive} label="Storage driver" value={storageDriverLabel(info, schema.data, schema.isError)} />
-                <KeyValue icon={Database} label="Storage target" value={storageTargetLabel(info)} />
-                <KeyValue icon={Database} label="Schema surface" value={inferSchemaSurface(schema.data, schema.isPending, schema.isError)} />
+                <KeyValue icon={HardDrive} label="Backend" value={storageBackendLabel(storage, info, schema.data, schema.isError)} />
+                <KeyValue icon={Database} label="Target" value={storageTargetLabel(info)} />
+                <KeyValue icon={Boxes} label="Schema" value={inferSchemaSurface(schema.data, schema.isPending, schema.isError)} />
                 <KeyValue icon={ShieldCheck} label="Provider/model" value={providerModelLabel(info)} />
                 <KeyValue icon={ShieldCheck} label="Provider key" value={providerKeyLabel(info)} />
               </div>
             </Panel>
 
-            <Panel title="Component notes" description="Unavailable means the current server does not expose that surface on this origin.">
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>Component listen addresses come from `/api/v1/server/info` when available.</li>
-                <li>Metrics may use a separate listener; `/metrics` is still probed directly.</li>
-                <li>Watcher health combines configured service state and collector coverage.</li>
-              </ul>
+            <Panel title="Collector coverage" description={health?.checkedAt ? `checked ${formatDate(health.checkedAt)}` : "compact /api/v1/health summary"}>
+              <div className="grid grid-cols-2 gap-3">
+                <Metric label="Resources" value={numberValue(summary?.resources)} />
+                <Metric label="Healthy" value={numberValue(summary?.healthy)} tone="good" />
+                <Metric label="Issues" value={numberValue(collectorIssueCount(summary))} tone={collectorIssueCount(summary) > 0 ? "warn" : "neutral"} />
+                <Metric label="Complete" value={summary?.complete ? "yes" : "no"} tone={summary?.complete ? "good" : "warn"} />
+              </div>
+              <CollectorIssues resources={resources} loading={resourceHealth.isPending} error={resourceHealth.isError} />
+            </Panel>
+
+            <Panel title="Endpoint links" description="Open the underlying server surfaces directly.">
+              <div className="grid gap-2">
+                <EndpointLink href="/api/v1/storage/stats" label="/api/v1/storage/stats" />
+                <EndpointLink href="/api/v1/health?limit=500" label="/api/v1/health" />
+                <EndpointLink href="/api/v1/schema" label="/api/v1/schema" />
+                <EndpointLink href="/metrics" label="/metrics" />
+              </div>
             </Panel>
           </aside>
         </section>
@@ -261,7 +289,85 @@ function EndpointLink({ href, label }: { href: string; label: string }) {
   )
 }
 
-function ResourceTable({
+function StorageWarnings({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null
+  return (
+    <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+      {warnings.slice(0, 3).map((warning) => (
+        <li key={warning}>{warning}</li>
+      ))}
+    </ul>
+  )
+}
+
+function ObjectKindTable({
+  rows,
+  loading,
+  error,
+}: {
+  rows: StorageObjectKindStatDTO[]
+  loading: boolean
+  error: boolean
+}) {
+  if (loading) return <p className="text-sm text-muted-foreground">Loading storage distribution...</p>
+  if (error) return <p className="text-sm text-destructive">Object distribution is unavailable.</p>
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No retained object versions returned.</p>
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <div className="grid grid-cols-[minmax(0,1.5fr)_5rem_5rem_7rem] gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+        <div>Resource</div>
+        <div className="text-right">Objects</div>
+        <div className="text-right">Versions</div>
+        <div className="text-right">Doc bytes</div>
+      </div>
+      {rows.slice(0, 10).map((row) => (
+        <div key={objectKindKey(row)} className="grid grid-cols-[minmax(0,1.5fr)_5rem_5rem_7rem] gap-3 border-t border-border bg-background px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{objectKindLabel(row)}</div>
+            <div className="truncate text-xs text-muted-foreground">{row.group || "core"}/{row.version || "unknown"}</div>
+          </div>
+          <div className="text-right tabular-nums text-muted-foreground">{numberValue(row.objects)}</div>
+          <div className="text-right tabular-nums text-muted-foreground">{numberValue(row.versions)}</div>
+          <div className="text-right tabular-nums text-muted-foreground">{formatBytes(row.storedBytes)}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TableFootprintTable({
+  rows,
+  loading,
+  error,
+}: {
+  rows: StorageTableStatDTO[]
+  loading: boolean
+  error: boolean
+}) {
+  if (loading) return <p className="text-sm text-muted-foreground">Loading table footprint...</p>
+  if (error) return <p className="text-sm text-destructive">Table footprint is unavailable.</p>
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground">This backend did not return table-level footprint data.</p>
+  return (
+    <div className="overflow-hidden rounded-md border border-border">
+      <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem_7rem] gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
+        <div>Table</div>
+        <div className="text-right">Rows</div>
+        <div className="text-right">Size</div>
+        <div className="text-right">Ratio</div>
+      </div>
+      {rows.slice(0, 12).map((row) => (
+        <div key={row.name} className="grid grid-cols-[minmax(0,1fr)_6rem_7rem_7rem] gap-3 border-t border-border bg-background px-3 py-2 text-sm">
+          <div className="truncate font-medium">{row.name}</div>
+          <div className="text-right tabular-nums text-muted-foreground">{numberValue(row.rows)}</div>
+          <div className="text-right tabular-nums text-muted-foreground">{formatBytes(tableSizeBytes(row))}</div>
+          <div className="text-right tabular-nums text-muted-foreground">{formatRatio(tableCompressionRatio(row))}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CollectorIssues({
   resources,
   loading,
   error,
@@ -270,30 +376,19 @@ function ResourceTable({
   loading: boolean
   error: boolean
 }) {
-  const rows = priorityResources(resources).slice(0, 8)
-  if (loading) return <p className="mt-4 text-sm text-muted-foreground">Loading collector coverage...</p>
-  if (error) return <p className="mt-4 text-sm text-destructive">Collector coverage is unavailable from this origin.</p>
-  if (rows.length === 0) return <p className="mt-4 text-sm text-muted-foreground">No resource coverage records returned.</p>
+  const rows = priorityResources(resources).filter((resource) => resource.error || resource.stale || resource.status === "not_started" || resource.status === "retrying").slice(0, 4)
+  if (loading) return <p className="mt-3 text-sm text-muted-foreground">Checking collector coverage...</p>
+  if (error) return <p className="mt-3 text-sm text-destructive">Collector coverage is unavailable from this origin.</p>
+  if (rows.length === 0) return <p className="mt-3 text-sm text-muted-foreground">No collector issues reported.</p>
   return (
-    <div className="mt-4 overflow-hidden rounded-md border border-border">
-      <div className="grid grid-cols-[minmax(0,1.2fr)_7rem_5rem] gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground sm:grid-cols-[minmax(0,1.3fr)_8rem_6rem_6rem]">
-        <div>Resource</div>
-        <div>Status</div>
-        <div className="text-right">Objects</div>
-        <div className="hidden text-right sm:block">Age</div>
-      </div>
+    <div className="mt-3 space-y-2">
       {rows.map((resource) => (
-        <div key={resourceKey(resource)} className="grid grid-cols-[minmax(0,1.2fr)_7rem_5rem] gap-3 border-t border-border bg-background px-3 py-2 text-sm sm:grid-cols-[minmax(0,1.3fr)_8rem_6rem_6rem]">
+        <div key={resourceKey(resource)} className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2 text-sm">
           <div className="min-w-0">
             <div className="truncate font-medium">{resourceLabel(resource)}</div>
-            <div className="truncate text-xs text-muted-foreground">{resource.clusterId || "default cluster"}</div>
+            <div className="truncate text-xs text-muted-foreground">{resource.error || resource.status}</div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={statusDot(resource.status, resource.stale, Boolean(resource.error))} aria-hidden="true" />
-            <span className="truncate text-xs capitalize text-muted-foreground">{resource.status}</span>
-          </div>
-          <div className="text-right tabular-nums text-muted-foreground">{resource.latestObjects ?? 0}</div>
-          <div className="hidden text-right text-muted-foreground sm:block">{formatAge(resource.ageSeconds)}</div>
+          <span className={statusDot(resource.status, resource.stale, Boolean(resource.error))} aria-hidden="true" />
         </div>
       ))}
     </div>
@@ -385,6 +480,67 @@ function numberValue(value?: number) {
   return String(value ?? 0)
 }
 
+function primaryStorageBytes(summary: StorageStatsDTO["summary"] | undefined) {
+  if (!summary) return 0
+  return summary.bytesOnDisk || summary.databaseBytes || summary.storedBytes || summary.rawBytes
+}
+
+function tableSizeBytes(row: StorageTableStatDTO) {
+  return row.bytesOnDisk || row.bytes || row.compressedBytes || row.uncompressedBytes
+}
+
+function tableCompressionRatio(row: StorageTableStatDTO) {
+  return ratioValue(row.uncompressedBytes, row.compressedBytes)
+}
+
+function ratioValue(numerator?: number, denominator?: number) {
+  if (!denominator || denominator <= 0) return 0
+  return (numerator ?? 0) / denominator
+}
+
+function storageBackendLabel(
+  storage: StorageStatsDTO | undefined,
+  info: ServerInfoDTO | undefined,
+  schema: unknown,
+  schemaError: boolean,
+) {
+  if (storage?.backend) return storage.backend
+  return storageDriverLabel(info, schema, schemaError)
+}
+
+function collectorIssueCount(summary: ResourceHealthReportDTO["summary"] | undefined) {
+  if (!summary) return 0
+  return (summary.errors ?? 0) + (summary.stale ?? 0) + (summary.notStarted ?? 0)
+}
+
+function objectKindKey(row: StorageObjectKindStatDTO) {
+  return [row.group, row.version, row.resource, row.kind].filter(Boolean).join("/")
+}
+
+function objectKindLabel(row: StorageObjectKindStatDTO) {
+  if (row.resource && row.kind && row.resource !== row.kind) return `${row.resource} (${row.kind})`
+  return row.resource || row.kind
+}
+
+function formatBytes(value?: number) {
+  const bytes = value ?? 0
+  if (bytes <= 0) return "0 B"
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"]
+  let size = bytes
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024
+    unit += 1
+  }
+  const digits = size >= 10 || unit === 0 ? 0 : 1
+  return `${size.toFixed(digits)} ${units[unit]}`
+}
+
+function formatRatio(value?: number) {
+  if (!value || value <= 0) return "-"
+  return `${value.toFixed(value >= 10 ? 1 : 2)}x`
+}
+
 function storageDriverLabel(info: ServerInfoDTO | undefined, schema: unknown, schemaError: boolean) {
   if (info?.storage.driver) return info.storage.driver
   if (schemaError) return "unavailable"
@@ -454,14 +610,6 @@ function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
-}
-
-function formatAge(value?: number) {
-  if (!value || value < 0) return "-"
-  if (value < 60) return `${value}s`
-  if (value < 3600) return `${Math.round(value / 60)}m`
-  if (value < 86400) return `${Math.round(value / 3600)}h`
-  return `${Math.round(value / 86400)}d`
 }
 
 function toneClass(tone: Tone) {

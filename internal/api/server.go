@@ -123,6 +123,7 @@ func (s *Server) closeReadStore(store ReadStore) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
+	s.mux.HandleFunc("GET /api/v1/storage/stats", s.handleStorageStats)
 	s.mux.HandleFunc("GET /api/v1/server/info", s.handleServerInfo)
 	s.mux.HandleFunc("POST /api/v1/sql", s.handleSQL)
 	s.mux.HandleFunc("GET /api/v1/health", s.handleResourceHealth)

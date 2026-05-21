@@ -173,8 +173,10 @@ The dashboard should show:
 - API, Web UI, MCP, metrics, and watcher component status.
 - Storage driver and backend target, including SQLite path, ClickHouse database,
   or chDB database where applicable.
-- Collector coverage summary from `/api/v1/health`, including stale, error,
-  skipped, queued, and not-started resource counts.
+- Storage size, physical compression ratio where the backend exposes it, table
+  footprint, and object distribution by retained document bytes.
+- Compact collector coverage summary from `/api/v1/health`, including stale,
+  error, skipped, queued, and not-started resource counts.
 - Active, completed, failed, and cancelled agent runs once agent sessions exist.
 - Current provider/model configuration without exposing API keys.
 - Links to `/healthz`, `/api/v1/health`, `/api/v1/schema`, and `/metrics` when

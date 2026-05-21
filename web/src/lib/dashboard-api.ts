@@ -6,6 +6,7 @@ export const dashboardQueryKeys = {
   all: ["dashboard"] as const,
   healthz: () => [...dashboardQueryKeys.all, "healthz"] as const,
   resourceHealth: () => [...dashboardQueryKeys.all, "resource-health"] as const,
+  storageStats: () => [...dashboardQueryKeys.all, "storage-stats"] as const,
   schema: () => [...dashboardQueryKeys.all, "schema"] as const,
   serverInfo: () => [...dashboardQueryKeys.all, "server-info"] as const,
   agentRuns: () => [...dashboardQueryKeys.all, "agent-runs"] as const,
@@ -57,6 +58,59 @@ const resourceHealthReportSchema = z.object({
   resources: z.array(resourceHealthRecordSchema).optional().default([]),
 }).passthrough()
 
+const storageStatsSummarySchema = z.object({
+  clusters: z.number().optional().default(0),
+  apiResources: z.number().optional().default(0),
+  objects: z.number().optional().default(0),
+  deletedObjects: z.number().optional().default(0),
+  latestObjects: z.number().optional().default(0),
+  observations: z.number().optional().default(0),
+  versions: z.number().optional().default(0),
+  blobs: z.number().optional().default(0),
+  facts: z.number().optional().default(0),
+  edges: z.number().optional().default(0),
+  changes: z.number().optional().default(0),
+  filterDecisions: z.number().optional().default(0),
+  ingestionOffsets: z.number().optional().default(0),
+  rawBytes: z.number().optional().default(0),
+  storedBytes: z.number().optional().default(0),
+  databaseBytes: z.number().optional().default(0),
+  bytesOnDisk: z.number().optional().default(0),
+  compressedBytes: z.number().optional().default(0),
+  uncompressedBytes: z.number().optional().default(0),
+  compressionRatio: z.number().optional().default(0),
+}).passthrough()
+
+const storageTableStatSchema = z.object({
+  name: z.string(),
+  rows: z.number().optional().default(0),
+  bytes: z.number().optional().default(0),
+  bytesOnDisk: z.number().optional().default(0),
+  compressedBytes: z.number().optional().default(0),
+  uncompressedBytes: z.number().optional().default(0),
+}).passthrough()
+
+const storageObjectKindStatSchema = z.object({
+  group: z.string().optional(),
+  version: z.string().optional(),
+  resource: z.string().optional(),
+  kind: z.string(),
+  objects: z.number().optional().default(0),
+  latestObjects: z.number().optional().default(0),
+  versions: z.number().optional().default(0),
+  rawBytes: z.number().optional().default(0),
+  storedBytes: z.number().optional().default(0),
+}).passthrough()
+
+const storageStatsSchema = z.object({
+  checkedAt: z.string().optional(),
+  backend: z.string(),
+  summary: storageStatsSummarySchema,
+  tables: z.array(storageTableStatSchema).optional().default([]),
+  objectKinds: z.array(storageObjectKindStatSchema).optional().default([]),
+  warnings: z.array(z.string()).optional().default([]),
+}).passthrough()
+
 const agentRunSummarySchema = z.object({
   queued: z.number().optional().default(0),
   running: z.number().optional().default(0),
@@ -96,6 +150,9 @@ const serverInfoSchema = z.object({
 export type HealthzDTO = z.infer<typeof healthzSchema>
 export type ResourceHealthReportDTO = z.infer<typeof resourceHealthReportSchema>
 export type ResourceHealthRecordDTO = z.infer<typeof resourceHealthRecordSchema>
+export type StorageStatsDTO = z.infer<typeof storageStatsSchema>
+export type StorageObjectKindStatDTO = z.infer<typeof storageObjectKindStatSchema>
+export type StorageTableStatDTO = z.infer<typeof storageTableStatSchema>
 export type ServerInfoDTO = z.infer<typeof serverInfoSchema>
 export type AgentRunSummaryDTO = z.infer<typeof agentRunSummarySchema>
 export type AgentRunListDTO = z.infer<typeof agentRunListSchema>
@@ -116,6 +173,10 @@ export function getResourceHealth(options?: AgentAPIOptions) {
     options,
     (value) => resourceHealthReportSchema.parse(value),
   )
+}
+
+export function getStorageStats(options?: AgentAPIOptions) {
+  return agentRequestJSON<StorageStatsDTO>("/api/v1/storage/stats", options, (value) => storageStatsSchema.parse(value))
 }
 
 export function getSchema(options?: AgentAPIOptions) {

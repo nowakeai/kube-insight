@@ -50,6 +50,8 @@ func TestServerReadOnlyAgentEndpoints(t *testing.T) {
 	assertGETContains(t, server.URL+"/api/v1/schema", `"name": "latest_index"`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"relationships":`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"recipes":`)
+	assertGETContains(t, server.URL+"/api/v1/storage/stats", `"compressionRatio"`)
+	assertGETContains(t, server.URL+"/api/v1/storage/stats", `"objectKinds"`)
 	assertPOSTContains(t, server.URL+"/api/v1/sql", `{"sql":"select name from latest_index where name = 'api-0'","maxRows":5}`, `"name": "api-0"`)
 	assertPOSTContains(t, server.URL+"/api/v1/sql", `{"sql":"delete from latest_index"}`, `"error":`)
 	assertGETContains(t, server.URL+"/api/v1/health?limit=5", `"summary":`)

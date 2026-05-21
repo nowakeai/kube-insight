@@ -21,6 +21,7 @@ type ServerOptions struct {
 	KeepStoreOpen bool
 	Close         func() error
 	AgentStore    agent.Store
+	ServerInfo    ServerInfo
 }
 
 type StoreOpener func(context.Context) (ReadStore, error)
@@ -35,6 +36,7 @@ type Server struct {
 	closeStoreOnRequest bool
 	closeFunc           func() error
 	agentStore          agent.Store
+	serverInfo          ServerInfo
 	mux                 *http.ServeMux
 }
 
@@ -68,7 +70,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if agentStore == nil {
 		agentStore = agent.NewMemoryStore()
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, mux: http.NewServeMux()}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }
@@ -111,6 +113,7 @@ func (s *Server) closeReadStore(store ReadStore) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
+	s.mux.HandleFunc("GET /api/v1/server/info", s.handleServerInfo)
 	s.mux.HandleFunc("POST /api/v1/sql", s.handleSQL)
 	s.mux.HandleFunc("GET /api/v1/health", s.handleResourceHealth)
 	s.mux.HandleFunc("GET /api/v1/history", s.handleHistory)
@@ -126,6 +129,12 @@ func (s *Server) routes() {
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
+	info := s.serverInfo
+	info.CheckedAt = time.Now().UTC()
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {

@@ -69,3 +69,42 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 		t.Fatalf("sqlite target = %q", got)
 	}
 }
+
+func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-secret-value")
+	cfg := appconfig.Default()
+	cfg.Storage.Driver = "clickhouse"
+	cfg.Storage.ClickHouse.Database = "ki"
+	cfg.Server.Chat.Enabled = true
+	cfg.Server.Chat.Provider = "openai-compatible"
+	cfg.Server.Chat.APIKeyEnv = "OPENAI_API_KEY"
+	cfg.Server.Chat.Model = "mimo-v2.5-pro"
+
+	opts := apiServerOptions(cfg, "kubeinsight.db", serveSelection{
+		API:           true,
+		MCP:           true,
+		WebUI:         true,
+		Metrics:       true,
+		Watch:         true,
+		APIListen:     "127.0.0.1:8080",
+		MCPListen:     "127.0.0.1:8090",
+		WebUIListen:   "127.0.0.1:8081",
+		MetricsListen: "127.0.0.1:9090",
+	})
+	info := opts.ServerInfo
+	if info.Storage.Driver != "clickhouse" || info.Storage.Target != "clickhouse:ki" {
+		t.Fatalf("storage info = %#v", info.Storage)
+	}
+	if !info.Components["api"].Enabled || info.Components["api"].Listen != "127.0.0.1:8080" {
+		t.Fatalf("api component = %#v", info.Components["api"])
+	}
+	if !info.Components["metrics"].Enabled || info.Components["metrics"].URL != "http://127.0.0.1:9090/metrics" {
+		t.Fatalf("metrics component = %#v", info.Components["metrics"])
+	}
+	if info.Chat.Provider != "openai-compatible" || info.Chat.Model != "mimo-v2.5-pro" {
+		t.Fatalf("chat info = %#v", info.Chat)
+	}
+	if info.Chat.APIKeyEnv != "OPENAI_API_KEY" || !info.Chat.APIKeyConfigured {
+		t.Fatalf("chat key info = %#v", info.Chat)
+	}
+}

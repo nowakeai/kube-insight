@@ -7,6 +7,7 @@ export const dashboardQueryKeys = {
   healthz: () => [...dashboardQueryKeys.all, "healthz"] as const,
   resourceHealth: () => [...dashboardQueryKeys.all, "resource-health"] as const,
   schema: () => [...dashboardQueryKeys.all, "schema"] as const,
+  serverInfo: () => [...dashboardQueryKeys.all, "server-info"] as const,
   metrics: () => [...dashboardQueryKeys.all, "metrics"] as const,
 }
 
@@ -55,9 +56,32 @@ const resourceHealthReportSchema = z.object({
   resources: z.array(resourceHealthRecordSchema).optional().default([]),
 }).passthrough()
 
+const serverComponentInfoSchema = z.object({
+  enabled: z.boolean(),
+  listen: z.string().optional(),
+  url: z.string().optional(),
+}).passthrough()
+
+const serverInfoSchema = z.object({
+  checkedAt: z.string().optional(),
+  storage: z.object({
+    driver: z.string(),
+    target: z.string(),
+  }).passthrough(),
+  components: z.record(z.string(), serverComponentInfoSchema).optional().default({}),
+  chat: z.object({
+    enabled: z.boolean(),
+    provider: z.string().optional(),
+    model: z.string().optional(),
+    apiKeyEnv: z.string().optional(),
+    apiKeyConfigured: z.boolean(),
+  }).passthrough(),
+}).passthrough()
+
 export type HealthzDTO = z.infer<typeof healthzSchema>
 export type ResourceHealthReportDTO = z.infer<typeof resourceHealthReportSchema>
 export type ResourceHealthRecordDTO = z.infer<typeof resourceHealthRecordSchema>
+export type ServerInfoDTO = z.infer<typeof serverInfoSchema>
 
 export type MetricsProbeDTO = {
   ok: boolean
@@ -79,6 +103,10 @@ export function getResourceHealth(options?: AgentAPIOptions) {
 
 export function getSchema(options?: AgentAPIOptions) {
   return agentRequestJSON<unknown>("/api/v1/schema", options)
+}
+
+export function getServerInfo(options?: AgentAPIOptions) {
+  return agentRequestJSON<ServerInfoDTO>("/api/v1/server/info", options, (value) => serverInfoSchema.parse(value))
 }
 
 export async function getMetricsProbe(options?: AgentAPIOptions): Promise<MetricsProbeDTO> {

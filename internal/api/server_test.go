@@ -46,6 +46,7 @@ func TestServerReadOnlyAgentEndpoints(t *testing.T) {
 	defer server.Close()
 
 	assertGETContains(t, server.URL+"/healthz", `"ok": true`)
+	assertGETContains(t, server.URL+"/api/v1/server/info", `"storage"`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"name": "latest_index"`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"relationships":`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"recipes":`)
@@ -58,6 +59,51 @@ func TestServerReadOnlyAgentEndpoints(t *testing.T) {
 	assertGETContains(t, server.URL+"/api/v1/services/default/api/investigation?maxEvidenceObjects=5&maxVersionsPerObject=2", `"endpointSlices": 1`)
 	assertGETContains(t, server.URL+"/api/v1/services/default/api/investigation?maxEvidenceObjects=5&maxVersionsPerObject=2", `"pods": 1`)
 	assertGETContains(t, server.URL+"/api/v1/topology?kind=Pod&namespace=default&name=api-0", `"pod_on_node"`)
+}
+
+func TestServerInfoEndpointRedactsSecrets(t *testing.T) {
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		ServerInfo: ServerInfo{
+			Storage: ServerStorageInfo{Driver: "clickhouse", Target: "clickhouse:ki"},
+			Components: map[string]ServerComponentInfo{
+				"api":     {Enabled: true, Listen: "127.0.0.1:8080", URL: "http://127.0.0.1:8080"},
+				"metrics": {Enabled: false, Listen: "127.0.0.1:9090"},
+			},
+			Chat: ServerChatInfo{
+				Enabled:          true,
+				Provider:         "openai-compatible",
+				Model:            "mimo-v2.5-pro",
+				APIKeyEnv:        "MIMO_API_KEY",
+				APIKeyConfigured: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	body := getBody(t, server.URL+"/api/v1/server/info", http.StatusOK)
+	for _, want := range []string{
+		`"driver": "clickhouse"`,
+		`"target": "clickhouse:ki"`,
+		`"provider": "openai-compatible"`,
+		`"model": "mimo-v2.5-pro"`,
+		`"apiKeyEnv": "MIMO_API_KEY"`,
+		`"apiKeyConfigured": true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("server info missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "tp-") || strings.Contains(body, "secret") {
+		t.Fatalf("server info leaked a secret-looking value: %s", body)
+	}
 }
 
 func assertGETContains(t *testing.T, url string, want string) {

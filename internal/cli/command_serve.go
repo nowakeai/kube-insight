@@ -136,7 +136,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		logger.Info("serving api", "listen", addr)
 		services = append(services, serveStatusRow{"api", "serving", "http://" + addr})
 		start("api", func() error {
-			return api.ListenAndServe(serviceCtx, addr, apiServerOptions(rt.Config, dbPath))
+			return api.ListenAndServe(serviceCtx, addr, apiServerOptions(rt.Config, dbPath, selection))
 		})
 	}
 	if selection.MCP {
@@ -358,7 +358,7 @@ func serveAPICommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 			addr := firstNonEmpty(listen, rt.Config.Server.API.Listen, "127.0.0.1:8080")
 			logger.Info("serving api", "listen", addr, "db", dbPath)
 			fmt.Fprintf(stdout, "serving api on http://%s\n", addr)
-			return api.ListenAndServe(runCtx, addr, apiServerOptions(rt.Config, dbPath))
+			return api.ListenAndServe(runCtx, addr, apiServerOptions(rt.Config, dbPath, serveSelection{API: true, APIListen: addr}))
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "", "Listen address; defaults to server.api.listen")
@@ -453,8 +453,66 @@ func metricsServerOptions(cfg appconfig.Config, dbPath string) metrics.ServerOpt
 	return opts
 }
 
-func apiServerOptions(cfg appconfig.Config, dbPath string) api.ServerOptions {
-	opts := api.ServerOptions{DBPath: dbPath}
+func configuredServerInfoSelection(cfg appconfig.Config) serveSelection {
+	return serveSelection{
+		API:           cfg.Server.API.Enabled,
+		MCP:           cfg.MCP.Enabled,
+		WebUI:         cfg.Server.Web.Enabled,
+		Metrics:       cfg.Server.Metrics.Enabled,
+		Watch:         cfg.Collection.Enabled,
+		APIListen:     firstNonEmpty(cfg.Server.API.Listen, "127.0.0.1:8080"),
+		MCPListen:     firstNonEmpty(cfg.MCP.Listen, "127.0.0.1:8090"),
+		WebUIListen:   firstNonEmpty(cfg.Server.Web.Listen, "127.0.0.1:8081"),
+		MetricsListen: firstNonEmpty(cfg.Server.Metrics.Listen, "127.0.0.1:9090"),
+	}
+}
+
+func apiServerInfo(cfg appconfig.Config, dbPath string, selection serveSelection) api.ServerInfo {
+	apiKeyEnv := cfg.Server.Chat.EffectiveAPIKeyEnv()
+	_, apiKeyConfigured := os.LookupEnv(apiKeyEnv)
+	if apiKeyEnv == "" {
+		apiKeyConfigured = false
+	}
+	return api.ServerInfo{
+		Storage: api.ServerStorageInfo{
+			Driver: storageDriver(cfg),
+			Target: serviceStorageTarget(cfg, dbPath),
+		},
+		Components: map[string]api.ServerComponentInfo{
+			"api":     componentInfo(selection.API, selection.APIListen, ""),
+			"mcp":     componentInfo(selection.MCP, selection.MCPListen, "/mcp"),
+			"webui":   componentInfo(selection.WebUI, selection.WebUIListen, ""),
+			"metrics": componentInfo(selection.Metrics, selection.MetricsListen, "/metrics"),
+			"watch":   {Enabled: selection.Watch},
+		},
+		Chat: api.ServerChatInfo{
+			Enabled:          cfg.Server.Chat.Enabled,
+			Provider:         cfg.Server.Chat.Provider,
+			Model:            cfg.Server.Chat.Model,
+			APIKeyEnv:        apiKeyEnv,
+			APIKeyConfigured: apiKeyConfigured,
+		},
+	}
+}
+
+func componentInfo(enabled bool, listen string, path string) api.ServerComponentInfo {
+	info := api.ServerComponentInfo{Enabled: enabled}
+	if listen == "" {
+		return info
+	}
+	info.Listen = listen
+	if enabled {
+		info.URL = "http://" + listen + path
+	}
+	return info
+}
+
+func apiServerOptions(cfg appconfig.Config, dbPath string, selections ...serveSelection) api.ServerOptions {
+	selection := configuredServerInfoSelection(cfg)
+	if len(selections) > 0 {
+		selection = selections[0]
+	}
+	opts := api.ServerOptions{DBPath: dbPath, ServerInfo: apiServerInfo(cfg, dbPath, selection)}
 	switch storageDriver(cfg) {
 	case "clickhouse":
 		opts.OpenStore = func(context.Context) (api.ReadStore, error) {

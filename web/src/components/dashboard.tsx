@@ -9,8 +9,10 @@ import {
   getMetricsProbe,
   getResourceHealth,
   getSchema,
+  getServerInfo,
   type ResourceHealthRecordDTO,
   type ResourceHealthReportDTO,
+  type ServerInfoDTO,
 } from "@/lib/dashboard-api"
 import { useAgentProjectionStore, type AgentRunStatus } from "@/lib/agent-store"
 import { cn } from "@/lib/utils"
@@ -33,6 +35,11 @@ export function Dashboard() {
     queryFn: ({ signal }) => getSchema({ signal }),
     refetchInterval: 60_000,
   })
+  const serverInfo = useQuery({
+    queryKey: dashboardQueryKeys.serverInfo(),
+    queryFn: ({ signal }) => getServerInfo({ signal }),
+    refetchInterval: refreshMs,
+  })
   const metrics = useQuery({
     queryKey: dashboardQueryKeys.metrics(),
     queryFn: ({ signal }) => getMetricsProbe({ signal }),
@@ -41,6 +48,7 @@ export function Dashboard() {
   const runsById = useAgentProjectionStore((state) => state.runs)
   const runCounts = useMemo(() => countRuns(Object.values(runsById)), [runsById])
   const health = resourceHealth.data
+  const info = serverInfo.data
   const summary = health?.summary
   const resources = health?.resources ?? []
 
@@ -58,7 +66,7 @@ export function Dashboard() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), schema.refetch(), metrics.refetch()])}>
+            <Button type="button" size="sm" variant="outline" onClick={() => void Promise.all([healthz.refetch(), resourceHealth.refetch(), schema.refetch(), serverInfo.refetch(), metrics.refetch()])}>
               <RotateCw className="size-3.5" aria-hidden="true" />
               Refresh
             </Button>
@@ -71,25 +79,36 @@ export function Dashboard() {
           </div>
         </header>
 
-        <section className="grid gap-3 py-5 md:grid-cols-2 xl:grid-cols-4">
+        <section className="grid gap-3 py-5 md:grid-cols-2 xl:grid-cols-5">
           <ComponentStatus
             icon={Server}
             label="API"
-            detail={healthz.data?.ok ? "healthz ok" : queryDetail(healthz.isPending, healthz.isError)}
+            detail={apiDetail(info, healthz.data?.ok, healthz.isPending, healthz.isError)}
             tone={healthz.data?.ok ? "good" : healthz.isError ? "bad" : "neutral"}
           />
-          <ComponentStatus icon={Activity} label="Web UI" detail="serving this page" tone="good" />
+          <ComponentStatus
+            icon={Activity}
+            label="Web UI"
+            detail={componentDetail(info?.components.webui, "serving this page")}
+            tone={componentTone(info?.components.webui, true)}
+          />
+          <ComponentStatus
+            icon={ShieldCheck}
+            label="MCP"
+            detail={componentDetail(info?.components.mcp, "unknown")}
+            tone={componentTone(info?.components.mcp)}
+          />
           <ComponentStatus
             icon={Radio}
             label="Watcher"
-            detail={watcherDetail(health)}
-            tone={watcherTone(health)}
+            detail={watcherDetail(health, info)}
+            tone={watcherTone(health, info)}
           />
           <ComponentStatus
             icon={Gauge}
             label="Metrics"
-            detail={metricsDetail(metrics.data, metrics.isPending, metrics.isError)}
-            tone={metrics.data?.ok ? "good" : metrics.isError ? "bad" : "neutral"}
+            detail={metricsDetail(metrics.data, metrics.isPending, metrics.isError, info)}
+            tone={metricsTone(metrics.data, metrics.isError, info)}
           />
         </section>
 
@@ -129,19 +148,21 @@ export function Dashboard() {
               </div>
             </Panel>
 
-            <Panel title="Storage and schema" description="Inferred from /api/v1/schema until a server info endpoint exists.">
+            <Panel title="Storage and schema" description={info?.checkedAt ? `server info ${formatDate(info.checkedAt)}` : "server info plus /api/v1/schema"}>
               <div className="space-y-3 text-sm">
-                <KeyValue icon={HardDrive} label="Storage driver" value={inferStorageDriver(schema.data, schema.isError)} />
+                <KeyValue icon={HardDrive} label="Storage driver" value={storageDriverLabel(info, schema.data, schema.isError)} />
+                <KeyValue icon={Database} label="Storage target" value={storageTargetLabel(info)} />
                 <KeyValue icon={Database} label="Schema surface" value={inferSchemaSurface(schema.data, schema.isPending, schema.isError)} />
-                <KeyValue icon={ShieldCheck} label="Provider/model" value={providerModelLabel()} />
+                <KeyValue icon={ShieldCheck} label="Provider/model" value={providerModelLabel(info)} />
+                <KeyValue icon={ShieldCheck} label="Provider key" value={providerKeyLabel(info)} />
               </div>
             </Panel>
 
             <Panel title="Component notes" description="Unavailable means the current server does not expose that surface on this origin.">
               <ul className="space-y-2 text-sm text-muted-foreground">
-                <li>MCP is served separately when `serve --mcp` is enabled.</li>
-                <li>Metrics may use a separate listener; `/metrics` is a direct probe only.</li>
-                <li>Watcher health is derived from collector resource coverage.</li>
+                <li>Component listen addresses come from `/api/v1/server/info` when available.</li>
+                <li>Metrics may use a separate listener; `/metrics` is still probed directly.</li>
+                <li>Watcher health combines configured service state and collector coverage.</li>
               </ul>
             </Panel>
           </aside>
@@ -283,8 +304,26 @@ function queryDetail(isPending: boolean, isError: boolean) {
   return "ok"
 }
 
-function watcherDetail(health?: ResourceHealthReportDTO) {
-  if (!health) return "checking coverage"
+function apiDetail(info: ServerInfoDTO | undefined, ok: boolean | undefined, isPending: boolean, isError: boolean) {
+  if (ok) return componentDetail(info?.components.api, "healthz ok")
+  return queryDetail(isPending, isError)
+}
+
+function componentDetail(component: ServerInfoDTO["components"][string] | undefined, fallback: string) {
+  if (!component) return fallback
+  if (!component.enabled) return "disabled"
+  return component.listen || component.url || "enabled"
+}
+
+function componentTone(component: ServerInfoDTO["components"][string] | undefined, fallbackGood = false): Tone {
+  if (!component) return fallbackGood ? "good" : "neutral"
+  return component.enabled ? "good" : "neutral"
+}
+
+function watcherDetail(health: ResourceHealthReportDTO | undefined, info: ServerInfoDTO | undefined) {
+  const watch = info?.components.watch
+  if (watch && !watch.enabled) return "disabled"
+  if (!health) return watch?.enabled ? "checking coverage" : "checking coverage"
   const summary = health.summary
   if ((summary.resources ?? 0) === 0) return "no resources observed"
   if ((summary.errors ?? 0) > 0) return `${summary.errors} error streams`
@@ -292,7 +331,9 @@ function watcherDetail(health?: ResourceHealthReportDTO) {
   return summary.complete ? "coverage complete" : "coverage partial"
 }
 
-function watcherTone(health?: ResourceHealthReportDTO): Tone {
+function watcherTone(health: ResourceHealthReportDTO | undefined, info: ServerInfoDTO | undefined): Tone {
+  const watch = info?.components.watch
+  if (watch && !watch.enabled) return "neutral"
   if (!health) return "neutral"
   const summary = health.summary
   if ((summary.errors ?? 0) > 0) return "bad"
@@ -300,24 +341,48 @@ function watcherTone(health?: ResourceHealthReportDTO): Tone {
   return "good"
 }
 
-function metricsDetail(data: { ok: boolean; status: number } | undefined, isPending: boolean, isError: boolean) {
+function metricsDetail(
+  data: { ok: boolean; status: number } | undefined,
+  isPending: boolean,
+  isError: boolean,
+  info: ServerInfoDTO | undefined,
+) {
+  const component = info?.components.metrics
+  if (component && !component.enabled) return "disabled"
+  if (component?.listen && !data?.ok) return `${component.listen} configured`
   if (isPending) return "probing /metrics"
   if (isError) return "probe failed"
   if (!data) return "not checked"
   return data.ok ? "prometheus endpoint" : `not on this origin (${data.status})`
 }
 
+function metricsTone(
+  data: { ok: boolean } | undefined,
+  isError: boolean,
+  info: ServerInfoDTO | undefined,
+): Tone {
+  const component = info?.components.metrics
+  if (component && !component.enabled) return "neutral"
+  if (data?.ok || component?.enabled) return "good"
+  return isError ? "bad" : "neutral"
+}
+
 function numberValue(value?: number) {
   return String(value ?? 0)
 }
 
-function inferStorageDriver(schema: unknown, isError: boolean) {
-  if (isError) return "unavailable"
+function storageDriverLabel(info: ServerInfoDTO | undefined, schema: unknown, schemaError: boolean) {
+  if (info?.storage.driver) return info.storage.driver
+  if (schemaError) return "unavailable"
   if (!schema) return "checking"
   const text = JSON.stringify(schema).toLowerCase()
   if (text.includes("clickhouse")) return "ClickHouse-compatible"
   if (text.includes("sqlite")) return "SQLite"
   return "configured server store"
+}
+
+function storageTargetLabel(info: ServerInfoDTO | undefined) {
+  return info?.storage.target || "unavailable"
 }
 
 function inferSchemaSurface(schema: unknown, isPending: boolean, isError: boolean) {
@@ -337,10 +402,16 @@ function countNamedArray(value: unknown, name: string): number {
   return Array.isArray(record[name]) ? record[name].length : 0
 }
 
-function providerModelLabel() {
-  const provider = import.meta.env.VITE_KUBE_INSIGHT_PROVIDER || "server default"
-  const model = import.meta.env.VITE_KUBE_INSIGHT_MODEL || "model from server config"
+function providerModelLabel(info: ServerInfoDTO | undefined) {
+  const provider = info?.chat.provider || "server default"
+  const model = info?.chat.model || "model from server config"
   return `${provider} / ${model}`
+}
+
+function providerKeyLabel(info: ServerInfoDTO | undefined) {
+  if (!info) return "unavailable"
+  if (!info.chat.apiKeyEnv) return "not configured"
+  return info.chat.apiKeyConfigured ? `set via ${info.chat.apiKeyEnv}` : `missing ${info.chat.apiKeyEnv}`
 }
 
 function priorityResources(resources: ResourceHealthRecordDTO[]) {

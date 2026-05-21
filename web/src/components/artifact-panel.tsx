@@ -42,16 +42,21 @@ export function ArtifactDock({
   if (collapsed) {
     return (
       <aside className="hidden min-h-0 lg:block" aria-label="Panel dock collapsed">
-        <button
-          type="button"
-          className="sticky top-20 flex h-[calc(100svh-6rem)] w-full flex-col items-center justify-between rounded-md border border-border bg-card px-2 py-3 text-muted-foreground shadow-sm transition hover:border-primary/40 hover:text-foreground"
-          onClick={() => onCollapsedChange(false)}
-          aria-label="Expand panel dock"
-        >
-          <PanelRightOpen className="size-4" aria-hidden="true" />
-          <span className="[writing-mode:vertical-rl] rotate-180 text-xs font-medium">Panel dock</span>
-          <span className="rounded-md border border-border px-1.5 py-1 text-[0.65rem] tabular-nums">{visibleArtifacts.length}</span>
-        </button>
+        <div className="sticky top-20 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shadow-sm"
+            onClick={() => onCollapsedChange(false)}
+            aria-label="Expand panel dock"
+            title="Expand panel dock"
+          >
+            <PanelRightOpen className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">Panel dock</span>
+            {visibleArtifacts.length > 0 ? <span className="tabular-nums">{visibleArtifacts.length}</span> : null}
+          </Button>
+        </div>
       </aside>
     )
   }

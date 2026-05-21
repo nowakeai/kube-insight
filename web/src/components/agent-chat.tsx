@@ -228,7 +228,7 @@ export function AgentChat() {
               </ThreadPrimitive.Empty>
 
               <ThreadPrimitive.If empty={false}>
-                <div className={panelDockCollapsed ? "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_3.5rem]" : "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]"}>
+                <div className={panelDockCollapsed ? "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_5rem]" : "grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]"}>
                   <section className="min-w-0">
                     <RunPageHeader
                       routeRun={routeRun}

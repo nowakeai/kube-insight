@@ -87,7 +87,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Implement stop, retry, continue, and new session controls.
 - [x] Implement tool timeline with input summary, output summary, status, duration,
   and error display.
-- [ ] Render markdown answers with GFM tables and code blocks.
+- [x] Render markdown answers with GFM tables and code blocks.
 - [ ] Render evidence citations and jump targets.
 
 ## Artifact Renderers

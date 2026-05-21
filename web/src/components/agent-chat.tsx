@@ -243,7 +243,7 @@ export function AgentChat() {
                         prompt={prompt}
                         method="replace"
                         autoSend={false}
-                        className="min-h-10 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/40 hover:bg-muted hover:text-foreground"
+                        className="min-h-11 rounded-md border border-border bg-background px-3 py-2 text-left text-sm text-muted-foreground transition hover:border-primary/40 hover:bg-muted hover:text-foreground"
                       >
                         {prompt}
                       </ThreadPrimitive.Suggestion>
@@ -397,8 +397,8 @@ function CitationChip({ citation, selected }: { citation: AgentCitationView; sel
       type="button"
       className={
         selected
-          ? "inline-flex min-h-8 items-center gap-1 rounded-md border border-primary bg-muted px-2.5 py-1 text-left text-xs text-foreground"
-          : "inline-flex min-h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+          ? "inline-flex min-h-11 items-center gap-1 rounded-md border border-primary bg-muted px-3 py-2 text-left text-xs text-foreground"
+          : "inline-flex min-h-11 items-center gap-1 rounded-md border border-border bg-card px-3 py-2 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
       }
       onClick={onClick}
     >
@@ -467,7 +467,7 @@ function ChatComposer({
         className={
           isHome
             ? "max-h-44 min-h-12 flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 outline-none placeholder:text-muted-foreground"
-            : "max-h-44 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
+            : "max-h-44 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
         }
       />
       <ThreadPrimitive.If running={false}>

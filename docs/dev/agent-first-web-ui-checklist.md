@@ -16,6 +16,7 @@ happen next.
 - [x] Fallback agent runtime is charmbracelet/fantasy if Eino complexity is too high.
 - [x] Frontend app stack is React + TypeScript + Vite.
 - [x] UI stack is shadcn/ui + Tailwind + Radix.
+- [x] Visual style follows the nowake.ai Design Guide Cloud Index direction.
 - [x] Chat UI foundation is assistant-ui.
 - [x] Client state uses Zustand for run/artifact UI projection.
 - [x] Server data fetching uses TanStack Query for non-streaming API calls.

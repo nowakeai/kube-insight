@@ -10,38 +10,67 @@
   letter-spacing: 0;
   color-scheme: light;
 
-  --background: oklch(0.99 0.004 95);
-  --foreground: oklch(0.19 0.012 255);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.19 0.012 255);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.19 0.012 255);
-  --primary: oklch(0.36 0.055 214);
-  --primary-foreground: oklch(0.99 0.004 95);
-  --secondary: oklch(0.94 0.01 215);
-  --secondary-foreground: oklch(0.24 0.016 255);
-  --muted: oklch(0.95 0.006 230);
-  --muted-foreground: oklch(0.47 0.018 255);
-  --accent: oklch(0.92 0.045 152);
-  --accent-foreground: oklch(0.23 0.03 155);
-  --destructive: oklch(0.58 0.2 28);
-  --border: oklch(0.88 0.01 230);
-  --input: oklch(0.88 0.01 230);
-  --ring: oklch(0.56 0.06 214);
-  --chart-1: oklch(0.54 0.09 214);
-  --chart-2: oklch(0.55 0.11 152);
-  --chart-3: oklch(0.62 0.13 68);
-  --chart-4: oklch(0.58 0.12 28);
-  --chart-5: oklch(0.48 0.08 285);
+  --nw-color-blue-50: #eef3fa;
+  --nw-color-blue-100: #e6eefb;
+  --nw-color-blue-200: #dbe1ea;
+  --nw-color-blue-300: #d3dce9;
+  --nw-color-blue-700: #245aae;
+  --nw-color-ink-900: #171b24;
+  --nw-color-slate-600: #626a78;
+  --nw-color-slate-500: #596577;
+  --nw-color-white: #ffffff;
+  --nw-color-bg: #f7f8fb;
+  --nw-color-green-700: #277b63;
+  --nw-color-amber-700: #946514;
+  --nw-shadow-blue-soft: rgba(29, 53, 93, 0.08);
+
+  --color-page: var(--nw-color-bg);
+  --color-surface: var(--nw-color-white);
+  --color-surface-soft: var(--nw-color-blue-50);
+  --color-surface-raised: var(--nw-color-white);
+  --color-text: var(--nw-color-ink-900);
+  --color-text-muted: var(--nw-color-slate-600);
+  --color-text-subtle: var(--nw-color-slate-500);
+  --color-border: var(--nw-color-blue-200);
+  --color-border-strong: var(--nw-color-blue-300);
+  --color-accent: var(--nw-color-blue-700);
+  --color-accent-soft: var(--nw-color-blue-100);
+  --color-signal: var(--nw-color-green-700);
+  --color-warn: var(--nw-color-amber-700);
+  --shadow-surface: 0 20px 60px var(--nw-shadow-blue-soft);
+
+  --background: var(--color-page);
+  --foreground: var(--color-text);
+  --card: var(--color-surface);
+  --card-foreground: var(--color-text);
+  --popover: var(--color-surface);
+  --popover-foreground: var(--color-text);
+  --primary: var(--color-text);
+  --primary-foreground: var(--nw-color-white);
+  --secondary: var(--color-surface-soft);
+  --secondary-foreground: var(--color-text);
+  --muted: var(--color-surface-soft);
+  --muted-foreground: var(--color-text-muted);
+  --accent: var(--color-signal);
+  --accent-foreground: var(--nw-color-white);
+  --destructive: #b42318;
+  --border: var(--color-border);
+  --input: var(--color-border);
+  --ring: var(--color-accent);
+  --chart-1: var(--color-accent);
+  --chart-2: var(--color-signal);
+  --chart-3: var(--color-warn);
+  --chart-4: #8a4f2a;
+  --chart-5: #5b5f97;
   --radius: 0.5rem;
-  --sidebar: oklch(0.98 0.004 95);
-  --sidebar-foreground: oklch(0.19 0.012 255);
-  --sidebar-primary: oklch(0.36 0.055 214);
-  --sidebar-primary-foreground: oklch(0.99 0.004 95);
-  --sidebar-accent: oklch(0.94 0.01 215);
-  --sidebar-accent-foreground: oklch(0.24 0.016 255);
-  --sidebar-border: oklch(0.88 0.01 230);
-  --sidebar-ring: oklch(0.56 0.06 214);
+  --sidebar: var(--color-surface);
+  --sidebar-foreground: var(--color-text);
+  --sidebar-primary: var(--color-text);
+  --sidebar-primary-foreground: var(--nw-color-white);
+  --sidebar-accent: var(--color-surface-soft);
+  --sidebar-accent-foreground: var(--color-text);
+  --sidebar-border: var(--color-border);
+  --sidebar-ring: var(--color-accent);
 }
 
 .dark {
@@ -129,5 +158,23 @@
   button,
   textarea {
     font: inherit;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  textarea:focus-visible {
+    outline: 3px solid rgb(36 90 174 / 92%);
+    outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
   }
 }

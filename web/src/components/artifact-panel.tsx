@@ -1,4 +1,4 @@
-import { ChevronRight, FileText, PanelRightClose, X } from "lucide-react"
+import { FileText, PanelRightClose, PanelRightOpen, X } from "lucide-react"
 import { lazy, Suspense, useMemo, useState, type ReactNode } from "react"
 
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
@@ -25,53 +25,71 @@ const LazyUnknownArtifact = lazy(() =>
 export function ArtifactDock({
   artifacts,
   selectedArtifactId,
+  collapsed,
+  onCollapsedChange,
 }: {
   artifacts: AgentArtifact[]
   selectedArtifactId?: string
+  collapsed: boolean
+  onCollapsedChange: (collapsed: boolean) => void
 }) {
-  const [collapsed, setCollapsed] = useState(false)
   const [closedIds, setClosedIds] = useState<string[]>([])
   const visibleArtifacts = useMemo(
     () => artifacts.filter((artifact) => !closedIds.includes(artifact.id)),
     [artifacts, closedIds],
   )
 
+  if (collapsed) {
+    return (
+      <aside className="hidden min-h-0 lg:block" aria-label="Panel dock collapsed">
+        <button
+          type="button"
+          className="sticky top-20 flex h-[calc(100svh-6rem)] w-full flex-col items-center justify-between rounded-md border border-border bg-card px-2 py-3 text-muted-foreground shadow-sm transition hover:border-primary/40 hover:text-foreground"
+          onClick={() => onCollapsedChange(false)}
+          aria-label="Expand panel dock"
+        >
+          <PanelRightOpen className="size-4" aria-hidden="true" />
+          <span className="[writing-mode:vertical-rl] rotate-180 text-xs font-medium">Panel dock</span>
+          <span className="rounded-md border border-border px-1.5 py-1 text-[0.65rem] tabular-nums">{visibleArtifacts.length}</span>
+        </button>
+      </aside>
+    )
+  }
+
   return (
-    <aside className="hidden min-h-0 lg:block" aria-label="Artifact dock">
+    <aside className="hidden min-h-0 lg:block" aria-label="Panel dock">
       <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-hidden rounded-md border border-border bg-card shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <FileText className="size-3.5" aria-hidden="true" />
-              <span>Artifact dock</span>
+              <span>Panel dock</span>
             </div>
             <h2 className="mt-1 truncate text-sm font-semibold text-foreground">
               {visibleArtifacts.length > 0 ? `${visibleArtifacts.length} panel${visibleArtifacts.length === 1 ? "" : "s"}` : "No pinned panels"}
             </h2>
           </div>
-          <Button type="button" size="icon-sm" variant="ghost" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand artifact dock" : "Collapse artifact dock"}>
-            {collapsed ? <ChevronRight className="size-3.5" aria-hidden="true" /> : <PanelRightClose className="size-3.5" aria-hidden="true" />}
+          <Button type="button" size="icon-sm" variant="ghost" onClick={() => onCollapsedChange(true)} aria-label="Collapse panel dock">
+            <PanelRightClose className="size-3.5" aria-hidden="true" />
           </Button>
         </div>
 
-        {collapsed ? null : (
-          <div className="max-h-[calc(100svh-10rem)] space-y-3 overflow-auto p-3">
-            {visibleArtifacts.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
-                Pin resources, topology, history, or diff artifacts from the chat stream.
-              </div>
-            ) : (
-              visibleArtifacts.map((artifact) => (
-                <DockPanel
-                  key={artifact.id}
-                  artifact={artifact}
-                  selected={artifact.id === selectedArtifactId}
-                  onClose={() => setClosedIds((current) => current.includes(artifact.id) ? current : [...current, artifact.id])}
-                />
-              ))
-            )}
-          </div>
-        )}
+        <div className="max-h-[calc(100svh-10rem)] space-y-3 overflow-auto p-3">
+          {visibleArtifacts.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
+              Pin resources, topology, history, or diff artifacts from the chat stream.
+            </div>
+          ) : (
+            visibleArtifacts.map((artifact) => (
+              <DockPanel
+                key={artifact.id}
+                artifact={artifact}
+                selected={artifact.id === selectedArtifactId}
+                onClose={() => setClosedIds((current) => current.includes(artifact.id) ? current : [...current, artifact.id])}
+              />
+            ))
+          )}
+        </div>
       </div>
     </aside>
   )

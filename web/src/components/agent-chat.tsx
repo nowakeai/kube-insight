@@ -118,6 +118,11 @@ export function AgentChat() {
       title: "Pod default/api-0",
       data: demoK8sResourceArtifact(prompt),
     })
+    upsertArtifact(runID, {
+      kind: "k8s.resource_list",
+      title: "Demo resource candidates",
+      data: demoK8sResourceListArtifact(prompt),
+    })
     addCitation(runID, {
       id: "citation_demo_runtime",
       artifactId: resourceArtifactID,
@@ -614,6 +619,51 @@ function demoK8sResourceArtifact(question: string) {
         ],
       },
     },
+  }
+}
+
+function demoK8sResourceListArtifact(question: string) {
+  return {
+    title: "Candidates",
+    groups: [
+      {
+        title: "Likely related",
+        items: [
+          {
+            id: "candidate-pod-api-0",
+            identity: { apiVersion: "v1", kind: "Pod", namespace: "default", name: "api-0" },
+            status: { phase: "Running", ready: "True" },
+            score: 0.98,
+            reason: "Exact workload match for the demo query.",
+            summary: [`Question: ${question}`, "Running pod with retained status proof."],
+            labels: { app: "api", "pod-template-hash": "demo" },
+          },
+          {
+            id: "candidate-service-api",
+            identity: { apiVersion: "v1", kind: "Service", namespace: "default", name: "api" },
+            status: { phase: "Active" },
+            score: 0.86,
+            reason: "Service selector matches app=api.",
+            summary: ["Routes traffic to demo api pods."],
+            labels: { app: "api" },
+          },
+        ],
+      },
+      {
+        title: "Needs attention",
+        items: [
+          {
+            id: "candidate-pod-worker-0",
+            identity: { apiVersion: "v1", kind: "Pod", namespace: "default", name: "worker-0" },
+            status: { phase: "Running", ready: "False", reason: "ContainersNotReady" },
+            score: 0.63,
+            reason: "Shares namespace and recent readiness signal.",
+            summary: ["Readiness is false in the demo candidate set."],
+            labels: { app: "worker" },
+          },
+        ],
+      },
+    ],
   }
 }
 

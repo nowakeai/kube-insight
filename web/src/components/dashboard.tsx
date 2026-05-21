@@ -477,7 +477,21 @@ function metricsTone(
 }
 
 function numberValue(value?: number) {
-  return String(value ?? 0)
+  return formatCount(value)
+}
+
+function formatCount(value?: number) {
+  const count = value ?? 0
+  if (count < 1000) return String(count)
+  const units = ["", "k", "m", "g", "t"]
+  let size = count
+  let unit = 0
+  while (size >= 1000 && unit < units.length - 1) {
+    size /= 1000
+    unit += 1
+  }
+  const digits = size >= 100 ? 0 : size >= 10 ? 1 : 1
+  return `${size.toFixed(digits)}${units[unit]}`
 }
 
 function primaryStorageBytes(summary: StorageStatsDTO["summary"] | undefined) {

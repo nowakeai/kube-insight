@@ -190,9 +190,8 @@ The combined command supports these components:
 - `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP endpoint at `/mcp`.
-- `--webui`: embedded Web UI listener for the React app built from `web/`.
-  The first formal UI milestone is the agent-first chat surface described in
-  [Agent-First Web UI Design](product/agent-first-web-ui.md).
+- `--webui`: web UI listener. The current build exposes only a placeholder until
+  the UI is implemented.
 
 Example with all current and planned service surfaces:
 

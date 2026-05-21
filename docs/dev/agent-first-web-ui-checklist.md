@@ -141,6 +141,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add provider configuration validation.
 - [ ] Add optional BYOK after default env-provider path works.
 - [x] Add user-facing errors for missing provider keys and unsupported providers.
+  - Chat runs now surface `error`/`run.failed` messages in the assistant bubble,
+    and retry uses the server retry endpoint instead of resubmitting as a new prompt.
 
 ## Validation
 

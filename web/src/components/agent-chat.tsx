@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ArtifactPanel } from "@/components/artifact-panel"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
-import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession } from "@/lib/agent-api"
+import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentRunEvent } from "@/lib/agent-store"
@@ -134,10 +134,25 @@ export function AgentChat() {
     if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
   }, [startNewSession])
 
-  const handleRetry = useCallback(() => {
-    if (!activeRun || isRunning) return
-    void runPrompt(activeRun.input)
-  }, [activeRun, isRunning, runPrompt])
+  const handleRetry = useCallback(async () => {
+    if (!activeRun || activeRun.status !== "failed" || isRunning) return
+    try {
+      await runServerPrompt(activeRun.input, {
+        activeSessionId: activeRun.sessionId,
+        retryRunId: activeRun.id,
+        applyServerEvent,
+        eventSubscriptionRef,
+        activeServerRunRef,
+        setIsRunning,
+        setMessages,
+        setRouteRun,
+        upsertServerRun,
+        upsertServerSession,
+      })
+    } catch {
+      await runPrompt(activeRun.input)
+    }
+  }, [activeRun, applyServerEvent, isRunning, runPrompt, upsertServerRun, upsertServerSession])
 
   const handleContinue = useCallback(() => {
     if (isRunning) return
@@ -216,7 +231,7 @@ export function AgentChat() {
                   routeRun={routeRun}
                   status={activeRun?.status ?? (isRunning ? "running" : "completed")}
                   isRunning={isRunning}
-                  canRetry={Boolean(activeRun)}
+                  canRetry={activeRun?.status === "failed"}
                   onStop={onCancel}
                   onRetry={handleRetry}
                   onContinue={handleContinue}
@@ -247,6 +262,7 @@ type RunServerPromptOptions = {
   applyServerEvent: (event: AgentRunEventDTO) => void
   eventSubscriptionRef: React.MutableRefObject<AgentRunEventSubscription | undefined>
   activeServerRunRef: React.MutableRefObject<string | undefined>
+  retryRunId?: string
   setIsRunning: (value: boolean) => void
   setMessages: React.Dispatch<React.SetStateAction<ThreadMessage[]>>
   setRouteRun: React.Dispatch<React.SetStateAction<AgentRunRoute | undefined>>
@@ -255,16 +271,17 @@ type RunServerPromptOptions = {
 }
 
 async function runServerPrompt(prompt: string, options: RunServerPromptOptions) {
-  const session = await ensureServerSession(prompt, options.activeSessionId)
-  options.upsertServerSession(session)
-  const run = await createAgentRun(session.id, { input: prompt })
+  const run = options.retryRunId
+    ? await retryAgentRun(options.retryRunId)
+    : await createRunInServerSession(prompt, options)
   options.upsertServerRun(run)
   options.activeServerRunRef.current = run.id
-  openRunPage(session.id, run.id)
-  options.setRouteRun({ sessionID: session.id, runID: run.id })
+  openRunPage(run.sessionId, run.id)
+  options.setRouteRun({ sessionID: run.sessionId, runID: run.id })
 
   const assistantID = newMessageID("assistant")
   let assistantText = ""
+  let errorText = run.error ?? ""
   let terminal = isTerminalRunStatus(run.status)
   options.setIsRunning(!terminal)
   options.setMessages((current) => [
@@ -277,6 +294,8 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
     runId: run.id,
     onEvent: (event) => {
       options.applyServerEvent(event)
+      const eventError = errorMessageFromEvent(event)
+      if (eventError) errorText = eventError
       const update = messageUpdateFromEvent(event)
       if (update.delta) assistantText += update.delta
       if (update.content) assistantText = update.content
@@ -287,7 +306,7 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
       if (status && isTerminalRunStatus(status)) {
         terminal = true
         options.setIsRunning(false)
-        options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, assistantText || queuedRunMessage(status), status === "cancelled" ? "cancelled" : "complete") : item))
+        options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, assistantText || queuedRunMessage(status, errorText), status === "cancelled" ? "cancelled" : "complete") : item))
       }
     },
   })
@@ -295,8 +314,14 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
   await subscription.closed
   if (!terminal) {
     options.setIsRunning(false)
-    options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, queuedRunMessage(run.status), "complete") : item))
+    options.setMessages((current) => current.map((item) => item.id === assistantID ? assistantMessage(assistantID, queuedRunMessage(run.status, errorText), "complete") : item))
   }
+}
+
+async function createRunInServerSession(prompt: string, options: RunServerPromptOptions) {
+  const session = await ensureServerSession(prompt, options.activeSessionId)
+  options.upsertServerSession(session)
+  return createAgentRun(session.id, { input: prompt })
 }
 
 async function ensureServerSession(prompt: string, activeSessionId?: string): Promise<AgentSessionDTO> {
@@ -409,8 +434,15 @@ function messageUpdateFromEvent(event: AgentRunEventDTO) {
   }
 }
 
-function queuedRunMessage(status: string) {
-  if (status === "failed") return "Run failed before an answer was produced."
+function errorMessageFromEvent(event: AgentRunEventDTO) {
+  const data = event.data && typeof event.data === "object" ? event.data as { error?: unknown; message?: unknown } : {}
+  if (typeof data.error === "string" && data.error) return data.error
+  if (event.type === "error" && typeof data.message === "string" && data.message) return data.message
+  return undefined
+}
+
+function queuedRunMessage(status: string, error?: string) {
+  if (status === "failed") return error ? `Run failed: ${error}` : "Run failed before an answer was produced."
   if (status === "cancelled") return "Run cancelled."
   return "Run accepted by the server. Backend agent execution is not connected yet, so this run is waiting for the next server-side agent loop step."
 }

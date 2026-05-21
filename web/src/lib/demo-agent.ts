@@ -122,6 +122,29 @@ export function demoK8sResourceListArtifact(question: string) {
   }
 }
 
+export function demoK8sTopologyArtifact(question: string) {
+  return {
+    title: "Service default/api topology",
+    query: question,
+    nodes: [
+      { id: "svc-default-api", kind: "Service", namespace: "default", name: "api", status: "Active" },
+      { id: "eps-default-api", kind: "EndpointSlice", namespace: "default", name: "api-abc12", status: "Ready 2" },
+      { id: "pod-default-api-0", kind: "Pod", namespace: "default", name: "api-0", status: "Ready True" },
+      { id: "pod-default-worker-0", kind: "Pod", namespace: "default", name: "worker-0", status: "Ready False" },
+      { id: "node-demo-1", kind: "Node", name: "demo-node-1", status: "Ready" },
+      { id: "event-worker-unready", kind: "Event", namespace: "default", name: "worker-0-unready", status: "Warning" },
+    ],
+    edges: [
+      { id: "svc-eps", source: "svc-default-api", target: "eps-default-api", label: "selects" },
+      { id: "eps-api", source: "eps-default-api", target: "pod-default-api-0", label: "endpoint" },
+      { id: "eps-worker", source: "eps-default-api", target: "pod-default-worker-0", label: "endpoint" },
+      { id: "api-node", source: "pod-default-api-0", target: "node-demo-1", label: "scheduled" },
+      { id: "worker-node", source: "pod-default-worker-0", target: "node-demo-1", label: "scheduled" },
+      { id: "worker-event", source: "pod-default-worker-0", target: "event-worker-unready", label: "emits" },
+    ],
+  }
+}
+
 const markdownEscapeChars = new Set(["\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", "|", ">"])
 
 function escapeMarkdown(value: string) {

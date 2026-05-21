@@ -1,14 +1,25 @@
 import { FileText } from "lucide-react"
+import { lazy, Suspense, type ReactNode } from "react"
 
-import { K8sDiffArtifact } from "@/components/k8s-diff-artifact"
-import { K8sHistoryArtifact } from "@/components/k8s-history-artifact"
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact"
-import { K8sTopologyArtifact } from "@/components/k8s-topology-artifact"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
-import { UnknownArtifact } from "@/components/unknown-artifact"
 import { type AgentArtifact, useAgentProjectionStore } from "@/lib/agent-store"
+
+
+const LazyK8sDiffArtifact = lazy(() =>
+  import("@/components/k8s-diff-artifact").then((module) => ({ default: module.K8sDiffArtifact })),
+)
+const LazyK8sHistoryArtifact = lazy(() =>
+  import("@/components/k8s-history-artifact").then((module) => ({ default: module.K8sHistoryArtifact })),
+)
+const LazyK8sTopologyArtifact = lazy(() =>
+  import("@/components/k8s-topology-artifact").then((module) => ({ default: module.K8sTopologyArtifact })),
+)
+const LazyUnknownArtifact = lazy(() =>
+  import("@/components/unknown-artifact").then((module) => ({ default: module.UnknownArtifact })),
+)
 
 export function ArtifactPanel({
   artifacts,
@@ -74,15 +85,29 @@ function ArtifactBody({ artifact }: { artifact: AgentArtifact }) {
     return <K8sResourceListArtifact data={artifact.data} />
   }
   if (artifact.kind === "k8s.topology") {
-    return <K8sTopologyArtifact data={artifact.data} />
+    return <LazyArtifact><LazyK8sTopologyArtifact data={artifact.data} /></LazyArtifact>
   }
   if (artifact.kind === "k8s.history") {
-    return <K8sHistoryArtifact data={artifact.data} />
+    return <LazyArtifact><LazyK8sHistoryArtifact data={artifact.data} /></LazyArtifact>
   }
   if (artifact.kind === "k8s.diff") {
-    return <K8sDiffArtifact data={artifact.data} />
+    return <LazyArtifact><LazyK8sDiffArtifact data={artifact.data} /></LazyArtifact>
   }
-  return <UnknownArtifact kind={artifact.kind} data={artifact.data} />
+  return <LazyArtifact><LazyUnknownArtifact kind={artifact.kind} data={artifact.data} /></LazyArtifact>
+}
+
+function LazyArtifact({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="rounded-md border border-border bg-background px-3 py-6 text-center text-sm text-muted-foreground">
+          Loading artifact renderer...
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  )
 }
 
 function markdownArtifactText(data: unknown) {

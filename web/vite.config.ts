@@ -23,6 +23,20 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: allowedHosts.length > 0 ? { allowedHosts } : undefined,
+    build: {
+      rolldownOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('/@assistant-ui/')) return 'vendor-assistant-ui'
+            if (id.includes('/@xyflow/')) return 'vendor-react-flow'
+            if (id.includes('/@codemirror/') || id.includes('/@uiw/')) return 'vendor-codemirror'
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'vendor-react'
+            return undefined
+          },
+        },
+      },
+    },
   }
 })
 

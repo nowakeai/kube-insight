@@ -1,5 +1,5 @@
-import { FileText } from "lucide-react"
-import { lazy, Suspense, type ReactNode } from "react"
+import { ChevronRight, FileText, PanelRightClose, X } from "lucide-react"
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react"
 
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact"
@@ -20,6 +20,90 @@ const LazyK8sTopologyArtifact = lazy(() =>
 const LazyUnknownArtifact = lazy(() =>
   import("@/components/unknown-artifact").then((module) => ({ default: module.UnknownArtifact })),
 )
+
+
+export function ArtifactDock({
+  artifacts,
+  selectedArtifactId,
+}: {
+  artifacts: AgentArtifact[]
+  selectedArtifactId?: string
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const [closedIds, setClosedIds] = useState<string[]>([])
+  const visibleArtifacts = useMemo(
+    () => artifacts.filter((artifact) => !closedIds.includes(artifact.id)),
+    [artifacts, closedIds],
+  )
+
+  return (
+    <aside className="hidden min-h-0 lg:block" aria-label="Artifact dock">
+      <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-hidden rounded-md border border-border bg-card shadow-sm">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <FileText className="size-3.5" aria-hidden="true" />
+              <span>Artifact dock</span>
+            </div>
+            <h2 className="mt-1 truncate text-sm font-semibold text-foreground">
+              {visibleArtifacts.length > 0 ? `${visibleArtifacts.length} panel${visibleArtifacts.length === 1 ? "" : "s"}` : "No pinned panels"}
+            </h2>
+          </div>
+          <Button type="button" size="icon-sm" variant="ghost" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? "Expand artifact dock" : "Collapse artifact dock"}>
+            {collapsed ? <ChevronRight className="size-3.5" aria-hidden="true" /> : <PanelRightClose className="size-3.5" aria-hidden="true" />}
+          </Button>
+        </div>
+
+        {collapsed ? null : (
+          <div className="max-h-[calc(100svh-10rem)] space-y-3 overflow-auto p-3">
+            {visibleArtifacts.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
+                Pin resources, topology, history, or diff artifacts from the chat stream.
+              </div>
+            ) : (
+              visibleArtifacts.map((artifact) => (
+                <DockPanel
+                  key={artifact.id}
+                  artifact={artifact}
+                  selected={artifact.id === selectedArtifactId}
+                  onClose={() => setClosedIds((current) => current.includes(artifact.id) ? current : [...current, artifact.id])}
+                />
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function DockPanel({
+  artifact,
+  selected,
+  onClose,
+}: {
+  artifact: AgentArtifact
+  selected: boolean
+  onClose: () => void
+}) {
+  const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  return (
+    <section className={selected ? "overflow-hidden rounded-md border border-primary/50 bg-background" : "overflow-hidden rounded-md border border-border bg-background"}>
+      <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectArtifact(artifact.id)}>
+          <div className="truncate text-[0.7rem] text-muted-foreground">{artifact.kind}</div>
+          <div className="mt-1 truncate text-sm font-medium text-foreground">{artifact.title || "Artifact"}</div>
+        </button>
+        <Button type="button" size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close artifact panel">
+          <X className="size-3.5" aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="max-h-[24rem] overflow-auto px-3 py-3">
+        <ArtifactBody artifact={artifact} />
+      </div>
+    </section>
+  )
+}
 
 export function ArtifactPanel({
   artifacts,

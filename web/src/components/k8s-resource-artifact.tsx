@@ -1,5 +1,7 @@
 import { AlertTriangle, CheckCircle2, CircleDashed, CopyCheck, FileCode2 } from "lucide-react"
 
+import { ProofViewer } from "@/components/proof-viewer"
+
 export function K8sResourceArtifact({ data }: { data: unknown }) {
   const payload = asRecord(data)
   const object = asRecord(payload?.object) ?? asRecord(payload?.resource)
@@ -90,9 +92,7 @@ export function K8sResourceArtifact({ data }: { data: unknown }) {
           <FileCode2 className="size-3.5" aria-hidden="true" />
           Proof
         </h4>
-        <pre className="max-h-80 overflow-auto rounded-md border border-border bg-muted p-3 text-xs leading-5 text-foreground">
-          {formatProof(proof)}
-        </pre>
+<ProofViewer value={proof} language="yaml" />
       </section>
     </div>
   )
@@ -228,11 +228,6 @@ function recordEntries(value: Record<string, unknown> | undefined): [string, str
   return Object.entries(value)
     .map(([key, item]) => [key, textValue(item) ?? JSON.stringify(item)] as [string, string])
     .filter(([, item]) => Boolean(item))
-}
-
-function formatProof(value: unknown) {
-  if (typeof value === "string") return value
-  return JSON.stringify(value, null, 2)
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

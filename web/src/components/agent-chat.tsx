@@ -7,10 +7,10 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, Bot, CircleStop, ExternalLink, LayoutDashboard, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
+import { ArrowRight, Bot, ChevronDown, CircleStop, ExternalLink, LayoutDashboard, Play, Plus, RotateCw, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { ArtifactPanel } from "@/components/artifact-panel"
+import { ArtifactDock } from "@/components/artifact-panel"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession, retryAgentRun } from "@/lib/agent-api"
@@ -170,7 +170,7 @@ export function AgentChat() {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <main className="min-h-svh bg-background text-foreground">
-        <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-svh w-full max-w-7xl flex-col px-4 py-4 sm:px-6 lg:px-8">
           <header className="flex h-12 items-center justify-between border-b border-border/80">
             <div className="flex items-center gap-2 text-sm font-medium">
               <span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
@@ -227,26 +227,26 @@ export function AgentChat() {
               </ThreadPrimitive.Empty>
 
               <ThreadPrimitive.If empty={false}>
-                <RunPageHeader
-                  routeRun={routeRun}
-                  status={activeRun?.status ?? (isRunning ? "running" : "completed")}
-                  isRunning={isRunning}
-                  canRetry={activeRun?.status === "failed"}
-                  onStop={onCancel}
-                  onRetry={handleRetry}
-                  onContinue={handleContinue}
-                />
-                <RunTimeline events={activeRunEvents} />
-                <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
-                <ArtifactPanel artifacts={activeRunArtifacts} selectedArtifactId={selectedArtifactId} />
-              </ThreadPrimitive.If>
-
-              <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-
-              <ThreadPrimitive.If empty={false}>
-                <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-6 bg-background/95 py-4 backdrop-blur">
-                  <ChatComposer />
-                </ThreadPrimitive.ViewportFooter>
+                <div className="grid min-h-0 gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_28rem]">
+                  <section className="min-w-0">
+                    <RunPageHeader
+                      routeRun={routeRun}
+                      status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                      isRunning={isRunning}
+                      canRetry={activeRun?.status === "failed"}
+                      onStop={onCancel}
+                      onRetry={handleRetry}
+                      onContinue={handleContinue}
+                    />
+                    <RunTimeline events={activeRunEvents} />
+                    <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
+                    <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
+                    <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-6 bg-background/95 py-4 backdrop-blur">
+                      <ChatComposer />
+                    </ThreadPrimitive.ViewportFooter>
+                  </section>
+                  <ArtifactDock artifacts={activeRunArtifacts} selectedArtifactId={selectedArtifactId} />
+                </div>
               </ThreadPrimitive.If>
             </ThreadPrimitive.Viewport>
           </ThreadPrimitive.Root>
@@ -492,7 +492,11 @@ function RunTimeline({ events }: { events: AgentRunEvent[] }) {
   if (toolEvents.length === 0) return null
   return (
     <div className="mb-4 border-b border-border/80 pb-3">
-      <div className="flex flex-col gap-2">
+      <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <RotateCw className="size-3.5" aria-hidden="true" />
+        Tool calls
+      </div>
+      <div className="flex flex-col gap-1.5">
         {toolEvents.map((event) => (
           <ToolTimelineRow key={event.id} event={event} />
         ))}
@@ -502,21 +506,35 @@ function RunTimeline({ events }: { events: AgentRunEvent[] }) {
 }
 
 function ToolTimelineRow({ event }: { event: AgentRunEvent }) {
+  const [expanded, setExpanded] = useState(false)
   const data = toolEventData(event.data)
   const status = data.status || event.type.replace("tool.", "")
+  const detail = toolEventDetail(data)
   return (
-    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 rounded-md border border-border bg-background px-3 py-2 text-xs sm:grid-cols-[8rem_minmax(0,1fr)_5rem]">
-      <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-        <span className={statusDotClass(status)} aria-hidden="true" />
-        <span className="truncate capitalize">{status}</span>
-      </div>
-      <div className="min-w-0">
-        <div className="truncate font-medium text-foreground">{data.name || "tool"}</div>
-        <div className="truncate text-muted-foreground">{toolEventSummary(data)}</div>
-      </div>
-      <div className="hidden text-right text-muted-foreground sm:block">
-        {typeof data.durationMs === "number" ? `${data.durationMs}ms` : ""}
-      </div>
+    <div className="rounded-md border border-border bg-background text-xs">
+      <button
+        type="button"
+        className="grid w-full grid-cols-[6.5rem_minmax(0,1fr)_1.5rem] gap-3 px-3 py-2 text-left sm:grid-cols-[7rem_minmax(0,1fr)_5rem_1.5rem]"
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
+          <span className={statusDotClass(status)} aria-hidden="true" />
+          <span className="truncate capitalize">{status}</span>
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-medium text-foreground">{data.name || "tool"}</div>
+          <div className="truncate text-muted-foreground">{toolEventSummary(data)}</div>
+        </div>
+        <div className="hidden text-right text-muted-foreground sm:block">
+          {typeof data.durationMs === "number" ? `${data.durationMs}ms` : ""}
+        </div>
+        <ChevronDown className={expanded ? "mt-1 size-3.5 rotate-180 text-muted-foreground transition" : "mt-1 size-3.5 text-muted-foreground transition"} aria-hidden="true" />
+      </button>
+      {expanded ? (
+        <pre className="max-h-56 overflow-auto border-t border-border bg-muted px-3 py-2 text-[0.7rem] leading-5 text-muted-foreground">
+          {detail}
+        </pre>
+      ) : null}
     </div>
   )
 }
@@ -637,7 +655,7 @@ function ChatComposer({
       <ThreadPrimitive.If running={false}>
         <ComposerPrimitive.Send asChild>
           <Button type="submit" size="icon" aria-label="Send message" className={isHome ? "size-11" : undefined}>
-            <ArrowUp className="size-4" aria-hidden="true" />
+            <ArrowRight className="size-4" aria-hidden="true" />
           </Button>
         </ComposerPrimitive.Send>
       </ThreadPrimitive.If>
@@ -776,6 +794,18 @@ function toolEventSummary(data: ToolEventData) {
   if (data.output !== undefined) return `output ${compactJSON(data.output)}`
   if (data.input !== undefined) return `input ${compactJSON(data.input)}`
   return "waiting"
+}
+
+function toolEventDetail(data: ToolEventData) {
+  const detail = {
+    name: data.name,
+    status: data.status,
+    durationMs: data.durationMs,
+    input: data.input,
+    output: data.output,
+    error: data.error,
+  }
+  return JSON.stringify(detail, null, 2)
 }
 
 function compactJSON(value: unknown) {

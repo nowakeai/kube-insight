@@ -122,6 +122,43 @@ export function demoK8sResourceListArtifact(question: string) {
   }
 }
 
+export function demoK8sHistoryArtifact(question: string) {
+  return {
+    title: "Pod default/api-0 history",
+    identity: { apiVersion: "v1", kind: "Pod", namespace: "default", name: "api-0" },
+    versions: [
+      {
+        id: "version-48270",
+        observedAt: "2026-05-21T01:40:00Z",
+        resourceVersion: "48270",
+        status: "Pending",
+        reason: "Scheduled",
+        summary: ["Pod was scheduled and waiting for container readiness.", `Question context: ${question}`],
+        document: {
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: { namespace: "default", name: "api-0", resourceVersion: "48270" },
+          status: { phase: "Pending", conditions: [{ type: "Ready", status: "False" }] },
+        },
+      },
+      {
+        id: "version-48291",
+        observedAt: "2026-05-21T01:42:00Z",
+        resourceVersion: "48291",
+        status: "Running",
+        reason: "ContainersReady",
+        summary: ["Pod reached Ready=True and all demo containers are ready."],
+        document: {
+          apiVersion: "v1",
+          kind: "Pod",
+          metadata: { namespace: "default", name: "api-0", resourceVersion: "48291" },
+          status: { phase: "Running", conditions: [{ type: "Ready", status: "True" }] },
+        },
+      },
+    ],
+  }
+}
+
 export function demoK8sTopologyArtifact(question: string) {
   return {
     title: "Service default/api topology",

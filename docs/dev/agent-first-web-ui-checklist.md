@@ -96,9 +96,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Implement `k8s.resource` renderer.
 - [x] Implement `k8s.resource_list` renderer.
 - [x] Implement `k8s.topology` renderer with React Flow.
-- [ ] Implement `k8s.history` renderer with version/history travel controls.
+- [x] Implement `k8s.history` renderer with version/history travel controls.
 - [ ] Implement `k8s.diff` renderer.
-- [ ] Implement JSON/YAML proof viewer.
+- [x] Implement JSON/YAML proof viewer.
 - [ ] Add fallback renderer for unknown artifact kinds.
 
 ## Dashboard

@@ -66,7 +66,7 @@ async function readRunEventStream(
   signal: AbortSignal,
   seen: Set<string>,
 ) {
-  const response = await agentFetch(`/api/v1/agent/runs/${encodeURIComponent(options.runId)}/events`, {
+  const response = await agentFetch(`/api/v1/agent/runs/${encodeURIComponent(options.runId)}/events?follow=true`, {
     baseURL: options.baseURL,
     fetcher: options.fetcher,
     signal,
@@ -149,5 +149,5 @@ function abortableDelay(ms: number, signal: AbortSignal) {
 }
 
 export function agentRunEventStreamURL(runId: string, baseURL?: string) {
-  return agentURL(`/api/v1/agent/runs/${encodeURIComponent(runId)}/events`, baseURL)
+  return agentURL(`/api/v1/agent/runs/${encodeURIComponent(runId)}/events?follow=true`, baseURL)
 }

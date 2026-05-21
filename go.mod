@@ -6,6 +6,7 @@ require (
 	charm.land/log/v2 v2.0.0
 	github.com/chdb-io/chdb-go v1.11.0
 	github.com/cloudwego/eino v0.8.13
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/dustin/go-humanize v1.0.1
 	github.com/modelcontextprotocol/go-sdk v1.6.0
 	github.com/prometheus/client_golang v1.23.2
@@ -34,10 +35,12 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
+	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -67,6 +70,7 @@ require (
 	github.com/mailru/easyjson v0.9.0 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-runewidth v0.0.23 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect

@@ -74,11 +74,13 @@ func TestServerInfoEndpointRedactsSecrets(t *testing.T) {
 				"metrics": {Enabled: false, Listen: "127.0.0.1:9090"},
 			},
 			Chat: ServerChatInfo{
-				Enabled:          true,
-				Provider:         "openai-compatible",
-				Model:            "mimo-v2.5-pro",
-				APIKeyEnv:        "MIMO_API_KEY",
-				APIKeyConfigured: true,
+				Enabled:           true,
+				Provider:          "openai-compatible",
+				Model:             "mimo-v2.5-pro",
+				APIKeyEnv:         "MIMO_API_KEY",
+				APIKeyConfigured:  true,
+				BaseURLEnv:        "MIMO_OPENAI_BASEURL",
+				BaseURLConfigured: true,
 			},
 		},
 	})
@@ -96,6 +98,8 @@ func TestServerInfoEndpointRedactsSecrets(t *testing.T) {
 		`"model": "mimo-v2.5-pro"`,
 		`"apiKeyEnv": "MIMO_API_KEY"`,
 		`"apiKeyConfigured": true`,
+		`"baseUrlEnv": "MIMO_OPENAI_BASEURL"`,
+		`"baseUrlConfigured": true`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("server info missing %q: %s", want, body)

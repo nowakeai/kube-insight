@@ -21,10 +21,15 @@ type ServerOptions struct {
 	KeepStoreOpen bool
 	Close         func() error
 	AgentStore    agent.Store
+	AgentRunner   AgentRunner
 	ServerInfo    ServerInfo
 }
 
 type StoreOpener func(context.Context) (ReadStore, error)
+
+type AgentRunner interface {
+	Run(context.Context, agent.EinoRunInput) (agent.EinoRunResult, error)
+}
 
 type ReadStore interface {
 	Close() error
@@ -36,6 +41,7 @@ type Server struct {
 	closeStoreOnRequest bool
 	closeFunc           func() error
 	agentStore          agent.Store
+	agentRunner         AgentRunner
 	serverInfo          ServerInfo
 	mux                 *http.ServeMux
 }
@@ -70,7 +76,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if agentStore == nil {
 		agentStore = agent.NewMemoryStore()
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
 	return s, nil
 }

@@ -474,6 +474,11 @@ func apiServerInfo(cfg appconfig.Config, dbPath string, selection serveSelection
 	if apiKeyEnv == "" {
 		apiKeyConfigured = false
 	}
+	baseURLEnv := cfg.Server.Chat.BaseURLEnv
+	_, baseURLConfigured := os.LookupEnv(baseURLEnv)
+	if baseURLEnv == "" {
+		baseURLConfigured = false
+	}
 	return api.ServerInfo{
 		Storage: api.ServerStorageInfo{
 			Driver: storageDriver(cfg),
@@ -487,11 +492,13 @@ func apiServerInfo(cfg appconfig.Config, dbPath string, selection serveSelection
 			"watch":   {Enabled: selection.Watch},
 		},
 		Chat: api.ServerChatInfo{
-			Enabled:          cfg.Server.Chat.Enabled,
-			Provider:         cfg.Server.Chat.Provider,
-			Model:            cfg.Server.Chat.Model,
-			APIKeyEnv:        apiKeyEnv,
-			APIKeyConfigured: apiKeyConfigured,
+			Enabled:           cfg.Server.Chat.Enabled,
+			Provider:          cfg.Server.Chat.Provider,
+			Model:             cfg.Server.Chat.Model,
+			APIKeyEnv:         apiKeyEnv,
+			APIKeyConfigured:  apiKeyConfigured,
+			BaseURLEnv:        baseURLEnv,
+			BaseURLConfigured: baseURLConfigured,
 		},
 	}
 }
@@ -554,5 +561,6 @@ func apiServerOptions(cfg appconfig.Config, dbPath string, selections ...serveSe
 			return err
 		}
 	}
+	configureAgentRunner(context.Background(), cfg, dbPath, &opts)
 	return opts
 }

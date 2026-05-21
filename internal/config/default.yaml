@@ -338,6 +338,7 @@ server:
     enabled: false
     provider: openai
     apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
 
 mcp:

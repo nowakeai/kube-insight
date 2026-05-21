@@ -208,6 +208,7 @@ type ChatConfig struct {
 	Enabled         bool   `yaml:"enabled" json:"enabled"`
 	Provider        string `yaml:"provider" json:"provider"`
 	APIKeyEnv       string `yaml:"apiKeyEnv" json:"apiKeyEnv"`
+	BaseURLEnv      string `yaml:"baseUrlEnv" json:"baseUrlEnv,omitempty"`
 	Model           string `yaml:"model" json:"model"`
 	OpenAIAPIKeyEnv string `yaml:"openaiApiKeyEnv" json:"openaiApiKeyEnv,omitempty"`
 }

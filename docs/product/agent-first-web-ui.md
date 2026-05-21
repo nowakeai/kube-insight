@@ -272,7 +272,7 @@ and later optional BYOK.
 
 Initial direction:
 
-- Default provider/model configured in server config and environment variables.
+- Default provider/model/base URL env configured in server config and environment variables.
 - BYOK can be added as a runtime session option, passed to the server for that
   session/run without being persisted by default.
 - Provider selection is a server concern because the server owns agent runtime,
@@ -286,6 +286,7 @@ server:
     enabled: true
     provider: openai
     apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
 ```
 

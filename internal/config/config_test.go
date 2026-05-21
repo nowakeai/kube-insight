@@ -52,7 +52,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if len(cfg.ProfileRules()) == 0 {
 		t.Fatalf("profile rules missing")
 	}
-	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.Model == "" {
+	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.BaseURLEnv != "OPENAI_BASE_URL" || cfg.Server.Chat.Model == "" {
 		t.Fatalf("chat = %#v", cfg.Server.Chat)
 	}
 	for _, want := range []string{"resource_version", "status_condition_timestamps", "leader_election_configmap", "report_skip"} {
@@ -198,6 +198,7 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	t.Setenv("KUBE_INSIGHT_LOGGING_FORMAT", "json")
 	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_PROVIDER", "openai-compatible")
 	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_API_KEY_ENV", "ALT_OPENAI_API_KEY")
+	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_BASE_URL_ENV", "ALT_OPENAI_BASE_URL")
 	t.Setenv("KUBE_INSIGHT_SERVER_CHAT_MODEL", "gpt-5.2-mini")
 	t.Setenv("KUBE_INSIGHT_STORAGE_MAINTENANCE_MIN_WAL_BYTES", "1048576")
 	t.Setenv("KUBE_INSIGHT_PROCESSING_FILTERS", `{managed_fields: {type: builtin, action: keep_modified, removePaths: [/metadata/managedFields]}}`)
@@ -225,7 +226,7 @@ func TestLoadEffectiveAppliesEnvAndOverrides(t *testing.T) {
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" {
 		t.Fatalf("logging = %#v", cfg.Logging)
 	}
-	if cfg.Server.Chat.Provider != "openai-compatible" || cfg.Server.Chat.APIKeyEnv != "ALT_OPENAI_API_KEY" || cfg.Server.Chat.Model != "gpt-5.2-mini" {
+	if cfg.Server.Chat.Provider != "openai-compatible" || cfg.Server.Chat.APIKeyEnv != "ALT_OPENAI_API_KEY" || cfg.Server.Chat.BaseURLEnv != "ALT_OPENAI_BASE_URL" || cfg.Server.Chat.Model != "gpt-5.2-mini" {
 		t.Fatalf("chat = %#v", cfg.Server.Chat)
 	}
 	if cfg.Storage.Maintenance.IntervalSeconds != 60 || cfg.Storage.Maintenance.MinWalBytes != 1048576 {

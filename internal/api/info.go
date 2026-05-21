@@ -21,11 +21,13 @@ type ServerComponentInfo struct {
 }
 
 type ServerChatInfo struct {
-	Enabled          bool   `json:"enabled"`
-	Provider         string `json:"provider,omitempty"`
-	Model            string `json:"model,omitempty"`
-	APIKeyEnv        string `json:"apiKeyEnv,omitempty"`
-	APIKeyConfigured bool   `json:"apiKeyConfigured"`
+	Enabled           bool   `json:"enabled"`
+	Provider          string `json:"provider,omitempty"`
+	Model             string `json:"model,omitempty"`
+	APIKeyEnv         string `json:"apiKeyEnv,omitempty"`
+	APIKeyConfigured  bool   `json:"apiKeyConfigured"`
+	BaseURLEnv        string `json:"baseUrlEnv,omitempty"`
+	BaseURLConfigured bool   `json:"baseUrlConfigured"`
 }
 
 func normalizeServerInfo(info ServerInfo, dbPath string) ServerInfo {

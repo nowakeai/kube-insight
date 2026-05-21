@@ -40,7 +40,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Backend Foundation
 
 - [x] Add agent config fields for `server.chat.provider`, `server.chat.apiKeyEnv`,
-  and `server.chat.model`.
+  `server.chat.baseUrlEnv`, and `server.chat.model`.
 - [x] Add agent session and run domain types.
 - [x] Add in-memory session/run store for the first spike.
 - [x] Add `POST /api/v1/agent/sessions`.
@@ -124,15 +124,16 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Persistence And Hardening
 
 - [x] Add SQLite persistence for sessions, runs, and run events.
-- [ ] Connect API-created runs to the Eino agent runner.
-  - Frontend is server-first now; backend agent execution is still not wired
-    into `POST /api/v1/agent/sessions/{session_id}/runs`.
+- [x] Connect API-created runs to the Eino agent runner.
+  - `POST /api/v1/agent/sessions/{session_id}/runs` now starts the server-side
+    runner asynchronously, and `GET /api/v1/agent/runs/{run_id}/events?follow=true`
+    streams until the run reaches a terminal status.
 - [ ] Add cancellation propagation from API to Eino run context.
 - [ ] Add retry semantics for failed runs.
 - [ ] Add structured audit records for agent tool calls.
-- [ ] Add provider configuration validation.
+- [x] Add provider configuration validation.
 - [ ] Add optional BYOK after default env-provider path works.
-- [ ] Add user-facing errors for missing provider keys and unsupported models.
+- [x] Add user-facing errors for missing provider keys and unsupported providers.
 
 ## Validation
 
@@ -140,6 +141,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Run frontend typecheck, lint, and build.
 - [x] Run `make test`.
 - [x] Run `make build`.
+- [x] Smoke-test server-side Eino runner with the OpenAI-compatible MIMO test
+  endpoint, including tool events and final answer events over follow SSE.
 - [x] Run `git diff --check`.
 - [x] Run the 800-line Go file check.
 - [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.

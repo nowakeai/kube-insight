@@ -72,12 +72,14 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 
 func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-secret-value")
+	t.Setenv("MIMO_OPENAI_BASEURL", "https://example.invalid/v1")
 	cfg := appconfig.Default()
 	cfg.Storage.Driver = "clickhouse"
 	cfg.Storage.ClickHouse.Database = "ki"
 	cfg.Server.Chat.Enabled = true
 	cfg.Server.Chat.Provider = "openai-compatible"
 	cfg.Server.Chat.APIKeyEnv = "OPENAI_API_KEY"
+	cfg.Server.Chat.BaseURLEnv = "MIMO_OPENAI_BASEURL"
 	cfg.Server.Chat.Model = "mimo-v2.5-pro"
 
 	opts := apiServerOptions(cfg, "kubeinsight.db", serveSelection{
@@ -104,7 +106,7 @@ func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	if info.Chat.Provider != "openai-compatible" || info.Chat.Model != "mimo-v2.5-pro" {
 		t.Fatalf("chat info = %#v", info.Chat)
 	}
-	if info.Chat.APIKeyEnv != "OPENAI_API_KEY" || !info.Chat.APIKeyConfigured {
+	if info.Chat.APIKeyEnv != "OPENAI_API_KEY" || !info.Chat.APIKeyConfigured || info.Chat.BaseURLEnv != "MIMO_OPENAI_BASEURL" || !info.Chat.BaseURLConfigured {
 		t.Fatalf("chat key info = %#v", info.Chat)
 	}
 }

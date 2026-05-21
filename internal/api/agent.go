@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"kube-insight/internal/agent"
 )
@@ -83,6 +85,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeAgentStoreError(w, err)
 		return
 	}
+	s.startAgentRun(run)
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -133,22 +136,114 @@ func validRunStatus(status agent.RunStatus) bool {
 }
 
 func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
-	events, err := s.agentStore.ListRunEvents(r.Context(), r.PathValue("run_id"))
+	runID := r.PathValue("run_id")
+	follow := agentRunEventsShouldFollow(r)
+	events, err := s.agentStore.ListRunEvents(r.Context(), runID)
 	if err != nil {
 		writeAgentStoreError(w, err)
 		return
+	}
+	var run agent.Run
+	if follow {
+		run, err = s.agentStore.GetRun(r.Context(), runID)
+		if err != nil {
+			writeAgentStoreError(w, err)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	for _, event := range events {
-		if err := writeServerSentEvent(w, event); err != nil {
+	lastSequence, ok := writeServerSentEvents(w, events, 0)
+	if !ok {
+		return
+	}
+	flushServerSentEvents(w)
+	if !follow || agentRunStatusTerminal(run.Status) {
+		return
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
+		events, err = s.agentStore.ListRunEvents(r.Context(), runID)
+		if err != nil {
+			return
+		}
+		lastSequence, ok = writeServerSentEvents(w, events, lastSequence)
+		if !ok {
+			return
+		}
+		run, err = s.agentStore.GetRun(r.Context(), runID)
+		if err != nil {
+			return
+		}
+		flushServerSentEvents(w)
+		if agentRunStatusTerminal(run.Status) {
 			return
 		}
 	}
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
+}
+
+func (s *Server) startAgentRun(run agent.Run) {
+	if s.agentRunner == nil {
+		return
+	}
+	go func() {
+		_, err := s.agentRunner.Run(context.Background(), agent.EinoRunInput{
+			Messages: []agent.Message{{Role: agent.RoleUser, Content: run.Input}},
+			Store:    s.agentStore,
+			RunID:    run.ID,
+		})
+		if err != nil {
+			s.recordAgentRunFailure(context.Background(), run.ID, err)
+		}
+	}()
+}
+
+func (s *Server) recordAgentRunFailure(ctx context.Context, runID string, runErr error) {
+	run, err := s.agentStore.GetRun(ctx, runID)
+	if err != nil || agentRunStatusTerminal(run.Status) {
+		return
+	}
+	message := "agent run failed"
+	if runErr != nil && runErr.Error() != "" {
+		message = runErr.Error()
+	}
+	_, _ = s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventError,
+		Data: mustJSON(agent.ErrorEventData{Message: message}),
+	})
+	failed, err := s.agentStore.UpdateRunStatus(ctx, run.ID, agent.RunFailed, message)
+	if err != nil {
+		return
+	}
+	_, _ = s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventRunFailed,
+		Data: mustJSON(agent.RunStatusEventData{RunID: run.ID, SessionID: failed.SessionID, Status: failed.Status, Error: message}),
+	})
+}
+
+func agentRunEventsShouldFollow(r *http.Request) bool {
+	switch r.URL.Query().Get("follow") {
+	case "1", "true":
+		return true
+	default:
+		return false
+	}
+}
+
+func agentRunStatusTerminal(status agent.RunStatus) bool {
+	switch status {
+	case agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -193,6 +288,22 @@ func writeAgentStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
+func writeServerSentEvents(w io.Writer, events []agent.RunEvent, afterSequence int64) (int64, bool) {
+	lastSequence := afterSequence
+	for _, event := range events {
+		if event.Sequence <= afterSequence {
+			continue
+		}
+		if err := writeServerSentEvent(w, event); err != nil {
+			return lastSequence, false
+		}
+		if event.Sequence > lastSequence {
+			lastSequence = event.Sequence
+		}
+	}
+	return lastSequence, true
+}
+
 func writeServerSentEvent(w io.Writer, event agent.RunEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -200,6 +311,12 @@ func writeServerSentEvent(w io.Writer, event agent.RunEvent) error {
 	}
 	_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.Sequence, event.Type, data)
 	return err
+}
+
+func flushServerSentEvents(w http.ResponseWriter) {
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func mustJSON(value any) json.RawMessage {

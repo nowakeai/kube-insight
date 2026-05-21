@@ -222,12 +222,15 @@ server:
     enabled: true
     provider: openai
     apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
 ```
 
 The deprecated `openaiApiKeyEnv` key is still accepted for compatibility, but new
 configs should use `apiKeyEnv` so non-OpenAI-compatible providers can share the
-same shape later.
+same shape later. `baseUrlEnv` is optional for OpenAI-compatible endpoints and
+points to the environment variable containing the API base URL; the URL value is
+not exposed by server info responses.
 
 ## Supported Running Modes
 

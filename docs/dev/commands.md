@@ -61,6 +61,23 @@ Run local service surfaces:
 ./bin/kube-insight serve --watch --api --mcp --metrics --db kubeinsight.db
 ```
 
+Run the React Web UI dev server:
+
+```bash
+npm --prefix web run dev
+```
+
+When the dev server is exposed through a remote workspace domain, configure Vite
+host checking in the gitignored root `.env` file:
+
+```dotenv
+KUBE_INSIGHT_WEB_ALLOWED_HOSTS=5173--main--rj--renjie.coder.autonome.fun
+```
+
+Use a comma or whitespace separated list for multiple hosts. `VITE_ALLOWED_HOSTS`
+is also accepted for local Vite compatibility, but
+`KUBE_INSIGHT_WEB_ALLOWED_HOSTS` is the preferred project variable.
+
 Query schema and read-only SQL:
 
 ```bash

@@ -122,6 +122,30 @@ export function demoK8sResourceListArtifact(question: string) {
   }
 }
 
+export function demoK8sDiffArtifact() {
+  return {
+    title: "Pod default/api-0 retained document diff",
+    beforeLabel: "48270",
+    afterLabel: "48291",
+    changes: [
+      { path: "status.phase", summary: "Pending -> Running" },
+      { path: "status.conditions[Ready].status", summary: "False -> True" },
+    ],
+    before: {
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: { namespace: "default", name: "api-0", resourceVersion: "48270" },
+      status: { phase: "Pending", conditions: [{ type: "Ready", status: "False" }] },
+    },
+    after: {
+      apiVersion: "v1",
+      kind: "Pod",
+      metadata: { namespace: "default", name: "api-0", resourceVersion: "48291" },
+      status: { phase: "Running", conditions: [{ type: "Ready", status: "True" }] },
+    },
+  }
+}
+
 export function demoK8sHistoryArtifact(question: string) {
   return {
     title: "Pod default/api-0 history",

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from "react"
 import { ArtifactPanel } from "@/components/artifact-panel"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
-import { demoAgentAnswer, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
+import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentRunEvent } from "@/lib/agent-store"
 
 const starterPrompts = [
@@ -133,6 +133,11 @@ export function AgentChat() {
       kind: "k8s.history",
       title: "Pod default/api-0 history",
       data: demoK8sHistoryArtifact(prompt),
+    })
+    upsertArtifact(runID, {
+      kind: "k8s.diff",
+      title: "Pod default/api-0 diff",
+      data: demoK8sDiffArtifact(),
     })
     addCitation(runID, {
       id: "citation_demo_runtime",

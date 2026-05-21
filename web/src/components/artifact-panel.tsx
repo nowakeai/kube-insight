@@ -1,5 +1,6 @@
 import { FileText } from "lucide-react"
 
+import { K8sDiffArtifact } from "@/components/k8s-diff-artifact"
 import { K8sHistoryArtifact } from "@/components/k8s-history-artifact"
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact"
@@ -76,6 +77,9 @@ function ArtifactBody({ artifact }: { artifact: AgentArtifact }) {
   }
   if (artifact.kind === "k8s.history") {
     return <K8sHistoryArtifact data={artifact.data} />
+  }
+  if (artifact.kind === "k8s.diff") {
+    return <K8sDiffArtifact data={artifact.data} />
   }
   return (
     <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-center text-sm text-muted-foreground">

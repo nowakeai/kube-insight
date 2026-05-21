@@ -1,6 +1,6 @@
 # Agent-First Web UI Checklist
 
-Status date: 2026-05-20
+Status date: 2026-05-21
 
 This checklist tracks the first Web UI milestone. Keep it updated during
 development so handoffs show what is done, what is in progress, and what should
@@ -131,7 +131,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 ## Validation
 
-- [ ] Run focused Go tests for API/session/agent packages.
+- [x] Run focused Go tests for API/session/agent packages.
 - [x] Run frontend typecheck, lint, and build.
 - [x] Run `make test`.
 - [x] Run `make build`.

@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type ProxyOptions } from 'vite'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
@@ -14,6 +14,21 @@ export default defineConfig(({ mode }) => {
       ?? rootEnv.VITE_ALLOWED_HOSTS
       ?? '',
   )
+  const apiProxyTarget = normalizeProxyTarget(
+    process.env.KUBE_INSIGHT_API_PROXY_TARGET
+      ?? rootEnv.KUBE_INSIGHT_API_PROXY_TARGET
+      ?? process.env.VITE_KUBE_INSIGHT_API_PROXY_TARGET
+      ?? rootEnv.VITE_KUBE_INSIGHT_API_PROXY_TARGET
+      ?? '',
+  )
+  const metricsProxyTarget = normalizeProxyTarget(
+    process.env.KUBE_INSIGHT_METRICS_PROXY_TARGET
+      ?? rootEnv.KUBE_INSIGHT_METRICS_PROXY_TARGET
+      ?? process.env.VITE_KUBE_INSIGHT_METRICS_PROXY_TARGET
+      ?? rootEnv.VITE_KUBE_INSIGHT_METRICS_PROXY_TARGET
+      ?? '',
+  )
+  const proxy = buildProxy(apiProxyTarget, metricsProxyTarget)
 
   return {
     plugins: [react(), tailwindcss()],
@@ -22,7 +37,7 @@ export default defineConfig(({ mode }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
     },
-    server: allowedHosts.length > 0 ? { allowedHosts } : undefined,
+    server: allowedHosts.length > 0 || proxy ? { allowedHosts, proxy } : undefined,
     build: {
       rolldownOptions: {
         output: {
@@ -60,4 +75,23 @@ function normalizeAllowedHost(value: string) {
   } catch {
     return trimmed.split('/')[0].split(':')[0] || undefined
   }
+}
+
+function normalizeProxyTarget(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  return trimmed.includes('://') ? trimmed : `http://${trimmed}`
+}
+
+function buildProxy(apiTarget?: string, metricsTarget?: string) {
+  const proxy: Record<string, string | ProxyOptions> = {}
+  if (apiTarget) {
+    proxy['/api'] = { target: apiTarget, changeOrigin: true }
+    proxy['/healthz'] = { target: apiTarget, changeOrigin: true }
+  }
+  const resolvedMetricsTarget = metricsTarget ?? apiTarget
+  if (resolvedMetricsTarget) {
+    proxy['/metrics'] = { target: resolvedMetricsTarget, changeOrigin: true }
+  }
+  return Object.keys(proxy).length > 0 ? proxy : undefined
 }

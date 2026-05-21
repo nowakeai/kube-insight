@@ -154,6 +154,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Run the 800-line Go file check.
 - [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
 - [x] Verify the embedded binary serves the built React app.
-- [ ] Verify dashboard health calls work with and without metrics enabled.
-  - Verified without a metrics endpoint on the Vite dev origin; metrics-enabled
-    verification remains.
+- [x] Verify dashboard health calls work with and without metrics enabled.
+  - Vite dev server can proxy `/api`, `/healthz`, and `/metrics` to configured
+    local service targets; verified collector coverage and metrics through the
+    5173 dev origin and allowed authproxy host.

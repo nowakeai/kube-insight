@@ -7,7 +7,7 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, Bot, CircleStop, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
+import { ArrowUp, Bot, CircleStop, ExternalLink, Play, Plus, RotateCcw, Search, Server, Sparkles, UserRound } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -49,6 +49,7 @@ export function AgentChat() {
   const activeRunEvents = activeRunEventIds
     .map((eventID) => eventsById[eventID])
     .filter((event): event is AgentRunEvent => Boolean(event))
+  const selectedArtifactId = useAgentProjectionStore((state) => state.selectedArtifactId)
 
   useEffect(() => {
     const onPopState = () => setRouteRun(readRouteRun())
@@ -105,6 +106,7 @@ export function AgentChat() {
       data: { markdown: answer },
     })
     addCitation(runID, {
+      id: "citation_demo_runtime",
       artifactId: artifactID,
       text: "Demo runtime",
       target: { kind: "artifact", id: artifactID },
@@ -227,6 +229,7 @@ export function AgentChat() {
                   onContinue={handleContinue}
                 />
                 <RunTimeline events={activeRunEvents} />
+                <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
               </ThreadPrimitive.If>
 
               <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
@@ -319,6 +322,57 @@ function ToolTimelineRow({ event }: { event: AgentRunEvent }) {
   )
 }
 
+
+function CitationPanel({
+  events,
+  selectedArtifactId,
+}: {
+  events: AgentRunEvent[]
+  selectedArtifactId?: string
+}) {
+  const citations = events
+    .filter((event) => event.type === "citation.created")
+    .map((event) => citationEventData(event.data))
+    .filter((citation): citation is AgentCitationView => Boolean(citation?.id))
+  if (citations.length === 0) return null
+  return (
+    <div id="evidence" className="mb-4 rounded-md border border-border bg-background p-3">
+      <div className="mb-2 text-xs font-medium text-muted-foreground">Evidence</div>
+      <div className="flex flex-wrap gap-2">
+        {citations.map((citation) => (
+          <CitationChip
+            key={citation.id}
+            citation={citation}
+            selected={Boolean(citation.artifactId && citation.artifactId === selectedArtifactId)}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CitationChip({ citation, selected }: { citation: AgentCitationView; selected: boolean }) {
+  const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const onClick = () => {
+    if (citation.artifactId) selectArtifact(citation.artifactId)
+    document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+  return (
+    <button
+      type="button"
+      className={
+        selected
+          ? "inline-flex min-h-8 items-center gap-1 rounded-md border border-primary bg-muted px-2.5 py-1 text-left text-xs text-foreground"
+          : "inline-flex min-h-8 items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
+      }
+      onClick={onClick}
+    >
+      <ExternalLink className="size-3" aria-hidden="true" />
+      <span>{citation.text || citation.id}</span>
+    </button>
+  )
+}
+
 function ChatMessage() {
   return (
     <MessagePrimitive.Root className="w-full py-4">
@@ -408,11 +462,16 @@ function MarkdownText({ text }: { text: string }) {
         h2: ({ children }) => <h2 className="mb-3 mt-5 text-lg font-semibold leading-7 first:mt-0 last:mb-0">{children}</h2>,
         h3: ({ children }) => <h3 className="mb-2 mt-4 text-base font-semibold leading-6 first:mt-0 last:mb-0">{children}</h3>,
         p: ({ children }) => <p className="mb-3 leading-6 last:mb-0">{children}</p>,
-        a: ({ children, href }) => (
-          <a className="font-medium text-primary underline underline-offset-4" href={href} rel="noreferrer" target="_blank">
-            {children}
-          </a>
-        ),
+        a: ({ children, href }) => {
+          if (href?.startsWith("#citation:")) {
+            return <CitationJump href={href}>{children}</CitationJump>
+          }
+          return (
+            <a className="font-medium text-primary underline underline-offset-4" href={href} rel="noreferrer" target="_blank">
+              {children}
+            </a>
+          )
+        },
         blockquote: ({ children }) => (
           <blockquote className="mb-3 border-l-2 border-border pl-3 text-muted-foreground last:mb-0">
             {children}
@@ -453,6 +512,28 @@ function MarkdownText({ text }: { text: string }) {
     >
       {text}
     </ReactMarkdown>
+  )
+}
+
+
+function CitationJump({ href, children }: { href: string; children: React.ReactNode }) {
+  const citationId = decodeURIComponent(href.replace("#citation:", ""))
+  const citations = useAgentProjectionStore((state) => state.citations)
+  const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const onClick = () => {
+    const citation = citations[citationId]
+    if (citation?.artifactId) selectArtifact(citation.artifactId)
+    document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+  return (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[0.85em] font-medium text-foreground transition hover:border-primary/40"
+      onClick={onClick}
+    >
+      {children}
+      <ExternalLink className="size-3" aria-hidden="true" />
+    </button>
   )
 }
 
@@ -548,7 +629,7 @@ function demoAgentAnswer(question: string) {
     "> Rich answers should stay compact, scannable, and tied to evidence.",
     "",
     "### Evidence",
-    "- Demo runtime: local assistant-ui ExternalStoreRuntime.",
+    "- Demo runtime: [citation: demo runtime](#citation:citation_demo_runtime).",
     "- Renderer: [react-markdown](https://github.com/remarkjs/react-markdown) with GFM enabled.",
   ].join("\n")
 }
@@ -627,4 +708,23 @@ function statusDotClass(status: string) {
   if (status === "completed") return `${base} bg-accent`
   if (status === "failed") return `${base} bg-destructive`
   return `${base} bg-primary`
+}
+
+type AgentCitationView = {
+  id: string
+  artifactId?: string
+  text?: string
+  target?: unknown
+}
+
+function citationEventData(value: unknown): AgentCitationView | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const wrappedCitation = (value as { citation?: unknown }).citation
+  const citation = wrappedCitation && typeof wrappedCitation === "object" ? wrappedCitation : value
+  if (!hasCitationId(citation)) return undefined
+  return citation
+}
+
+function hasCitationId(value: unknown): value is AgentCitationView {
+  return Boolean(value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string")
 }

@@ -88,7 +88,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Implement tool timeline with input summary, output summary, status, duration,
   and error display.
 - [x] Render markdown answers with GFM tables and code blocks.
-- [ ] Render evidence citations and jump targets.
+- [x] Render evidence citations and jump targets.
 
 ## Artifact Renderers
 

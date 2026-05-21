@@ -240,7 +240,7 @@ Kube-insight supports these operational shapes:
 | API only | `kube-insight serve --api` or `serve api` | no | HTTP API | Read-only query service |
 | Metrics only | `kube-insight serve --metrics` | no | Prometheus `/metrics` | Scrape storage, filter, and watch health metrics |
 | MCP stdio | `kube-insight serve mcp` | no | stdio MCP | Local agent process launch |
-| MCP HTTP | `kube-insight serve --mcp` | no | HTTP `/mcp` | Long-running service deployment |
+| MCP HTTP | `kube-insight serve --mcp` | no | Streamable HTTP `/mcp`, legacy SSE `/sse` | Long-running service deployment |
 | Web UI | `kube-insight serve --webui` | no | HTTP Web UI | Future human UI surface |
 | All-in-one local | `kube-insight serve --watch --api --mcp --metrics --webui` | yes | HTTP API, HTTP MCP, Metrics, Web UI | Local PoC or small single-instance deployment |
 | Split production | one `--watch` writer plus N `--api/--mcp/--metrics/--webui` readers | writer only | readers only | HA/scale-out with one writer owner |

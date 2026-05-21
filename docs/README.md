@@ -50,6 +50,25 @@ These documents explain the system shape and current implementation direction:
 - [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
 - [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
 
+## nowake.ai Docs Site Source Contract
+
+Some documents in this repository are rendered by the nowake.ai website docs
+site through its explicit source manifest. Keep those source documents suitable
+for both this repository and the website renderer:
+
+- Keep the project repository as the source of truth; do not add website-only
+  Starlight frontmatter here.
+- Start each public source document with exactly one top-level `#` heading. The
+  website sync step removes that heading and injects site frontmatter from its
+  manifest.
+- Use relative links for other repository docs. The website sync step rewrites
+  manifest-listed links to `/docs/...` and leaves other repository links as
+  GitHub source links.
+- Keep public docs task-oriented: problem, prerequisites, commands or config,
+  expected output, common failure signals, current limits, and next links.
+- Keep development checklists, closeout notes, and raw research notes outside
+  the public source manifest unless they are rewritten for users.
+
 ## Development Notes
 
 Development-stage checklists, closeout notes, validation plans, and local

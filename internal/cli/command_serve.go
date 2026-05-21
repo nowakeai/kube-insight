@@ -61,7 +61,8 @@ Examples:
   kube-insight serve --watch pods events.events.k8s.io --api
 
 With no component flags, serve uses enabled services from the config file. The
-MCP component on the combined serve command uses HTTP at /mcp. Use
+MCP component on the combined serve command exposes MCP Streamable HTTP at /mcp
+and legacy SDK SSE at /sse. Use
 "kube-insight serve mcp" for stdio MCP.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,7 +71,7 @@ MCP component on the combined serve command uses HTTP at /mcp. Use
 	}
 	cmd.Flags().BoolVar(&opts.Watch, "watch", false, "Run Kubernetes discovery/list/watch writers")
 	cmd.Flags().BoolVar(&opts.API, "api", false, "Run the read-only HTTP API")
-	cmd.Flags().BoolVar(&opts.MCP, "mcp", false, "Run the HTTP MCP server at /mcp")
+	cmd.Flags().BoolVar(&opts.MCP, "mcp", false, "Run the HTTP MCP server with Streamable HTTP at /mcp and legacy SSE at /sse")
 	cmd.Flags().BoolVar(&opts.WebUI, "webui", false, "Run the web UI server")
 	cmd.Flags().BoolVar(&opts.Metrics, "metrics", false, "Run the Prometheus metrics server at /metrics")
 	cmd.Flags().StringVar(&opts.APIListen, "api-listen", "", "API listen address; defaults to server.api.listen")

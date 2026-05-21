@@ -1,21 +1,22 @@
 package mcp
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
 
-func TestServeStdioTools(t *testing.T) {
+func seedMCPDB(t *testing.T) string {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "kube-insight.db")
 	store, err := sqlite.Open(dbPath)
 	if err != nil {
@@ -36,122 +37,114 @@ func TestServeStdioTools(t *testing.T) {
 	if closeErr != nil {
 		t.Fatal(closeErr)
 	}
-
-	input := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"kube_insight_coverage_first","arguments":{"symptom":"webhook failures"}}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"select name from latest_index","maxRows":5}}}`,
-		`{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"kube_insight_history","arguments":{"kind":"Pod","namespace":"default","name":"api-1","maxVersions":2,"maxObservations":5}}}`,
-		`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"delete from latest_index"}}}`,
-	}, "\n") + "\n"
-	var output bytes.Buffer
-	if err := ServeStdio(context.Background(), strings.NewReader(input), &output, ServerOptions{DBPath: dbPath}); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
-	if len(lines) != 7 {
-		t.Fatalf("responses = %d: %s", len(lines), output.String())
-	}
-	for _, want := range []string{
-		`"protocolVersion":"2025-06-18"`,
-		`"prompts":{}`,
-		`"name":"kube_insight_sql"`,
-		`"name":"kube_insight_history"`,
-		`"name":"kube_insight_coverage_first"`,
-		`webhook failures`,
-		`\"name\": \"api-1\"`,
-		`\"observations\": 1`,
-		`"isError":true`,
-	} {
-		if !strings.Contains(output.String(), want) {
-			t.Fatalf("output missing %q: %s", want, output.String())
-		}
-	}
-
-	var response map[string]any
-	if err := json.Unmarshal([]byte(lines[4]), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response["id"].(float64) != 5 {
-		t.Fatalf("sql response id = %#v", response["id"])
-	}
+	return dbPath
 }
 
-func TestHTTPMCPTools(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "kube-insight.db")
-	store, err := sqlite.Open(dbPath)
+func connectInMemoryClient(t *testing.T, server *Server) *sdkmcp.ClientSession {
+	t.Helper()
+	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
+	serverSession, err := server.sdkServer.Connect(context.Background(), serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pipeline := ingest.DefaultPipeline(store)
-	pipeline.ClusterID = "c1"
-	_, err = pipeline.IngestJSON(context.Background(), []byte(`{
-	  "apiVersion": "v1",
-	  "kind": "Pod",
-	  "metadata": {"name": "api-1", "namespace": "default", "uid": "pod-uid"},
-	  "status": {"phase": "Running"}
-	}`))
-	closeErr := store.Close()
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	clientSession, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	handler, err := NewServer(ServerOptions{DBPath: dbPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		var body bytes.Buffer
-		if _, err := body.ReadFrom(r.Body); err != nil {
-			t.Fatal(err)
-		}
-		response, ok, err := handler.HandleJSONRPC(r.Context(), body.Bytes())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !ok {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		_, _ = w.Write(response)
+	t.Cleanup(func() {
+		_ = clientSession.Close()
+		_ = serverSession.Close()
 	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
+	return clientSession
+}
 
-	resp, err := http.Post(server.URL+"/mcp", "application/json", strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"select name from latest_index","maxRows":5}}}`,
-	))
+func callToolText(t *testing.T, session *sdkmcp.ClientSession, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	result, err := session.CallTool(context.Background(), &sdkmcp.CallToolParams{
+		Name:      name,
+		Arguments: args,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	var output bytes.Buffer
-	if _, err := output.ReadFrom(resp.Body); err != nil {
-		t.Fatal(err)
+	if len(result.Content) == 0 {
+		t.Fatalf("%s returned no content", name)
 	}
-	if !strings.Contains(output.String(), `\"name\": \"api-1\"`) {
-		t.Fatalf("response missing pod name: %s", output.String())
+	content, ok := result.Content[0].(*sdkmcp.TextContent)
+	if !ok {
+		t.Fatalf("%s returned %T, want TextContent", name, result.Content[0])
 	}
+	return content.Text, result.IsError
+}
 
-	resp, err = http.Post(server.URL+"/mcp", "application/json", strings.NewReader(
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kube_insight_history","arguments":{"kind":"Pod","namespace":"default","name":"api-1","maxVersions":2,"maxObservations":5}}}`,
-	))
+func TestSDKMCPTools(t *testing.T) {
+	server, err := NewServer(ServerOptions{DBPath: seedMCPDB(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	output.Reset()
-	if _, err := output.ReadFrom(resp.Body); err != nil {
+	session := connectInMemoryClient(t, server)
+	init := session.InitializeResult()
+	if init.ServerInfo.Name != "kube-insight" {
+		t.Fatalf("server name = %q", init.ServerInfo.Name)
+	}
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), `\"observations\": 1`) {
-		t.Fatalf("history response missing observations: %s", output.String())
+	var toolNames string
+	for _, tool := range tools.Tools {
+		toolNames += tool.Name + "\n"
+	}
+	for _, want := range []string{"kube_insight_schema", "kube_insight_sql", "kube_insight_history"} {
+		if !strings.Contains(toolNames, want) {
+			t.Fatalf("tools missing %q: %s", want, toolNames)
+		}
+	}
+
+	prompts, err := session.ListPrompts(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompts.Prompts) == 0 {
+		t.Fatalf("expected prompts")
+	}
+	prompt, err := session.GetPrompt(context.Background(), &sdkmcp.GetPromptParams{
+		Name:      "kube_insight_coverage_first",
+		Arguments: map[string]string{"symptom": "webhook failures"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(prompt.Messages[0].Content.(*sdkmcp.TextContent).Text, "webhook failures") {
+		t.Fatalf("prompt missing symptom: %#v", prompt.Messages[0].Content)
+	}
+
+	sqlText, sqlError := callToolText(t, session, "kube_insight_sql", map[string]any{
+		"sql":     "select name from latest_index",
+		"maxRows": 5,
+	})
+	if sqlError || !strings.Contains(sqlText, `"name": "api-1"`) {
+		t.Fatalf("sql result isError=%v text=%s", sqlError, sqlText)
+	}
+
+	historyText, historyError := callToolText(t, session, "kube_insight_history", map[string]any{
+		"kind":            "Pod",
+		"namespace":       "default",
+		"name":            "api-1",
+		"maxVersions":     2,
+		"maxObservations": 5,
+	})
+	if historyError || !strings.Contains(historyText, `"observations": 1`) {
+		t.Fatalf("history result isError=%v text=%s", historyError, historyText)
+	}
+
+	deleteText, deleteError := callToolText(t, session, "kube_insight_sql", map[string]any{
+		"sql": "delete from latest_index",
+	})
+	if !deleteError || deleteText == "" {
+		t.Fatalf("delete result isError=%v text=%s", deleteError, deleteText)
 	}
 }
 
@@ -195,6 +188,60 @@ func (f *fakeMCPReadStore) ObjectHistory(context.Context, storage.ObjectTarget, 
 		Object:  storage.ObjectRecord{ClusterID: "c1", Kind: "Pod", Namespace: "default", Name: "api-1"},
 		Summary: storage.ObjectHistorySummary{Versions: 1, Observations: 1},
 	}, nil
+}
+
+func TestStreamableHTTPMCPTransport(t *testing.T) {
+	handler, err := NewServer(ServerOptions{DBPath: seedMCPDB(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return handler.sdkServer
+	}, nil))
+	defer httpServer.Close()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	session, err := client.Connect(context.Background(), &sdkmcp.StreamableClientTransport{Endpoint: httpServer.URL}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	text, isError := callToolText(t, session, "kube_insight_sql", map[string]any{
+		"sql":     "select name from latest_index",
+		"maxRows": 5,
+	})
+	if isError || !strings.Contains(text, `"name": "api-1"`) {
+		t.Fatalf("streamable HTTP result isError=%v text=%s", isError, text)
+	}
+}
+
+func TestSSEMCPTransport(t *testing.T) {
+	handler, err := NewServer(ServerOptions{DBPath: seedMCPDB(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/sse", sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
+		return handler.sdkServer
+	}, nil))
+	httpServer := httptest.NewServer(mux)
+	defer httpServer.Close()
+
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "0.0.1"}, nil)
+	session, err := client.Connect(context.Background(), &sdkmcp.SSEClientTransport{Endpoint: httpServer.URL + "/sse"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	text, isError := callToolText(t, session, "kube_insight_sql", map[string]any{
+		"sql":     "select name from latest_index",
+		"maxRows": 5,
+	})
+	if isError || !strings.Contains(text, `"name": "api-1"`) {
+		t.Fatalf("SSE result isError=%v text=%s", isError, text)
+	}
 }
 
 func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
@@ -271,27 +318,28 @@ func TestServerUsesInjectedReadStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	calls := []string{
-		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kube_insight_schema","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kube_insight_sql","arguments":{"sql":"select kind from versions","maxRows":1}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"kube_insight_health","arguments":{"cluster":"c1"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"kube_insight_history","arguments":{"kind":"Pod","namespace":"default","name":"api-1"}}}`,
+	session := connectInMemoryClient(t, server)
+	calls := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "kube_insight_schema", args: map[string]any{}},
+		{name: "kube_insight_sql", args: map[string]any{"sql": "select kind from versions", "maxRows": 1}},
+		{name: "kube_insight_health", args: map[string]any{"cluster": "c1"}},
+		{name: "kube_insight_history", args: map[string]any{"kind": "Pod", "namespace": "default", "name": "api-1"}},
 	}
 	var output string
 	for _, call := range calls {
-		response, ok, err := server.HandleJSONRPC(context.Background(), []byte(call))
-		if err != nil {
-			t.Fatal(err)
+		text, isError := callToolText(t, session, call.name, call.args)
+		if isError {
+			t.Fatalf("%s returned tool error: %s", call.name, text)
 		}
-		if !ok {
-			t.Fatalf("missing response for %s", call)
-		}
-		output += string(response)
+		output += text
 	}
 	if opened != len(calls) {
 		t.Fatalf("open count = %d, want %d", opened, len(calls))
 	}
-	for _, want := range []string{`clickhouse`, `fake injected backend`, `\"kind\": \"Pod\"`, `\"healthy\": 1`, `\"observations\": 1`} {
+	for _, want := range []string{`clickhouse`, `fake injected backend`, `"kind": "Pod"`, `"healthy": 1`, `"observations": 1`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q: %s", want, output)
 		}

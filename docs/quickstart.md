@@ -189,7 +189,7 @@ The combined command supports these components:
 
 - `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
-- `--mcp`: HTTP MCP endpoint at `/mcp`.
+- `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
 - `--webui`: embedded Web UI listener for the React app built from `web/`.
   The first formal UI milestone is the agent-first chat surface described in
   [Agent-First Web UI Design](product/agent-first-web-ui.md).
@@ -204,8 +204,9 @@ Example with all current and planned service surfaces:
   --webui-listen 127.0.0.1:8081
 ```
 
-`serve --mcp` is HTTP for service deployments. Use `serve mcp` when an agent
-expects stdio MCP.
+`serve --mcp` is the preferred service deployment mode for agents that support
+remote MCP over Streamable HTTP. Use `serve mcp` only when an agent runtime
+explicitly expects stdio MCP.
 
 ## Serve API
 
@@ -227,6 +228,35 @@ curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&
 
 ## Serve MCP
 
+For long-running agent use, connect to the service over MCP Streamable HTTP
+instead of starting a new stdio MCP process per agent session. This keeps
+SQLite, chDB, and ClickHouse access owned by the long-lived kube-insight service
+process:
+
+```bash
+./kube-insight serve --watch --api --mcp \
+  --db kubeinsight.db \
+  --api-listen 127.0.0.1:8080 \
+  --mcp-listen 127.0.0.1:8090
+```
+
+Configure an MCP client that supports Streamable HTTP with the service endpoint:
+
+```json
+{
+  "mcpServers": {
+    "kube-insight": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8090/mcp"
+    }
+  }
+}
+```
+
+The same service also exposes the SDK legacy SSE transport at `/sse` for older
+clients that have not moved to Streamable HTTP. Use stdio only when the agent
+runtime does not support remote MCP:
+
 ```bash
 ./kube-insight serve mcp --db kubeinsight.db
 
@@ -240,7 +270,7 @@ started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
 Agents should call `kube_insight_schema` first because SQLite and
 ClickHouse-compatible backends expose different SQL table names.
 
-MCP stdio currently exposes:
+MCP currently exposes:
 
 - `kube_insight_schema`
 - `kube_insight_sql`

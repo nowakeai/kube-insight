@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -133,15 +134,22 @@ func einoMessage(message Message) adk.Message {
 }
 
 type einoRunRecorder struct {
-	store Store
-	runID string
+	store     Store
+	runID     string
+	toolCalls map[string]toolAuditDraft
+}
+
+type toolAuditDraft struct {
+	Name      string
+	Input     json.RawMessage
+	StartedAt time.Time
 }
 
 func newEinoRunRecorder(store Store, runID string) einoRunRecorder {
 	if store == nil || runID == "" {
 		return einoRunRecorder{}
 	}
-	return einoRunRecorder{store: store, runID: runID}
+	return einoRunRecorder{store: store, runID: runID, toolCalls: map[string]toolAuditDraft{}}
 }
 
 func (r einoRunRecorder) enabled() bool {
@@ -210,16 +218,22 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) erro
 		if !json.Valid(input) {
 			input = jsonRaw(map[string]string{"arguments": call.Function.Arguments})
 		}
+		r.toolCalls[call.ID] = toolAuditDraft{Name: call.Function.Name, Input: input, StartedAt: time.Now()}
 		if err := r.append(ctx, EventToolStarted, ToolCallEventData{ToolCallID: call.ID, Name: call.Function.Name, Status: "started", Input: input}); err != nil {
 			return err
 		}
 	}
 	if role == RoleTool {
 		outputData := toolOutputData(msg.Content)
-		name := firstNonEmptyString(output.ToolName, msg.ToolName)
+		draft := r.toolCalls[msg.ToolCallID]
+		name := firstNonEmptyString(output.ToolName, msg.ToolName, draft.Name)
 		if err := r.append(ctx, EventToolCompleted, ToolCallEventData{ToolCallID: msg.ToolCallID, Name: name, Status: "completed", Output: outputData}); err != nil {
 			return err
 		}
+		if err := r.append(ctx, EventToolAudit, ToolAuditEventData{RunID: r.runID, ToolCallID: msg.ToolCallID, Name: name, Status: "completed", Input: draft.Input, Output: outputData, DurationMS: toolAuditDurationMS(draft.StartedAt)}); err != nil {
+			return err
+		}
+		delete(r.toolCalls, msg.ToolCallID)
 	}
 	return nil
 }
@@ -250,6 +264,17 @@ func messageRoleFromEino(outputRole schema.RoleType, messageRole schema.RoleType
 	default:
 		return RoleAssistant
 	}
+}
+
+func toolAuditDurationMS(start time.Time) int64 {
+	if start.IsZero() {
+		return 0
+	}
+	duration := time.Since(start).Milliseconds()
+	if duration < 0 {
+		return 0
+	}
+	return duration
 }
 
 func toolOutputData(content string) json.RawMessage {

@@ -21,6 +21,7 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		EventToolStarted,
 		EventToolCompleted,
 		EventToolFailed,
+		EventToolAudit,
 		EventArtifact,
 		EventArtifactUpdate,
 		EventCitation,
@@ -36,8 +37,8 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		}
 		seen[value] = true
 	}
-	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventArtifact != "artifact.created" {
-		t.Fatalf("unexpected event names: %q %q %q", EventRunCreated, EventFinalAnswer, EventArtifact)
+	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventToolAudit != "tool.audit" || EventArtifact != "artifact.created" {
+		t.Fatalf("unexpected event names: %q %q %q %q", EventRunCreated, EventFinalAnswer, EventToolAudit, EventArtifact)
 	}
 }
 
@@ -61,6 +62,11 @@ func TestRunEventPayloadsMarshalContractFields(t *testing.T) {
 			name: "tool call",
 			in:   ToolCallEventData{ToolCallID: "tool_1", Name: "kube_insight_health", Status: "completed", DurationMS: 12},
 			want: []string{`"toolCallId":"tool_1"`, `"name":"kube_insight_health"`, `"status":"completed"`, `"durationMs":12`},
+		},
+		{
+			name: "tool audit",
+			in:   ToolAuditEventData{RunID: "run_1", ToolCallID: "tool_1", Name: "kube_insight_health", Status: "completed", DurationMS: 12},
+			want: []string{`"runId":"run_1"`, `"toolCallId":"tool_1"`, `"name":"kube_insight_health"`, `"status":"completed"`, `"durationMs":12`},
 		},
 		{
 			name: "artifact",

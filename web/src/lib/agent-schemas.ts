@@ -28,6 +28,7 @@ export const agentKnownRunEventTypeSchema = z.enum([
   "tool.started",
   "tool.completed",
   "tool.failed",
+  "tool.audit",
   "artifact.created",
   "artifact.updated",
   "citation.created",
@@ -90,6 +91,10 @@ export const toolCallEventDataSchema = z.object({
   output: z.unknown().optional(),
   durationMs: z.number().optional(),
   error: z.string().optional(),
+})
+
+export const toolAuditEventDataSchema = toolCallEventDataSchema.extend({
+  runId: z.string(),
 })
 
 export const markdownArtifactDataSchema = z.object({
@@ -167,6 +172,8 @@ export function parseAgentRunEventData(type: string, data: unknown) {
     case "tool.completed":
     case "tool.failed":
       return toolCallEventDataSchema.parse(data)
+    case "tool.audit":
+      return toolAuditEventDataSchema.parse(data)
     case "artifact.created":
     case "artifact.updated":
       return artifactEventDataSchema.parse(data)

@@ -124,7 +124,7 @@ func TestEinoRunRecorderMapsToolEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 5 || events[1].Type != EventMessageCreated || events[2].Type != EventToolStarted || events[3].Type != EventMessageCreated || events[4].Type != EventToolCompleted {
+	if len(events) != 6 || events[1].Type != EventMessageCreated || events[2].Type != EventToolStarted || events[3].Type != EventMessageCreated || events[4].Type != EventToolCompleted || events[5].Type != EventToolAudit {
 		t.Fatalf("events = %#v", events)
 	}
 	var started ToolCallEventData
@@ -140,6 +140,13 @@ func TestEinoRunRecorderMapsToolEvents(t *testing.T) {
 	}
 	if completed.ToolCallID != "tool_1" || completed.Name != SearchToolName || string(completed.Output) != `{"summary":{"matches":1}}` {
 		t.Fatalf("completed = %#v output=%s", completed, string(completed.Output))
+	}
+	var audit ToolAuditEventData
+	if err := json.Unmarshal(events[5].Data, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if audit.RunID != run.ID || audit.ToolCallID != "tool_1" || audit.Name != SearchToolName || audit.Status != "completed" || string(audit.Input) != `{"query":"api"}` || string(audit.Output) != `{"summary":{"matches":1}}` {
+		t.Fatalf("audit = %#v input=%s output=%s", audit, string(audit.Input), string(audit.Output))
 	}
 }
 

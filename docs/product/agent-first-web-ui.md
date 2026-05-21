@@ -257,6 +257,7 @@ The initial replayable event contract uses these event names:
 | `tool.started` | Tool call started. |
 | `tool.completed` | Tool call completed with output summary. |
 | `tool.failed` | Tool call failed. |
+| `tool.audit` | Normalized tool audit record with input, output, status, and duration. |
 | `artifact.created` | Typed artifact was created. |
 | `artifact.updated` | Existing artifact changed, such as history travel state. |
 | `citation.created` | Citation target was created. |

@@ -18,6 +18,7 @@ const (
 	EventToolStarted    RunEventType = "tool.started"
 	EventToolCompleted  RunEventType = "tool.completed"
 	EventToolFailed     RunEventType = "tool.failed"
+	EventToolAudit      RunEventType = "tool.audit"
 	EventArtifact       RunEventType = "artifact.created"
 	EventArtifactUpdate RunEventType = "artifact.updated"
 	EventCitation       RunEventType = "citation.created"
@@ -39,6 +40,17 @@ type MessageEventData struct {
 }
 
 type ToolCallEventData struct {
+	ToolCallID string          `json:"toolCallId"`
+	Name       string          `json:"name"`
+	Status     string          `json:"status"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Output     json.RawMessage `json:"output,omitempty"`
+	DurationMS int64           `json:"durationMs,omitempty"`
+	Error      string          `json:"error,omitempty"`
+}
+
+type ToolAuditEventData struct {
+	RunID      string          `json:"runId"`
 	ToolCallID string          `json:"toolCallId"`
 	Name       string          `json:"name"`
 	Status     string          `json:"status"`

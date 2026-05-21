@@ -135,7 +135,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - `POST /api/v1/agent/runs/{run_id}/retry` creates a new run in the same
     session, preserves the original run history, copies input/provider/model,
     and records `retryOfRunId` in the new run metadata.
-- [ ] Add structured audit records for agent tool calls.
+- [x] Add structured audit records for agent tool calls.
+  - Eino tool completions now emit `tool.audit` events with run id, tool call
+    id, name, input, output, status, and duration for later permission/audit UI.
 - [x] Add provider configuration validation.
 - [ ] Add optional BYOK after default env-provider path works.
 - [x] Add user-facing errors for missing provider keys and unsupported providers.
@@ -147,7 +149,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Run `make test`.
 - [x] Run `make build`.
 - [x] Smoke-test server-side Eino runner with the OpenAI-compatible MIMO test
-  endpoint, including tool events and final answer events over follow SSE.
+  endpoint, including tool events, `tool.audit`, and final answer events over follow SSE.
 - [x] Run `git diff --check`.
 - [x] Run the 800-line Go file check.
 - [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.

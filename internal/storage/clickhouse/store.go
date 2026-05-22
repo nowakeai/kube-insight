@@ -23,6 +23,8 @@ type Store struct {
 
 	mu                  sync.Mutex
 	insertMu            sync.Mutex
+	agentSchemaMu       sync.Mutex
+	agentSchemaReady    bool
 	pendingObservations []pendingObservation
 	pendingOffsets      map[string]map[string]any
 	flushTimer          *time.Timer

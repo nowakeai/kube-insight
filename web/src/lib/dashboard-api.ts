@@ -53,9 +53,11 @@ const resourceHealthRecordSchema = z.object({
 
 const resourceHealthReportSchema = z.object({
   checkedAt: z.string().optional(),
+  detail: z.string().optional(),
   summary: resourceHealthSummarySchema.optional().default({}),
   byStatus: z.record(z.string(), z.number()).optional().default({}),
   resources: z.array(resourceHealthRecordSchema).optional().default([]),
+  resourcesOmitted: z.number().optional().default(0),
 }).passthrough()
 
 const storageStatsSummarySchema = z.object({
@@ -169,7 +171,7 @@ export function getHealthz(options?: AgentAPIOptions) {
 
 export function getResourceHealth(options?: AgentAPIOptions) {
   return agentRequestJSON<ResourceHealthReportDTO>(
-    "/api/v1/health?limit=500",
+    "/api/v1/health",
     options,
     (value) => resourceHealthReportSchema.parse(value),
   )

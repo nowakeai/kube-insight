@@ -4,12 +4,14 @@ import {
   parseAgentRun,
   parseAgentRunEvent,
   parseAgentSession,
+  parseAgentSessionList,
   type AgentRunDTO,
   type AgentRunEventDTO,
   type AgentSessionDTO,
+  type AgentSessionListDTO,
 } from "@/lib/agent-schemas"
 
-export type { AgentMessageDTO, AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+export type { AgentMessageDTO, AgentRunDTO, AgentRunEventDTO, AgentSessionDTO, AgentSessionListDTO } from "@/lib/agent-schemas"
 
 export type CreateAgentSessionRequest = {
   title?: string
@@ -50,6 +52,14 @@ export const agentQueryKeys = {
   session: (sessionId: string) => [...agentQueryKeys.sessions(), sessionId] as const,
   runs: () => [...agentQueryKeys.all, "runs"] as const,
   runEvents: (runId: string) => [...agentQueryKeys.runs(), runId, "events"] as const,
+}
+
+export function listAgentSessions(options?: AgentAPIOptions) {
+  return agentRequestJSON<AgentSessionListDTO>(
+    "/api/v1/agent/sessions",
+    options,
+    parseAgentSessionList,
+  )
 }
 
 export function createAgentSession(input: CreateAgentSessionRequest = {}, options?: AgentAPIOptions) {

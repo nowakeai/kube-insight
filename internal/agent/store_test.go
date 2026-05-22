@@ -83,6 +83,14 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	if len(loaded.Runs) != 1 || loaded.Runs[0].ID != run.ID {
 		t.Fatalf("loaded session = %#v", loaded)
 	}
+
+	listed, err := store.ListSessions(context.Background(), ListSessionsOptions{Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID || len(listed.Sessions[0].Runs) != 1 {
+		t.Fatalf("listed sessions = %#v", listed)
+	}
 }
 
 func TestMemoryStoreListRunsSummaryAndFilters(t *testing.T) {

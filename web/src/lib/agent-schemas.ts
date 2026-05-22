@@ -25,6 +25,7 @@ export const agentKnownRunEventTypeSchema = z.enum([
   "message.delta",
   "message.completed",
   "answer.final",
+  "usage.delta",
   "tool.started",
   "tool.completed",
   "tool.failed",
@@ -69,6 +70,10 @@ export const agentSessionSchema = z.object({
   runs: z.array(agentRunSchema).optional(),
 })
 
+export const agentSessionListSchema = z.object({
+  sessions: z.array(agentSessionSchema),
+})
+
 export const runStatusEventDataSchema = z.object({
   runId: z.string(),
   sessionId: z.string().optional(),
@@ -83,12 +88,25 @@ export const messageEventDataSchema = z.object({
   content: z.string().optional(),
 })
 
+export const usageEventDataSchema = z.object({
+  phase: z.string().optional(),
+  source: z.string().optional(),
+  approximate: z.boolean().optional(),
+  promptTokens: z.number().optional(),
+  completionTokens: z.number().optional(),
+  totalTokens: z.number().optional(),
+  sentTokens: z.number().optional(),
+  receivedTokens: z.number().optional(),
+})
+
 export const toolCallEventDataSchema = z.object({
   toolCallId: z.string(),
   name: z.string(),
   status: z.string(),
   input: z.unknown().optional(),
   output: z.unknown().optional(),
+  outputSummary: z.string().optional(),
+  outputArtifactId: z.string().optional(),
   durationMs: z.number().optional(),
   error: z.string().optional(),
 })
@@ -142,6 +160,10 @@ export function parseAgentSession(value: unknown): AgentSessionDTO {
   return agentSessionSchema.parse(value)
 }
 
+export function parseAgentSessionList(value: unknown): AgentSessionListDTO {
+  return agentSessionListSchema.parse(value)
+}
+
 export function parseAgentRun(value: unknown): AgentRunDTO {
   return agentRunSchema.parse(value)
 }
@@ -168,6 +190,8 @@ export function parseAgentRunEventData(type: string, data: unknown) {
     case "message.completed":
     case "answer.final":
       return messageEventDataSchema.parse(data)
+    case "usage.delta":
+      return usageEventDataSchema.parse(data)
     case "tool.started":
     case "tool.completed":
     case "tool.failed":
@@ -190,6 +214,7 @@ export type AgentRunStatusDTO = z.infer<typeof agentRunStatusSchema>
 export type AgentMessageDTO = z.infer<typeof agentMessageSchema>
 export type AgentRunDTO = z.infer<typeof agentRunSchema>
 export type AgentSessionDTO = z.infer<typeof agentSessionSchema>
+export type AgentSessionListDTO = z.infer<typeof agentSessionListSchema>
 export type AgentRunEventDTO = z.infer<typeof agentRunEventSchema>
 export type AgentArtifactDTO = z.infer<typeof agentArtifactSchema>
 export type AgentCitationDTO = z.infer<typeof agentCitationSchema>

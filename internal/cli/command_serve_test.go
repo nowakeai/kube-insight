@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	appconfig "kube-insight/internal/config"
+	"kube-insight/internal/storage/clickhouse"
 )
 
 func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
@@ -73,6 +74,7 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-secret-value")
 	t.Setenv("MIMO_OPENAI_BASEURL", "https://example.invalid/v1")
+	t.Setenv("KUBE_INSIGHT_CLICKHOUSE_DSN", "http://clickhouse.example:8123")
 	cfg := appconfig.Default()
 	cfg.Storage.Driver = "clickhouse"
 	cfg.Storage.ClickHouse.Database = "ki"
@@ -108,5 +110,11 @@ func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	}
 	if info.Chat.APIKeyEnv != "OPENAI_API_KEY" || !info.Chat.APIKeyConfigured || info.Chat.BaseURLEnv != "MIMO_OPENAI_BASEURL" || !info.Chat.BaseURLConfigured {
 		t.Fatalf("chat key info = %#v", info.Chat)
+	}
+	if opts.DBPath != "" {
+		t.Fatalf("clickhouse api DBPath should not force sqlite agent store: %q", opts.DBPath)
+	}
+	if _, ok := opts.AgentStore.(*clickhouse.Store); !ok {
+		t.Fatalf("clickhouse agent store = %T", opts.AgentStore)
 	}
 }

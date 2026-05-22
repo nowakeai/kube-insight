@@ -222,7 +222,9 @@ curl http://127.0.0.1:8080/api/v1/schema
 curl -X POST http://127.0.0.1:8080/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 5","maxRows":5}'
-curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&limit=20'
+curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&problemLimit=20'
+# Full per-resource stream details for debugging only:
+curl 'http://127.0.0.1:8080/api/v1/health?detail=full&limit=500'
 curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&maxVersions=5&maxObservations=20'
 ```
 

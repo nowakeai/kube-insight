@@ -15,6 +15,7 @@ const (
 	EventMessageDelta   RunEventType = "message.delta"
 	EventMessageDone    RunEventType = "message.completed"
 	EventFinalAnswer    RunEventType = "answer.final"
+	EventUsageDelta     RunEventType = "usage.delta"
 	EventToolStarted    RunEventType = "tool.started"
 	EventToolCompleted  RunEventType = "tool.completed"
 	EventToolFailed     RunEventType = "tool.failed"
@@ -39,25 +40,40 @@ type MessageEventData struct {
 	Content   string      `json:"content,omitempty"`
 }
 
+type UsageEventData struct {
+	Phase            string `json:"phase,omitempty"`
+	Source           string `json:"source,omitempty"`
+	Approximate      bool   `json:"approximate,omitempty"`
+	PromptTokens     int64  `json:"promptTokens,omitempty"`
+	CompletionTokens int64  `json:"completionTokens,omitempty"`
+	TotalTokens      int64  `json:"totalTokens,omitempty"`
+	SentTokens       int64  `json:"sentTokens,omitempty"`
+	ReceivedTokens   int64  `json:"receivedTokens,omitempty"`
+}
+
 type ToolCallEventData struct {
-	ToolCallID string          `json:"toolCallId"`
-	Name       string          `json:"name"`
-	Status     string          `json:"status"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	Output     json.RawMessage `json:"output,omitempty"`
-	DurationMS int64           `json:"durationMs,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	ToolCallID       string          `json:"toolCallId"`
+	Name             string          `json:"name"`
+	Status           string          `json:"status"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	Output           json.RawMessage `json:"output,omitempty"`
+	OutputSummary    string          `json:"outputSummary,omitempty"`
+	OutputArtifactID string          `json:"outputArtifactId,omitempty"`
+	DurationMS       int64           `json:"durationMs,omitempty"`
+	Error            string          `json:"error,omitempty"`
 }
 
 type ToolAuditEventData struct {
-	RunID      string          `json:"runId"`
-	ToolCallID string          `json:"toolCallId"`
-	Name       string          `json:"name"`
-	Status     string          `json:"status"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	Output     json.RawMessage `json:"output,omitempty"`
-	DurationMS int64           `json:"durationMs,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	RunID            string          `json:"runId"`
+	ToolCallID       string          `json:"toolCallId"`
+	Name             string          `json:"name"`
+	Status           string          `json:"status"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	Output           json.RawMessage `json:"output,omitempty"`
+	OutputSummary    string          `json:"outputSummary,omitempty"`
+	OutputArtifactID string          `json:"outputArtifactId,omitempty"`
+	DurationMS       int64           `json:"durationMs,omitempty"`
+	Error            string          `json:"error,omitempty"`
 }
 
 type Artifact struct {

@@ -29,30 +29,63 @@ values (?, ?, ?, ?, ?, ?)`, session.ID, nullable(session.Title), nullable(sessio
 }
 
 func (s *Store) GetSession(ctx context.Context, id string) (agent.Session, error) {
-	var session agent.Session
-	var createdAt, updatedAt int64
-	var title, provider, model sql.NullString
-	err := s.db.QueryRowContext(ctx, `
+	session, err := scanAgentSession(s.db.QueryRowContext(ctx, `
 select id, title, provider, model, created_at, updated_at
 from agent_sessions
-where id = ?`, id).Scan(&session.ID, &title, &provider, &model, &createdAt, &updatedAt)
+where id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return agent.Session{}, agent.ErrSessionNotFound
 	}
 	if err != nil {
 		return agent.Session{}, err
 	}
-	session.Title = title.String
-	session.Provider = provider.String
-	session.Model = model.String
-	session.CreatedAt = time.UnixMilli(createdAt).UTC()
-	session.UpdatedAt = time.UnixMilli(updatedAt).UTC()
 	runs, err := s.sessionRuns(ctx, id)
 	if err != nil {
 		return agent.Session{}, err
 	}
 	session.Runs = runs
 	return session, nil
+}
+
+func (s *Store) ListSessions(ctx context.Context, opts agent.ListSessionsOptions) (agent.SessionList, error) {
+	query := `
+select id, title, provider, model, created_at, updated_at
+from agent_sessions
+order by updated_at desc, id desc`
+	args := []any{}
+	if opts.Limit > 0 {
+		query += `
+limit ?`
+		args = append(args, opts.Limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return agent.SessionList{}, err
+	}
+	sessions := []agent.Session{}
+	for rows.Next() {
+		session, err := scanAgentSession(rows)
+		if err != nil {
+			_ = rows.Close()
+			return agent.SessionList{}, err
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return agent.SessionList{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return agent.SessionList{}, err
+	}
+	for i := range sessions {
+		runs, err := s.sessionRuns(ctx, sessions[i].ID)
+		if err != nil {
+			return agent.SessionList{}, err
+		}
+		sessions[i].Runs = runs
+	}
+	return agent.SessionList{Sessions: sessions}, nil
 }
 
 func (s *Store) CreateRun(ctx context.Context, sessionID string, input agent.CreateRunInput) (agent.Run, error) {
@@ -305,6 +338,21 @@ func (s *Store) scanRun(ctx context.Context, query string, args ...any) (agent.R
 
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+func scanAgentSession(row scanner) (agent.Session, error) {
+	var session agent.Session
+	var createdAt, updatedAt int64
+	var title, provider, model sql.NullString
+	if err := row.Scan(&session.ID, &title, &provider, &model, &createdAt, &updatedAt); err != nil {
+		return agent.Session{}, err
+	}
+	session.Title = title.String
+	session.Provider = provider.String
+	session.Model = model.String
+	session.CreatedAt = time.UnixMilli(createdAt).UTC()
+	session.UpdatedAt = time.UnixMilli(updatedAt).UTC()
+	return session, nil
 }
 
 func scanAgentRun(row scanner) (agent.Run, error) {

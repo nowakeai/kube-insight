@@ -83,6 +83,10 @@ type AddCitationInput = {
   target?: unknown
 }
 
+type UpsertServerOptions = {
+  activate?: boolean
+}
+
 type AgentProjectionState = {
   activeSessionId?: string
   selectedArtifactId?: string
@@ -94,8 +98,8 @@ type AgentProjectionState = {
   citations: Record<string, AgentCitation>
   ensureSession: (title: string) => string
   startRun: (sessionId: string, input: string) => string
-  upsertServerSession: (session: AgentSessionDTO) => void
-  upsertServerRun: (run: AgentRunDTO) => void
+  upsertServerSession: (session: AgentSessionDTO, options?: UpsertServerOptions) => void
+  upsertServerRun: (run: AgentRunDTO, options?: UpsertServerOptions) => void
   applyServerEvent: (event: AgentRunEventDTO) => void
   appendRunEvent: (runId: string, input: AddRunEventInput) => string
   completeRun: (runId: string, finalAnswer: string) => void
@@ -185,7 +189,8 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     return id
   },
 
-  upsertServerSession: (session) => {
+  upsertServerSession: (session, options = {}) => {
+    const activate = options.activate ?? true
     set((current) => {
       const previous = current.sessions[session.id]
       const runIds = uniqueValues([
@@ -193,7 +198,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
         ...(session.runs ?? []).map((run) => run.id),
       ])
       return {
-        activeSessionId: session.id,
+        activeSessionId: activate ? session.id : current.activeSessionId,
         sessionOrder: uniquePrepend(current.sessionOrder, session.id),
         sessions: {
           ...current.sessions,
@@ -207,10 +212,11 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
         },
       }
     })
-    for (const run of session.runs ?? []) get().upsertServerRun(run)
+    for (const run of session.runs ?? []) get().upsertServerRun(run, { activate })
   },
 
-  upsertServerRun: (run) => {
+  upsertServerRun: (run, options = {}) => {
+    const activate = options.activate ?? true
     const now = nowISO()
     set((current) => {
       const previous = current.runs[run.id]
@@ -222,7 +228,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
         runIds: [],
       }
       return {
-        activeSessionId: run.sessionId,
+        activeSessionId: activate ? run.sessionId : current.activeSessionId,
         sessionOrder: uniquePrepend(current.sessionOrder, run.sessionId),
         sessions: {
           ...current.sessions,
@@ -454,6 +460,7 @@ function uniquePrepend(values: string[], value: string) {
 }
 
 function runStatusFromEvent(event: AgentRunEventDTO): AgentRunStatus | undefined {
+  if (event.type === "answer.final") return "completed"
   if (!event.type.startsWith("run.")) return undefined
   const status = eventDataRecord(event.data).status
   return isRunStatus(status) ? status : undefined

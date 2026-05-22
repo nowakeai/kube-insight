@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"kube-insight/internal/agent"
 	"kube-insight/internal/core"
 	"kube-insight/internal/extractor"
 	"kube-insight/internal/storage"
@@ -39,6 +40,7 @@ func TestServerExposesPrometheusMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	agent.ObserveToolCallDuration("kube_insight_sql", "failed", 150)
 	server, err := NewServer(ServerOptions{DBPath: dbPath})
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +56,7 @@ func TestServerExposesPrometheusMetrics(t *testing.T) {
 		"kube_insight_versions",
 		"kube_insight_storage_bytes",
 		"kube_insight_resource_streams",
+		`kube_insight_agent_tool_call_duration_seconds_count{status="failed",tool="kube_insight_sql"}`,
 	} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("metrics missing %q: %s", want, rec.Body.String())

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"kube-insight/internal/agent"
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/clickhouse"
 	"kube-insight/internal/storage/sqlite"
@@ -33,6 +34,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		driver = "sqlite"
 	}
 	registry := prometheus.NewRegistry()
+	registry.MustRegister(agent.ToolCallDurationCollector())
 	switch driver {
 	case "sqlite":
 		if opts.DBPath == "" {

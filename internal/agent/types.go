@@ -73,6 +73,14 @@ type CreateSessionInput struct {
 	Model    string
 }
 
+type ListSessionsOptions struct {
+	Limit int
+}
+
+type SessionList struct {
+	Sessions []Session `json:"sessions"`
+}
+
 type CreateRunInput struct {
 	Input    string
 	Provider string

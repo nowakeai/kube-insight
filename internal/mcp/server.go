@@ -53,20 +53,6 @@ type healthArguments struct {
 	IncludeSkipped   bool     `json:"includeSkipped,omitempty"`
 }
 
-type historyArguments struct {
-	ClusterID       string `json:"cluster,omitempty"`
-	UID             string `json:"uid,omitempty"`
-	Kind            string `json:"kind,omitempty"`
-	Namespace       string `json:"namespace,omitempty"`
-	Name            string `json:"name,omitempty"`
-	From            string `json:"from,omitempty"`
-	To              string `json:"to,omitempty"`
-	MaxVersions     int    `json:"maxVersions,omitempty"`
-	MaxObservations int    `json:"maxObservations,omitempty"`
-	IncludeDocs     bool   `json:"includeDocs,omitempty"`
-	Diffs           *bool  `json:"diffs,omitempty"`
-}
-
 func NewServer(opts ServerOptions) (*Server, error) {
 	openStore := opts.OpenStore
 	if openStore == nil {
@@ -124,11 +110,7 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "streamable-http+sse"})
 	})
-	mux.Handle("/mcp", sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
-		return server.sdkServer
-	}, &sdkmcp.StreamableHTTPOptions{
-		SessionTimeout: 30 * time.Minute,
-	}))
+	mux.Handle("/mcp", server.StreamableHTTPHandler(30*time.Minute))
 	mux.Handle("/sse", sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
 		return server.sdkServer
 	}, nil))
@@ -165,6 +147,17 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 	return s.sdkServer.Run(ctx, &sdkmcp.IOTransport{
 		Reader: nopReadCloser{Reader: in},
 		Writer: nopWriteCloser{Writer: out},
+	})
+}
+
+func (s *Server) StreamableHTTPHandler(sessionTimeout time.Duration) http.Handler {
+	if sessionTimeout <= 0 {
+		sessionTimeout = 30 * time.Minute
+	}
+	return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return s.sdkServer
+	}, &sdkmcp.StreamableHTTPOptions{
+		SessionTimeout: sessionTimeout,
 	})
 }
 
@@ -215,12 +208,33 @@ func (s *Server) callTool(ctx context.Context, request *sdkmcp.CallToolRequest) 
 		}
 		value, err := s.queryHealth(ctx, args)
 		return toolResult(value, err)
+	case "kube_insight_search":
+		var args searchArguments
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("invalid search arguments: %w", err)
+		}
+		value, err := s.querySearch(ctx, args)
+		return toolResult(value, err)
 	case "kube_insight_history":
 		var args historyArguments
 		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
 			return nil, fmt.Errorf("invalid history arguments: %w", err)
 		}
 		value, err := s.queryHistory(ctx, args)
+		return toolResult(value, err)
+	case "kube_insight_topology":
+		var args topologyArguments
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("invalid topology arguments: %w", err)
+		}
+		value, err := s.queryTopology(ctx, args)
+		return toolResult(value, err)
+	case "kube_insight_service_investigation":
+		var args serviceInvestigationArguments
+		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
+			return nil, fmt.Errorf("invalid service investigation arguments: %w", err)
+		}
+		value, err := s.queryServiceInvestigation(ctx, args)
 		return toolResult(value, err)
 	default:
 		return nil, fmt.Errorf("unknown tool %q", request.Params.Name)
@@ -237,7 +251,11 @@ func (s *Server) querySchema(ctx context.Context) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support schema queries")
 	}
-	return queryStore.QuerySchema(ctx)
+	schema, err := queryStore.QuerySchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return formatSQLSchemaDSL(schema), nil
 }
 
 func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
@@ -281,7 +299,11 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support resource health")
 	}
-	return healthStore.ResourceHealth(ctx, opts)
+	report, err := healthStore.ResourceHealth(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return formatResourceHealthDSL(report, 10), nil
 }
 
 func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, error) {
@@ -338,13 +360,19 @@ func toolResult(value any, err error) (*sdkmcp.CallToolResult, error) {
 			}},
 		}, nil
 	}
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return nil, err
+	var text string
+	if valueText, ok := value.(string); ok {
+		text = valueText
+	} else {
+		data, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+		text = string(data)
 	}
 	return &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{
-			Text: string(data),
+			Text: text,
 		}},
 	}, nil
 }
@@ -353,7 +381,7 @@ func tools() []sdkmcp.Tool {
 	return []sdkmcp.Tool{
 		{
 			Name:        "kube_insight_schema",
-			Description: "Return the active kube-insight backend schema, SQL dialect notes, tables, columns, indexes, and join hints. Call this before writing SQL because SQLite and ClickHouse table names differ.",
+			Description: "Return the active kube-insight backend schema as a compact DSL for LLM SQL planning, including dialect notes, useful tables, columns, indexes, joins, and recipes. Call this before writing SQL because SQLite and ClickHouse table names differ.",
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -361,7 +389,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store. Use kube_insight_schema first and write SQL for the reported backend/dialect.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -379,7 +407,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_health",
-			Description: "Return collector coverage, staleness, and per-resource health.",
+			Description: "Summarize collector coverage, staleness, and resource stream health before making current-state claims. Returns a compact DSL summary plus a bounded list of problematic resources by default; the HTTP /api/v1/health endpoint is much larger and intended for dashboards.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -407,8 +435,29 @@ func tools() []sdkmcp.Tool {
 			},
 		},
 		{
+			Name:        "kube_insight_search",
+			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Start with includeBundles=false and narrow by kind, namespace, cluster, or time; set includeBundles=true only for top targets that need compact proof.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query":                map[string]any{"type": "string", "description": "Search terms, symptoms, object names, labels, statuses, error text, or other evidence keywords."},
+					"clusterId":            map[string]any{"type": "string"},
+					"kind":                 map[string]any{"type": "string"},
+					"namespace":            map[string]any{"type": "string"},
+					"from":                 map[string]any{"type": "string", "description": "RFC3339 timestamp or YYYY-MM-DD lower bound."},
+					"to":                   map[string]any{"type": "string", "description": "RFC3339 timestamp or YYYY-MM-DD upper bound."},
+					"limit":                map[string]any{"type": "integer", "description": "Maximum matches to return. Defaults to 20 and caps at 100."},
+					"maxVersionsPerObject": map[string]any{"type": "integer", "description": "When includeBundles is true, cap retained versions per object. Caps at 5."},
+					"includeBundles":       map[string]any{"type": "boolean", "description": "Include compact evidence bundles for matched objects."},
+					"includeHealth":        map[string]any{"type": "boolean", "description": "Include collector coverage summary. Defaults to true."},
+					"healthStaleAfter":     map[string]any{"type": "string", "description": "Go duration such as 5m or 1h for coverage freshness when includeHealth is true."},
+				},
+				"required": []string{"query"},
+			},
+		},
+		{
 			Name:        "kube_insight_history",
-			Description: "Return one object's retained content versions, observation trail, and optional version diffs.",
+			Description: "Return one known object's retained content versions, observation trail, and optional version diffs. Use after search or SQL identifies the exact object. Keep maxVersions and maxObservations bounded; leave includeDocs=false unless raw YAML/JSON proof is explicitly needed.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -424,6 +473,40 @@ func tools() []sdkmcp.Tool {
 					"includeDocs":     map[string]any{"type": "boolean"},
 					"diffs":           map[string]any{"type": "boolean"},
 				},
+			},
+		},
+		{
+			Name:        "kube_insight_topology",
+			Description: "Load the retained topology graph around one known Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search or SQL identifies a target; do not use it for broad discovery.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"clusterId": map[string]any{"type": "string"},
+					"kind":      map[string]any{"type": "string", "description": "Kubernetes kind such as Service, Pod, Node, Deployment, or Event."},
+					"namespace": map[string]any{"type": "string"},
+					"name":      map[string]any{"type": "string"},
+					"uid":       map[string]any{"type": "string", "description": "Optional Kubernetes UID to disambiguate recreated objects."},
+				},
+				"required": []string{"kind", "name"},
+			},
+		},
+		{
+			Name:        "kube_insight_service_investigation",
+			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. Start with low limits, then expand only if the compact bundle does not answer the question.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"clusterId":            map[string]any{"type": "string"},
+					"namespace":            map[string]any{"type": "string", "description": "Service namespace."},
+					"name":                 map[string]any{"type": "string", "description": "Service name."},
+					"from":                 map[string]any{"type": "string", "description": "RFC3339 timestamp or YYYY-MM-DD lower bound."},
+					"to":                   map[string]any{"type": "string", "description": "RFC3339 timestamp or YYYY-MM-DD upper bound."},
+					"maxEvidenceObjects":   map[string]any{"type": "integer", "description": "Maximum related evidence objects. Defaults to 20 and caps at 100."},
+					"maxVersionsPerObject": map[string]any{"type": "integer", "description": "Maximum retained versions per object. Defaults to 3 and caps at 10."},
+					"maxFactsPerObject":    map[string]any{"type": "integer", "description": "Maximum facts per object. Defaults to 20 and caps at 100."},
+					"maxChangesPerObject":  map[string]any{"type": "integer", "description": "Maximum changes per object. Defaults to 20 and caps at 100."},
+				},
+				"required": []string{"namespace", "name"},
 			},
 		},
 	}

@@ -523,6 +523,10 @@ func apiServerOptions(cfg appconfig.Config, dbPath string, selections ...serveSe
 	opts := api.ServerOptions{DBPath: dbPath, ServerInfo: apiServerInfo(cfg, dbPath, selection)}
 	switch storageDriver(cfg) {
 	case "clickhouse":
+		opts.DBPath = ""
+		if agentStore, err := newClickHouseStoreFromConfig(cfg); err == nil {
+			opts.AgentStore = agentStore
+		}
 		opts.OpenStore = func(context.Context) (api.ReadStore, error) {
 			return newClickHouseStoreFromConfig(cfg)
 		}

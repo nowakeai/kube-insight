@@ -39,6 +39,12 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 	}
 
 	assertGETContains(t, server.URL+"/api/v1/agent/sessions/"+session.ID, `"title": "API investigation"`)
+	body := getBody(t, server.URL+"/api/v1/agent/sessions?limit=5", http.StatusOK)
+	for _, want := range []string{`"sessions": [`, `"title": "API investigation"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("session list missing %q: %s", want, body)
+		}
+	}
 
 	var run struct {
 		ID        string `json:"id"`
@@ -51,7 +57,7 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 		t.Fatalf("run = %#v", run)
 	}
 
-	body := getBody(t, server.URL+"/api/v1/agent/runs?limit=5", http.StatusOK)
+	body = getBody(t, server.URL+"/api/v1/agent/runs?limit=5", http.StatusOK)
 	for _, want := range []string{`"queued": 1`, `"total": 1`, `"runs": [`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("run list missing %q: %s", want, body)
@@ -123,7 +129,7 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 	}
 }
 
-func TestRetryAgentRunCreatesNewRunFromFailedRun(t *testing.T) {
+func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 	runner := &retryingAgentRunner{}
 	handler, err := NewServer(ServerOptions{
 		OpenStore: func(context.Context) (ReadStore, error) {
@@ -179,7 +185,25 @@ func TestRetryAgentRunCreatesNewRunFromFailedRun(t *testing.T) {
 			t.Fatalf("retried events missing %q: %s", want, body)
 		}
 	}
-	assertPOSTStatus(t, server.URL+"/api/v1/agent/runs/"+retried.ID+"/retry", `{}`, http.StatusConflict)
+
+	var retriedCompleted struct {
+		ID        string          `json:"id"`
+		SessionID string          `json:"sessionId"`
+		Status    string          `json:"status"`
+		Input     string          `json:"input"`
+		Metadata  json.RawMessage `json:"metadata"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/runs/"+retried.ID+"/retry", `{}`, http.StatusCreated, &retriedCompleted)
+	if retriedCompleted.ID == "" || retriedCompleted.ID == retried.ID || retriedCompleted.SessionID != session.ID || retriedCompleted.Status != "queued" || retriedCompleted.Input != "retry this" {
+		t.Fatalf("retried completed run = %#v", retriedCompleted)
+	}
+	metadata = map[string]string{}
+	if err := json.Unmarshal(retriedCompleted.Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata["retryOfRunId"] != retried.ID || metadata["source"] != "test" {
+		t.Fatalf("retry completed metadata = %#v", metadata)
+	}
 }
 
 func TestCancelAgentRunCancelsRunnerContext(t *testing.T) {

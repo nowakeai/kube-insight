@@ -44,6 +44,36 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, session)
 }
 
+func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request) {
+	opts, err := parseListAgentSessionsOptions(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	sessions, err := s.agentStore.ListSessions(r.Context(), opts)
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+func parseListAgentSessionsOptions(r *http.Request) (agent.ListSessionsOptions, error) {
+	query := r.URL.Query()
+	opts := agent.ListSessionsOptions{Limit: 50}
+	if rawLimit := query.Get("limit"); rawLimit != "" {
+		limit, err := strconv.Atoi(rawLimit)
+		if err != nil || limit < 0 {
+			return agent.ListSessionsOptions{}, fmt.Errorf("limit must be a non-negative integer")
+		}
+		opts.Limit = limit
+	}
+	if opts.Limit > 200 {
+		opts.Limit = 200
+	}
+	return opts, nil
+}
+
 func (s *Server) handleGetAgentSession(w http.ResponseWriter, r *http.Request) {
 	session, err := s.agentStore.GetSession(r.Context(), r.PathValue("session_id"))
 	if err != nil {
@@ -87,8 +117,8 @@ func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeAgentStoreError(w, err)
 		return
 	}
-	if original.Status != agent.RunFailed {
-		writeError(w, http.StatusConflict, errors.New("only failed agent runs can be retried"))
+	if original.Status == agent.RunQueued || original.Status == agent.RunRunning {
+		writeError(w, http.StatusConflict, errors.New("only terminal agent runs can be retried"))
 		return
 	}
 	run, err := s.agentStore.CreateRun(r.Context(), original.SessionID, agent.CreateRunInput{

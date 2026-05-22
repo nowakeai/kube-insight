@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"time"
 
+	openaimodel "github.com/cloudwego/eino-ext/components/model/openai"
+	einomcp "github.com/cloudwego/eino-ext/components/tool/mcp"
+	"github.com/cloudwego/eino/components/tool"
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	markmcp "github.com/mark3labs/mcp-go/mcp"
 	"kube-insight/internal/agent"
 	"kube-insight/internal/api"
 	appconfig "kube-insight/internal/config"
-	"kube-insight/internal/storage"
-	"kube-insight/internal/storage/sqlite"
-
-	openaimodel "github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/components/tool"
+	insightmcp "kube-insight/internal/mcp"
 )
 
 const agentModelTimeout = 2 * time.Minute
@@ -38,14 +40,16 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 	if err != nil {
 		return nil, nil, err
 	}
-	readStore, closeTools, err := openAgentToolStore(ctx, dbPath, opts)
+	tools, closeTools, err := configuredMCPAgentTools(ctx, dbPath, opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
-		Description: "Kubernetes investigation assistant backed by kube-insight evidence tools.",
-		Model:       model,
-		Tools:       configuredAgentTools(readStore),
+		Description:        "Kubernetes investigation assistant backed by kube-insight MCP evidence tools.",
+		Model:              model,
+		Tools:              tools,
+		EmitInternalEvents: true,
+		EnableStreaming:    true,
 	})
 	if err != nil {
 		if closeTools != nil {
@@ -83,48 +87,57 @@ func newConfiguredChatModel(ctx context.Context, chat appconfig.ChatConfig) (*op
 	})
 }
 
-func openAgentToolStore(ctx context.Context, dbPath string, opts *api.ServerOptions) (api.ReadStore, func() error, error) {
-	if opts.OpenStore != nil {
-		store, err := opts.OpenStore(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		if opts.KeepStoreOpen {
-			return store, nil, nil
-		}
-		return store, store.Close, nil
-	}
-	if dbPath == "" {
-		return nil, nil, errors.New("agent tools require a read store or sqlite database path")
-	}
-	store, err := sqlite.OpenReadOnly(dbPath)
+func configuredMCPAgentTools(ctx context.Context, dbPath string, opts *api.ServerOptions) ([]tool.BaseTool, func() error, error) {
+	mcpServer, err := insightmcp.NewServer(configuredMCPServerOptions(dbPath, opts))
 	if err != nil {
 		return nil, nil, err
 	}
-	return store, store.Close, nil
+	httpServer := httptest.NewServer(mcpServer.StreamableHTTPHandler(30 * time.Minute))
+	cli, err := mcpclient.NewStreamableHttpClient(httpServer.URL)
+	if err != nil {
+		httpServer.Close()
+		_ = mcpServer.Close()
+		return nil, nil, err
+	}
+	closeTools := func() error {
+		err := cli.Close()
+		httpServer.Close()
+		return errors.Join(err, mcpServer.Close())
+	}
+	if err := cli.Start(ctx); err != nil {
+		_ = closeTools()
+		return nil, nil, err
+	}
+	init := markmcp.InitializeRequest{}
+	init.Params.ProtocolVersion = markmcp.LATEST_PROTOCOL_VERSION
+	init.Params.ClientInfo = markmcp.Implementation{Name: "kube-insight-agent", Version: "0.1.0-dev"}
+	if _, err := cli.Initialize(ctx, init); err != nil {
+		_ = closeTools()
+		return nil, nil, err
+	}
+	tools, err := einomcp.GetTools(ctx, &einomcp.Config{Cli: cli})
+	if err != nil {
+		_ = closeTools()
+		return nil, nil, err
+	}
+	if len(tools) == 0 {
+		_ = closeTools()
+		return nil, nil, errors.New("agent MCP server returned no tools")
+	}
+	return agent.WrapRecoverableToolErrors(tools), closeTools, nil
 }
 
-func configuredAgentTools(readStore api.ReadStore) []tool.BaseTool {
-	tools := []tool.BaseTool{}
-	if store, ok := readStore.(storage.ResourceHealthStore); ok {
-		tools = append(tools, agent.NewHealthTool(store, agent.HealthToolOptions{}))
+func configuredMCPServerOptions(dbPath string, opts *api.ServerOptions) insightmcp.ServerOptions {
+	if opts != nil && opts.OpenStore != nil {
+		return insightmcp.ServerOptions{
+			DBPath: dbPath,
+			OpenStore: func(ctx context.Context) (insightmcp.ReadStore, error) {
+				return opts.OpenStore(ctx)
+			},
+			KeepStoreOpen: opts.KeepStoreOpen,
+		}
 	}
-	if store, ok := readStore.(storage.EvidenceSearchStore); ok {
-		tools = append(tools, agent.NewSearchTool(store, agent.SearchToolOptions{}))
-	}
-	if store, ok := readStore.(storage.ServiceInvestigationStore); ok {
-		tools = append(tools, agent.NewServiceInvestigationTool(store))
-	}
-	if store, ok := readStore.(storage.TopologyStore); ok {
-		tools = append(tools, agent.NewTopologyTool(store))
-	}
-	if store, ok := readStore.(storage.ObjectHistoryStore); ok {
-		tools = append(tools, agent.NewHistoryTool(store))
-	}
-	if store, ok := readStore.(storage.SQLQueryStore); ok {
-		tools = append(tools, agent.NewSQLTool(store))
-	}
-	return tools
+	return insightmcp.ServerOptions{DBPath: dbPath}
 }
 
 type agentRunError struct {

@@ -129,7 +129,7 @@ func TestRunDBClickHouseInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requests) != 18 {
+	if len(requests) != 21 {
 		t.Fatalf("requests = %d %#v", len(requests), requests)
 	}
 	for _, want := range []string{
@@ -137,7 +137,7 @@ func TestRunDBClickHouseInit(t *testing.T) {
 		"ki",
 		"statements",
 		"applied",
-		"18",
+		"21",
 		"password=***",
 	} {
 		if !strings.Contains(stdout.String(), want) {

@@ -18,6 +18,7 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		EventMessageDelta,
 		EventMessageDone,
 		EventFinalAnswer,
+		EventUsageDelta,
 		EventToolStarted,
 		EventToolCompleted,
 		EventToolFailed,
@@ -37,8 +38,8 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		}
 		seen[value] = true
 	}
-	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventToolAudit != "tool.audit" || EventArtifact != "artifact.created" {
-		t.Fatalf("unexpected event names: %q %q %q %q", EventRunCreated, EventFinalAnswer, EventToolAudit, EventArtifact)
+	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventUsageDelta != "usage.delta" || EventToolAudit != "tool.audit" || EventArtifact != "artifact.created" {
+		t.Fatalf("unexpected event names: %q %q %q %q %q", EventRunCreated, EventFinalAnswer, EventUsageDelta, EventToolAudit, EventArtifact)
 	}
 }
 
@@ -57,6 +58,11 @@ func TestRunEventPayloadsMarshalContractFields(t *testing.T) {
 			name: "message delta",
 			in:   MessageEventData{MessageID: "msg_1", Role: RoleAssistant, Delta: "checking"},
 			want: []string{`"messageId":"msg_1"`, `"role":"assistant"`, `"delta":"checking"`},
+		},
+		{
+			name: "usage delta",
+			in:   UsageEventData{Phase: "streaming", Source: "provider", PromptTokens: 10, CompletionTokens: 3, TotalTokens: 13},
+			want: []string{`"phase":"streaming"`, `"source":"provider"`, `"promptTokens":10`, `"completionTokens":3`, `"totalTokens":13`},
 		},
 		{
 			name: "tool call",

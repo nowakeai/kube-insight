@@ -68,8 +68,18 @@ func CreateTableStatements(opts SchemaOptions) ([]string, error) {
 		createFilterDecisions(opts),
 		createIngestionOffsets(opts),
 	}
+	statements = append(statements, CreateAgentTableStatements(opts)...)
 	statements = append(statements, readPathIndexStatements(opts)...)
 	return statements, nil
+}
+
+func CreateAgentTableStatements(opts SchemaOptions) []string {
+	opts = opts.normalized()
+	return []string{
+		createAgentSessions(opts),
+		createAgentRuns(opts),
+		createAgentRunEvents(opts),
+	}
 }
 
 func createAPIResources(opts SchemaOptions) string {
@@ -261,6 +271,51 @@ ENGINE = ReplacingMergeTree(updated_at)
 PARTITION BY toYYYYMM(updated_at)
 ORDER BY (cluster_id, api_group, api_version, resource, namespace, event)
 %s`, q(opts.Database), clusterClause(opts.Cluster), ttlClause(opts, "updated_at"))
+}
+
+func createAgentSessions(opts SchemaOptions) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.agent_sessions%s (
+    id String,
+    title String,
+    provider String,
+    model String,
+    created_at DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id`, q(opts.Database), clusterClause(opts.Cluster))
+}
+
+func createAgentRuns(opts SchemaOptions) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.agent_runs%s (
+    id String,
+    session_id String,
+    status LowCardinality(String),
+    input String CODEC(ZSTD(3)),
+    provider String,
+    model String,
+    created_at DateTime64(3, 'UTC'),
+    started_at Nullable(DateTime64(3, 'UTC')),
+    completed_at Nullable(DateTime64(3, 'UTC')),
+    error String CODEC(ZSTD(3)),
+    metadata String CODEC(ZSTD(3)),
+    updated_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY id`, q(opts.Database), clusterClause(opts.Cluster))
+}
+
+func createAgentRunEvents(opts SchemaOptions) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.agent_run_events%s (
+    id String,
+    run_id String,
+    sequence UInt64,
+    type LowCardinality(String),
+    created_at DateTime64(3, 'UTC'),
+    data String CODEC(ZSTD(3))
+)
+ENGINE = MergeTree
+ORDER BY (run_id, sequence, id)`, q(opts.Database), clusterClause(opts.Cluster))
 }
 
 func readPathIndexStatements(opts SchemaOptions) []string {

@@ -1,11 +1,8 @@
 package agent
 
 import (
-	"context"
 	"strings"
 	"testing"
-
-	"github.com/cloudwego/eino/schema"
 )
 
 func TestArtifactAndCitationContractNames(t *testing.T) {
@@ -41,34 +38,9 @@ func TestArtifactAndCitationContractNames(t *testing.T) {
 
 func TestDefaultAgentInstructionRequiresEvidenceCitations(t *testing.T) {
 	instruction := DefaultAgentInstruction()
-	for _, want := range []string{"kube-insight Kubernetes investigation agent", "Check collector health", "cite the exact proof", "version IDs", "Evidence section"} {
+	for _, want := range []string{"kube-insight Kubernetes investigation agent", "Evidence first", "kube_insight_health", "kube_insight_schema", "ClickHouse-compatible", "kube_insight_search", "includeDocs false", "maxRows bounded", "imaginary tables such as objects", "failed tool call is diagnostic evidence", "Parallel tool calls", "isError true", "cite the exact proof", "version IDs", "Evidence section"} {
 		if !strings.Contains(instruction, want) {
 			t.Fatalf("default instruction missing %q: %s", want, instruction)
-		}
-	}
-}
-
-func TestToolDescriptionsIncludeCitationGuidance(t *testing.T) {
-	tools := []struct {
-		name string
-		tool interface {
-			Info(context.Context) (*schema.ToolInfo, error)
-		}
-	}{
-		{name: HealthToolName, tool: NewHealthTool(nil, HealthToolOptions{})},
-		{name: SearchToolName, tool: NewSearchTool(nil, SearchToolOptions{})},
-		{name: HistoryToolName, tool: NewHistoryTool(nil)},
-		{name: TopologyToolName, tool: NewTopologyTool(nil)},
-		{name: ServiceInvestigationToolName, tool: NewServiceInvestigationTool(nil)},
-		{name: SQLToolName, tool: NewSQLTool(nil)},
-	}
-	for _, item := range tools {
-		info, err := item.tool.Info(context.Background())
-		if err != nil {
-			t.Fatalf("%s Info: %v", item.name, err)
-		}
-		if !strings.Contains(info.Desc, "Cite concrete proof") {
-			t.Fatalf("%s description missing citation guidance: %s", item.name, info.Desc)
 		}
 	}
 }

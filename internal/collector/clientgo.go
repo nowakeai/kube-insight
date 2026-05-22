@@ -108,11 +108,24 @@ func DiscoverResourcesClientGo(ctx context.Context, kubeContext string) ([]Resou
 		return nil, err
 	}
 	lists, err := client.ServerPreferredResources()
+	if isStaleDiscoveryError(err) {
+		if retryClient, retryClientErr := discovery.NewDiscoveryClientForConfig(config); retryClientErr == nil {
+			retryLists, retryErr := retryClient.ServerPreferredResources()
+			if retryErr == nil || len(retryLists) > 0 {
+				lists = retryLists
+				err = retryErr
+			}
+		}
+	}
 	if err != nil {
 		if groupErr, ok := err.(*discovery.ErrGroupDiscoveryFailed); ok {
-			err = errors.NewAggregate(mapDiscoveryErrors(groupErr.Groups))
+			if allStaleDiscoveryErrors(groupErr.Groups) && len(lists) > 0 {
+				err = nil
+			} else {
+				err = errors.NewAggregate(mapDiscoveryErrors(groupErr.Groups))
+			}
 		}
-		if len(lists) == 0 {
+		if err != nil && len(lists) == 0 {
 			return nil, err
 		}
 	}
@@ -282,6 +295,29 @@ func loadClientConfig() (*clientcmdapi.Config, error) {
 		return nil, err
 	}
 	return config, nil
+}
+
+
+func isStaleDiscoveryError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if groupErr, ok := err.(*discovery.ErrGroupDiscoveryFailed); ok {
+		return allStaleDiscoveryErrors(groupErr.Groups)
+	}
+	return strings.Contains(err.Error(), "stale GroupVersion discovery")
+}
+
+func allStaleDiscoveryErrors(groups map[schema.GroupVersion]error) bool {
+	if len(groups) == 0 {
+		return false
+	}
+	for _, err := range groups {
+		if err == nil || !strings.Contains(err.Error(), "stale GroupVersion discovery") {
+			return false
+		}
+	}
+	return true
 }
 
 func mapDiscoveryErrors(in map[schema.GroupVersion]error) []error {

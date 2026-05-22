@@ -1,23 +1,23 @@
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
-  MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowRight, Bot, ChevronDown, CircleStop, ExternalLink, LayoutDashboard, MessageSquareText, Play, Plus, RotateCcw, Search, Sparkles, UserRound } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ArrowUp, CircleStop, LayoutDashboard, Search, Sparkles } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
-import { MarkdownContent } from "@/components/markdown-content"
+import { SessionSidebar } from "@/components/agent-session-sidebar"
+import { isPanelDockArtifact, LocalMessageConversation, RunComposerStats, SessionConversation, type AgentRunRoute } from "@/components/agent-chat-stream"
 import { Button } from "@/components/ui/button"
-import { cancelAgentRun, createAgentRun, createAgentSession, getAgentSession, retryAgentRun } from "@/lib/agent-api"
+import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
-import { useAgentProjectionStore, type AgentRun, type AgentRunEvent, type AgentSession } from "@/lib/agent-store"
-import type { AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
+import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 const starterPrompts = [
   "Is the API service healthy right now?",
@@ -32,9 +32,11 @@ export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [panelDockCollapsed, setPanelDockCollapsed] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
+  const [routeHydrating, setRouteHydrating] = useState(false)
   const [routeRun, setRouteRun] = useState(readRouteRun)
   const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
   const activeServerRunRef = useRef<string | undefined>(undefined)
+  const hydratedRunRef = useRef<string | undefined>(undefined)
   const activeSessionId = useAgentProjectionStore((state) => state.activeSessionId)
   const sessionOrder = useAgentProjectionStore((state) => state.sessionOrder)
   const sessionsById = useAgentProjectionStore((state) => state.sessions)
@@ -51,30 +53,107 @@ export function AgentChat() {
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const selectSession = useAgentProjectionStore((state) => state.selectSession)
+  const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const handleSelectArtifact = useCallback((artifactId?: string) => {
+    selectArtifact(artifactId)
+    if (artifactId) setPanelDockCollapsed(false)
+  }, [selectArtifact])
   const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
   const activeRunEventIds = useAgentProjectionStore((state) => {
     if (!routeRun) return emptyEventIds
     return state.runs[routeRun.runID]?.eventIds ?? emptyEventIds
-  })
-  const activeRunArtifactIds = useAgentProjectionStore((state) => {
-    if (!routeRun) return emptyEventIds
-    return state.runs[routeRun.runID]?.artifactIds ?? emptyEventIds
   })
   const eventsById = useAgentProjectionStore((state) => state.events)
   const artifactsById = useAgentProjectionStore((state) => state.artifacts)
   const activeRunEvents = activeRunEventIds
     .map((eventID) => eventsById[eventID])
     .filter((event): event is AgentRunEvent => Boolean(event))
-  const activeRunArtifacts = activeRunArtifactIds
-    .map((artifactID) => artifactsById[artifactID])
-    .filter((artifact) => Boolean(artifact))
   const selectedArtifactId = useAgentProjectionStore((state) => state.selectedArtifactId)
+  const visibleSessionId = routeRun?.sessionID ?? activeSessionId
+  const visibleSession = visibleSessionId ? sessionsById[visibleSessionId] : undefined
+  const visibleRuns = (visibleSession?.runIds ?? [])
+    .map((runID) => runsById[runID])
+    .filter((run): run is AgentRun => Boolean(run))
+  const visiblePanelArtifacts = visibleRuns.flatMap((run) => run.artifactIds
+    .map((artifactID) => artifactsById[artifactID])
+    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind)))
 
   useEffect(() => {
     const onPopState = () => setRouteRun(readRouteRun())
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
+
+  useEffect(() => {
+    const abortController = new AbortController()
+    async function hydrateRecentSessions() {
+      const list = await listAgentSessions({ signal: abortController.signal })
+      if (abortController.signal.aborted) return
+      for (const session of [...list.sessions].reverse()) upsertServerSession(session, { activate: false })
+    }
+    void hydrateRecentSessions().catch(() => undefined)
+    return () => abortController.abort()
+  }, [upsertServerSession])
+
+  useEffect(() => {
+    if (!routeRun) {
+      hydratedRunRef.current = undefined
+      setRouteHydrating(false)
+      return
+    }
+    if (hydratedRunRef.current === routeRun.runID) return
+
+    const abortController = new AbortController()
+    hydratedRunRef.current = routeRun.runID
+    setRouteHydrating(true)
+
+    async function hydrateRouteRun() {
+      const session = await getAgentSession(routeRun!.sessionID, { signal: abortController.signal })
+      upsertServerSession(session)
+      const sessionRuns = session.runs ?? []
+      for (const candidate of sessionRuns) upsertServerRun(candidate)
+      const routeRunDTO = sessionRuns.find((candidate) => candidate.id === routeRun!.runID)
+      if (!routeRunDTO) throw new AgentAPIError(404, "run not found in session")
+
+      const routeEvents = await getAgentRunEvents(routeRun!.runID, { signal: abortController.signal })
+      for (const event of routeEvents) applyServerEvent(event)
+      if (abortController.signal.aborted) return
+
+      const hydratedRun = useAgentProjectionStore.getState().runs[routeRun!.runID]
+      const status = runStatusFromHydration(hydratedRun, routeRunDTO, routeEvents)
+      const running = status === "queued" || status === "running"
+      activeServerRunRef.current = running ? routeRun!.runID : undefined
+      setIsRunning(running)
+      setMessages(threadMessagesFromHydratedRun(hydratedRun, routeRunDTO, routeEvents))
+      setRouteHydrating(false)
+
+      void hydrateSiblingRunEvents(sessionRuns, routeRun!.runID, abortController.signal, applyServerEvent)
+    }
+
+    void hydrateRouteRun().catch((error: unknown) => {
+      if (abortController.signal.aborted) return
+      hydratedRunRef.current = undefined
+      activeServerRunRef.current = undefined
+      setIsRunning(false)
+      setRouteHydrating(false)
+      if (error instanceof AgentAPIError && error.status === 404) {
+        setMessages([])
+        setRouteRun(undefined)
+        if (window.location.pathname !== "/") window.history.replaceState({}, "", "/")
+        return
+      }
+      const message = error instanceof Error ? error.message : "Failed to load run."
+      setMessages([
+        userMessageWithID(`user_${routeRun.runID}`, "", new Date().toISOString()),
+        assistantMessage(`assistant_${routeRun.runID}`, `Run load failed: ${message}`, "complete"),
+      ])
+    })
+
+    return () => {
+      abortController.abort()
+      if (hydratedRunRef.current === routeRun.runID) hydratedRunRef.current = undefined
+    }
+  }, [applyServerEvent, routeRun, upsertServerRun, upsertServerSession])
 
   const runPrompt = useCallback(async (text: string) => {
     const prompt = text.trim()
@@ -157,12 +236,12 @@ export function AgentChat() {
     setMessages(threadMessagesFromRun(run))
   }, [selectSession])
 
-  const handleRetry = useCallback(async () => {
-    if (!activeRun || activeRun.status !== "failed" || isRunning) return
+  const handleRetryRun = useCallback(async (run: AgentRun) => {
+    if (isRunning) return
     try {
-      await runServerPrompt(activeRun.input, {
-        activeSessionId: activeRun.sessionId,
-        retryRunId: activeRun.id,
+      await runServerPrompt(run.input, {
+        activeSessionId: run.sessionId,
+        retryRunId: run.id,
         applyServerEvent,
         eventSubscriptionRef,
         activeServerRunRef,
@@ -173,14 +252,9 @@ export function AgentChat() {
         upsertServerSession,
       })
     } catch {
-      await runPrompt(activeRun.input)
+      await runPrompt(run.input)
     }
-  }, [activeRun, applyServerEvent, isRunning, runPrompt, upsertServerRun, upsertServerSession])
-
-  const handleContinue = useCallback(() => {
-    if (isRunning) return
-    void runPrompt("Continue the investigation")
-  }, [isRunning, runPrompt])
+  }, [applyServerEvent, isRunning, runPrompt, upsertServerRun, upsertServerSession])
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -243,34 +317,47 @@ export function AgentChat() {
                         </ThreadPrimitive.Suggestion>
                       ))}
                     </div>
-                    <ChatComposer autoFocus variant="home" />
+                    <ChatComposer autoFocus isRunning={isRunning} onCancel={onCancel} variant="home" />
                   </div>
                 </ThreadPrimitive.Empty>
 
                 <ThreadPrimitive.If empty={false}>
                   <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
-                    <ThreadPrimitive.Messages components={{ Message: ChatMessage }} />
-                    <CitationPanel events={activeRunEvents} selectedArtifactId={selectedArtifactId} />
-                    <RunActivity
-                      key={routeRun?.runID ?? "run-activity"}
-                      canRetry={Boolean(activeRun?.status === "failed")}
-                      events={activeRunEvents}
-                      isRunning={isRunning}
-                      onContinue={handleContinue}
-                      onRetry={handleRetry}
-                      onStop={onCancel}
-                      routeRun={routeRun}
-                      status={activeRun?.status ?? (isRunning ? "running" : "completed")}
-                    />
+                    {routeHydrating ? (
+                      <RouteRunLoading />
+                    ) : visibleRuns.length > 0 ? (
+                      <>
+                        <SessionConversation
+                          activeRun={activeRun}
+                          isRunning={isRunning}
+                          onRetryRun={handleRetryRun}
+                          onSelectArtifact={handleSelectArtifact}
+                          runs={visibleRuns}
+                          eventsById={eventsById}
+                          status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                        />
+                      </>
+                    ) : (
+                      <LocalMessageConversation messages={messages} />
+                    )}
                     <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background/95 py-4 backdrop-blur">
-                      <ChatComposer />
+                      {!routeHydrating ? (
+                        <RunComposerStats
+                          events={activeRunEvents}
+                          isRunning={isRunning}
+                          routeRun={routeRun}
+                          run={activeRun}
+                          status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                        />
+                      ) : null}
+                      <ChatComposer isRunning={isRunning} onCancel={onCancel} />
                     </ThreadPrimitive.ViewportFooter>
                   </div>
                 </ThreadPrimitive.If>
               </ThreadPrimitive.Viewport>
             </ThreadPrimitive.Root>
 
-            <ArtifactDock artifacts={activeRunArtifacts} selectedArtifactId={selectedArtifactId} collapsed={panelDockCollapsed} onCollapsedChange={setPanelDockCollapsed} />
+            <ArtifactDock artifacts={visiblePanelArtifacts} selectedArtifactId={selectedArtifactId} collapsed={panelDockCollapsed} onCollapsedChange={setPanelDockCollapsed} />
           </div>
         </div>
       </main>
@@ -438,12 +525,30 @@ async function runDemoPrompt(prompt: string, options: RunDemoPromptOptions) {
 }
 
 function statusFromServerEvent(event: AgentRunEventDTO) {
+  if (event.type === "answer.final") return "completed"
   const data = event.data && typeof event.data === "object" ? event.data as { status?: unknown } : {}
   return typeof data.status === "string" ? data.status : undefined
 }
 
 function isTerminalRunStatus(status: string) {
   return status === "completed" || status === "failed" || status === "cancelled"
+}
+
+async function hydrateSiblingRunEvents(
+  runs: AgentRunDTO[],
+  activeRunID: string,
+  signal: AbortSignal,
+  applyServerEvent: (event: AgentRunEventDTO) => void,
+) {
+  for (const run of runs) {
+    if (run.id === activeRunID || signal.aborted) continue
+    try {
+      const events = await getAgentRunEvents(run.id, { signal })
+      for (const event of events) applyServerEvent(event)
+    } catch {
+      return
+    }
+  }
 }
 
 function messageUpdateFromEvent(event: AgentRunEventDTO) {
@@ -469,272 +574,32 @@ function queuedRunMessage(status: string, error?: string) {
   return "Run accepted by the server. Backend agent execution is not connected yet, so this run is waiting for the next server-side agent loop step."
 }
 
-function SessionSidebar({
-  activeSessionId,
-  disabled,
-  onNew,
-  onSelect,
-  runs,
-  sessionOrder,
-  sessions,
-}: {
-  activeSessionId?: string
-  disabled: boolean
-  onNew: () => void
-  onSelect: (sessionId: string) => void
-  runs: Record<string, AgentRun>
-  sessionOrder: string[]
-  sessions: Record<string, AgentSession>
-}) {
-  const visibleSessions = sessionOrder
-    .map((sessionId) => sessions[sessionId])
-    .filter((session): session is AgentSession => Boolean(session))
 
+function RouteRunLoading() {
   return (
-    <aside className="hidden min-h-0 border-r border-border/80 bg-card/60 lg:flex lg:flex-col" aria-label="Sessions">
-      <div className="border-b border-border/80 p-4">
-        <Button type="button" variant="outline" className="w-full justify-start" onClick={onNew} disabled={disabled}>
-          <Plus className="size-4" aria-hidden="true" />
-          New thread
-        </Button>
+    <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] gap-3 text-sm text-muted-foreground">
+      <div className="flex size-8 items-center justify-center rounded-md border border-border bg-muted">
+        <CircleStop className="size-4 animate-pulse" aria-hidden="true" />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {visibleSessions.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-sm text-muted-foreground">
-            Sessions will appear here after the first run.
-          </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            {visibleSessions.map((session) => {
-              const latestRunId = session.runIds.at(-1)
-              const latestRun = latestRunId ? runs[latestRunId] : undefined
-              const selected = session.id === activeSessionId
-              return (
-                <button
-                  key={session.id}
-                  type="button"
-                  className={
-                    selected
-                      ? "rounded-md border border-border bg-background px-3 py-2 text-left shadow-sm"
-                      : "rounded-md border border-transparent px-3 py-2 text-left text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
-                  }
-                  onClick={() => onSelect(session.id)}
-                >
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <MessageSquareText className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{session.title || "New investigation"}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
-                    <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
-                    <span>{session.runIds.length} run{session.runIds.length === 1 ? "" : "s"}</span>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </aside>
-  )
-}
-
-function RunActivity({
-  canRetry,
-  events,
-  isRunning,
-  onContinue,
-  onRetry,
-  onStop,
-  routeRun,
-  status,
-}: {
-  canRetry: boolean
-  events: AgentRunEvent[]
-  isRunning: boolean
-  onContinue: () => void
-  onRetry: () => void
-  onStop: () => void
-  routeRun?: AgentRunRoute
-  status: string
-}) {
-  const toolCalls = useMemo(() => groupToolCalls(events), [events])
-  const terminal = isTerminalRunStatus(status)
-  const [manualExpanded, setManualExpanded] = useState<boolean | undefined>(undefined)
-  const expanded = manualExpanded ?? !terminal
-
-  if (!routeRun && toolCalls.length === 0) return null
-
-  return (
-    <div className="mt-2 rounded-md border border-border bg-card text-sm shadow-sm">
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
-        onClick={() => setManualExpanded((value) => !(value ?? !terminal))}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={statusDotClass(status)} aria-hidden="true" />
-          <span className="truncate font-medium text-foreground">Agent activity</span>
-          <span className="rounded-md border border-border px-2 py-0.5 text-xs capitalize text-muted-foreground">{runStatusLabel(status)}</span>
-          {toolCalls.length > 0 ? <span className="text-xs text-muted-foreground">{toolCalls.length} tool call{toolCalls.length === 1 ? "" : "s"}</span> : null}
+      <div className="min-w-0 pt-1">
+        <div className="inline-flex items-center gap-2 rounded-md bg-muted px-3 py-2">
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+          Loading conversation...
         </div>
-        <ChevronDown className={expanded ? "size-4 rotate-180 text-muted-foreground transition" : "size-4 text-muted-foreground transition"} aria-hidden="true" />
-      </button>
-
-      {expanded ? (
-        <div className="border-t border-border px-3 py-3">
-          <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
-            <div className="flex shrink-0 items-center gap-1">
-              <Button type="button" size="icon-sm" variant="ghost" title="Retry" aria-label="Retry run" onClick={onRetry} disabled={!canRetry || isRunning}>
-                <RotateCcw className="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button type="button" size="icon-sm" variant="ghost" title="Continue" aria-label="Continue run" onClick={onContinue} disabled={isRunning}>
-                <Play className="size-3.5" aria-hidden="true" />
-              </Button>
-              <Button type="button" size="icon-sm" variant="ghost" title="Stop" aria-label="Stop run" onClick={onStop} disabled={!isRunning}>
-                <CircleStop className="size-3.5" aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
-          {toolCalls.length > 0 ? (
-            <div className="flex flex-col gap-1.5">
-              {toolCalls.map((call) => (
-                <ToolTimelineRow key={call.id} call={call} />
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-md border border-dashed border-border bg-background px-3 py-4 text-xs text-muted-foreground">
-              No tool calls recorded for this run.
-            </div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function ToolTimelineRow({ call }: { call: ToolCallView }) {
-  const [expanded, setExpanded] = useState(false)
-  const detail = toolEventDetail(call)
-  return (
-    <div className="rounded-md border border-border bg-background text-xs">
-      <button
-        type="button"
-        className="grid w-full grid-cols-[5.5rem_minmax(0,1fr)_1.5rem] gap-3 px-3 py-2 text-left sm:grid-cols-[6.5rem_minmax(0,1fr)_5rem_1.5rem]"
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
-          <span className={statusDotClass(call.status)} aria-hidden="true" />
-          <span className="truncate capitalize">{runStatusLabel(call.status)}</span>
-        </div>
-        <div className="min-w-0">
-          <div className="truncate font-medium text-foreground">{call.name || "tool"}</div>
-          <div className="truncate text-muted-foreground">{toolEventSummary(call)}</div>
-        </div>
-        <div className="hidden text-right text-muted-foreground sm:block">
-          {typeof call.durationMs === "number" ? `${call.durationMs}ms` : ""}
-        </div>
-        <ChevronDown className={expanded ? "mt-1 size-3.5 rotate-180 text-muted-foreground transition" : "mt-1 size-3.5 text-muted-foreground transition"} aria-hidden="true" />
-      </button>
-      {expanded ? (
-        <pre className="max-h-56 overflow-auto border-t border-border bg-muted px-3 py-2 text-[0.7rem] leading-5 text-muted-foreground">
-          {detail}
-        </pre>
-      ) : null}
-    </div>
-  )
-}
-
-
-function CitationPanel({
-  events,
-  selectedArtifactId,
-}: {
-  events: AgentRunEvent[]
-  selectedArtifactId?: string
-}) {
-  const citations = events
-    .filter((event) => event.type === "citation.created")
-    .map((event) => citationEventData(event.data))
-    .filter((citation): citation is AgentCitationView => Boolean(citation?.id))
-  if (citations.length === 0) return null
-  return (
-    <div id="evidence" className="mb-4 rounded-md border border-border bg-background p-3">
-      <div className="mb-2 text-xs font-medium text-muted-foreground">Evidence</div>
-      <div className="flex flex-wrap gap-2">
-        {citations.map((citation) => (
-          <CitationChip
-            key={citation.id}
-            citation={citation}
-            selected={Boolean(citation.artifactId && citation.artifactId === selectedArtifactId)}
-          />
-        ))}
       </div>
     </div>
-  )
-}
-
-function CitationChip({ citation, selected }: { citation: AgentCitationView; selected: boolean }) {
-  const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
-  const onClick = () => {
-    if (citation.artifactId) selectArtifact(citation.artifactId)
-    document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" })
-  }
-  return (
-    <button
-      type="button"
-      className={
-        selected
-          ? "inline-flex min-h-11 items-center gap-1 rounded-md border border-primary bg-muted px-3 py-2 text-left text-xs text-foreground"
-          : "inline-flex min-h-11 items-center gap-1 rounded-md border border-border bg-card px-3 py-2 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-      }
-      onClick={onClick}
-    >
-      <ExternalLink className="size-3" aria-hidden="true" />
-      <span>{citation.text || citation.id}</span>
-    </button>
-  )
-}
-
-function ChatMessage() {
-  return (
-    <MessagePrimitive.Root className="w-full py-4">
-      <MessagePrimitive.If assistant>
-        <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] gap-3">
-          <div className="flex size-8 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground">
-            <Bot className="size-4" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 rounded-md border border-border bg-card px-4 py-3 text-sm shadow-sm">
-            <MessagePrimitive.Content
-              components={{
-                Text: MarkdownContent,
-                Empty: RunningMessage,
-                tools: { Fallback: ToolCallPart },
-              }}
-            />
-          </div>
-        </div>
-      </MessagePrimitive.If>
-
-      <MessagePrimitive.If user>
-        <div className="ml-auto grid max-w-[80%] grid-cols-[minmax(0,1fr)_2rem] gap-3 sm:max-w-[70%]">
-          <div className="min-w-0 rounded-md bg-primary px-4 py-3 text-sm text-primary-foreground">
-            <MessagePrimitive.Content components={{ Text: PlainText }} />
-          </div>
-          <div className="flex size-8 items-center justify-center rounded-md border border-border bg-background text-muted-foreground">
-            <UserRound className="size-4" aria-hidden="true" />
-          </div>
-        </div>
-      </MessagePrimitive.If>
-    </MessagePrimitive.Root>
   )
 }
 
 function ChatComposer({
   autoFocus = false,
+  isRunning = false,
+  onCancel,
   variant = "thread",
 }: {
   autoFocus?: boolean
+  isRunning?: boolean
+  onCancel?: () => void
   variant?: "home" | "thread"
 }) {
   const isHome = variant === "home"
@@ -758,37 +623,18 @@ function ChatComposer({
             : "max-h-44 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
         }
       />
-      <ThreadPrimitive.If running={false}>
+      {isRunning ? (
+        <Button type="button" size="icon" variant="secondary" aria-label="Stop run" className={isHome ? "size-11" : undefined} onClick={onCancel}>
+          <CircleStop className="size-4" aria-hidden="true" />
+        </Button>
+      ) : (
         <ComposerPrimitive.Send asChild>
           <Button type="submit" size="icon" aria-label="Send message" className={isHome ? "size-11" : undefined}>
-            <ArrowRight className="size-4" aria-hidden="true" />
+            <ArrowUp className="size-4" aria-hidden="true" />
           </Button>
         </ComposerPrimitive.Send>
-      </ThreadPrimitive.If>
-      <ThreadPrimitive.If running>
-        <ComposerPrimitive.Cancel asChild>
-          <Button type="button" size="icon" variant="secondary" aria-label="Cancel run" className={isHome ? "size-11" : undefined}>
-            <CircleStop className="size-4" aria-hidden="true" />
-          </Button>
-        </ComposerPrimitive.Cancel>
-      </ThreadPrimitive.If>
+      )}
     </ComposerPrimitive.Root>
-  )
-}
-
-function PlainText({ text }: { text: string }) {
-  return <p className="whitespace-pre-wrap leading-6">{text}</p>
-}
-
-function RunningMessage() {
-  return <p className="text-sm text-muted-foreground">Working...</p>
-}
-
-function ToolCallPart({ toolName }: { toolName: string }) {
-  return (
-    <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-      {toolName}
-    </div>
   )
 }
 
@@ -801,12 +647,68 @@ function appendMessageText(message: AppendMessage) {
 }
 
 function threadMessagesFromRun(run: AgentRun): ThreadMessage[] {
-  const assistantStatus = run.status === "cancelled" ? "cancelled" : run.status === "running" || run.status === "queued" ? "running" : "complete"
+  const assistantStatus = assistantStatusFromRunStatus(run.status)
   const assistantText = run.finalAnswer || (assistantStatus === "running" ? "" : queuedRunMessage(run.status, run.error))
   return [
     userMessageWithID(`user_${run.id}`, run.input, run.createdAt),
     assistantMessage(`assistant_${run.id}`, assistantText, assistantStatus),
   ]
+}
+
+function threadMessagesFromHydratedRun(
+  projectedRun: AgentRun | undefined,
+  serverRun: AgentRunDTO | undefined,
+  events: AgentRunEventDTO[],
+): ThreadMessage[] {
+  const runID = projectedRun?.id ?? serverRun?.id ?? "server"
+  const input = projectedRun?.input || serverRun?.input || ""
+  const createdAt = projectedRun?.createdAt ?? serverRun?.createdAt
+  const status = runStatusFromHydration(projectedRun, serverRun, events)
+  const error = latestErrorFromEvents(events) ?? projectedRun?.error ?? serverRun?.error
+  const answer = assistantTextFromEvents(events) || projectedRun?.finalAnswer || ""
+  const assistantStatus = assistantStatusFromRunStatus(status)
+  const assistantText = answer || (assistantStatus === "running" ? "" : queuedRunMessage(status, error))
+
+  return [
+    userMessageWithID(`user_${runID}`, input, createdAt),
+    assistantMessage(`assistant_${runID}`, assistantText, assistantStatus),
+  ]
+}
+
+function runStatusFromHydration(
+  projectedRun: AgentRun | undefined,
+  serverRun: AgentRunDTO | undefined,
+  events: AgentRunEventDTO[],
+) {
+  for (const event of [...events].reverse()) {
+    const status = statusFromServerEvent(event)
+    if (status) return status
+  }
+  return projectedRun?.status ?? serverRun?.status ?? "running"
+}
+
+function assistantTextFromEvents(events: AgentRunEventDTO[]) {
+  let text = ""
+  for (const event of events) {
+    const update = messageUpdateFromEvent(event)
+    if (update.content !== undefined) text = update.content
+    if (update.delta !== undefined) text += update.delta
+  }
+  return text
+}
+
+function latestErrorFromEvents(events: AgentRunEventDTO[]) {
+  for (const event of [...events].reverse()) {
+    const error = errorMessageFromEvent(event)
+    if (error) return error
+  }
+  return undefined
+}
+
+function assistantStatusFromRunStatus(status: string): "running" | "complete" | "cancelled" {
+  if (status === "cancelled") return "cancelled"
+  if (status === "running" || status === "queued") return "running"
+  return "complete"
 }
 
 function userMessage(text: string): ThreadMessage {
@@ -869,11 +771,6 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
-type AgentRunRoute = {
-  sessionID: string
-  runID: string
-}
-
 function readRouteRun(): AgentRunRoute | undefined {
   const match = window.location.pathname.match(/^\/sessions\/([^/]+)\/runs\/([^/]+)$/)
   if (!match) return undefined
@@ -887,120 +784,4 @@ function openRunPage(sessionID: string, runID: string) {
   const nextPath = `/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}`
   if (window.location.pathname === nextPath) return
   window.history.pushState({}, "", nextPath)
-}
-
-function shortID(value: string) {
-  const normalized = value.replace(/^[^_]+_/, "")
-  return normalized.length > 8 ? normalized.slice(0, 8) : normalized
-}
-
-type ToolEventData = {
-  toolCallId?: string
-  name?: string
-  status?: string
-  input?: unknown
-  output?: unknown
-  durationMs?: number
-  error?: string
-}
-
-type ToolCallView = Required<Pick<ToolEventData, "status">> & Omit<ToolEventData, "status"> & {
-  id: string
-}
-
-function groupToolCalls(events: AgentRunEvent[]): ToolCallView[] {
-  const calls = new Map<string, ToolCallView>()
-  for (const event of events) {
-    if (!event.type.startsWith("tool.")) continue
-    const data = toolEventData(event.data)
-    const id = data.toolCallId || event.id
-    const previous = calls.get(id)
-    const status = toolStatusFromEvent(event.type, data.status, previous?.status)
-    calls.set(id, {
-      id,
-      toolCallId: data.toolCallId,
-      name: data.name ?? previous?.name,
-      status,
-      input: data.input !== undefined ? data.input : previous?.input,
-      output: data.output !== undefined ? data.output : previous?.output,
-      durationMs: data.durationMs ?? previous?.durationMs,
-      error: data.error ?? previous?.error,
-    })
-  }
-  return Array.from(calls.values())
-}
-
-function toolStatusFromEvent(eventType: string, status?: string, previous = "started") {
-  if (eventType === "tool.failed") return "failed"
-  if (eventType === "tool.completed" || status === "completed") return "completed"
-  if (status) return status
-  if (eventType === "tool.audit") return previous
-  return eventType.replace("tool.", "")
-}
-
-function toolEventData(value: unknown): ToolEventData {
-  if (!value || typeof value !== "object") return {}
-  return value as ToolEventData
-}
-
-function toolEventSummary(data: ToolEventData) {
-  if (data.error) return data.error
-  if (data.output !== undefined) return `output ${compactJSON(data.output)}`
-  if (data.input !== undefined) return `input ${compactJSON(data.input)}`
-  return "waiting"
-}
-
-function toolEventDetail(data: ToolEventData) {
-  const detail = {
-    name: data.name,
-    status: data.status,
-    durationMs: data.durationMs,
-    input: data.input,
-    output: data.output,
-    error: data.error,
-  }
-  return JSON.stringify(detail, null, 2)
-}
-
-function compactJSON(value: unknown) {
-  const text = typeof value === "string" ? value : JSON.stringify(value)
-  if (!text) return ""
-  return text.length > 96 ? `${text.slice(0, 93)}...` : text
-}
-
-function runStatusLabel(status: string) {
-  if (status === "queued") return "queued"
-  if (status === "running") return "running"
-  if (status === "completed") return "completed"
-  if (status === "failed") return "failed"
-  if (status === "cancelled") return "cancelled"
-  if (status === "started") return "started"
-  return status
-}
-
-function statusDotClass(status: string) {
-  const base = "size-1.5 shrink-0 rounded-full"
-  if (status === "completed") return `${base} bg-accent`
-  if (status === "failed") return `${base} bg-destructive`
-  if (status === "cancelled") return `${base} bg-muted-foreground`
-  return `${base} bg-primary`
-}
-
-type AgentCitationView = {
-  id: string
-  artifactId?: string
-  text?: string
-  target?: unknown
-}
-
-function citationEventData(value: unknown): AgentCitationView | undefined {
-  if (!value || typeof value !== "object") return undefined
-  const wrappedCitation = (value as { citation?: unknown }).citation
-  const citation = wrappedCitation && typeof wrappedCitation === "object" ? wrappedCitation : value
-  if (!hasCitationId(citation)) return undefined
-  return citation
-}
-
-function hasCitationId(value: unknown): value is AgentCitationView {
-  return Boolean(value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string")
 }

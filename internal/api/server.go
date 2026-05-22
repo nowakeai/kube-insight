@@ -132,6 +132,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/services/{namespace}/{name}/investigation", s.handleServiceInvestigation)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
 	s.mux.HandleFunc("POST /api/v1/agent/sessions", s.handleCreateAgentSession)
+	s.mux.HandleFunc("GET /api/v1/agent/sessions", s.handleListAgentSessions)
 	s.mux.HandleFunc("GET /api/v1/agent/sessions/{session_id}", s.handleGetAgentSession)
 	s.mux.HandleFunc("POST /api/v1/agent/sessions/{session_id}/runs", s.handleCreateAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent/runs", s.handleListAgentRuns)
@@ -220,7 +221,11 @@ func (s *Server) handleResourceHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	if resourceHealthDetail(r) == "full" {
+		writeJSON(w, http.StatusOK, report)
+		return
+	}
+	writeJSON(w, http.StatusOK, compactResourceHealthReport(report, compactResourceHealthLimit(r)))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -355,6 +360,100 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 		}
 		return err
 	}
+}
+
+type compactResourceHealthResponse struct {
+	CheckedAt        time.Time                      `json:"checkedAt"`
+	Detail           string                         `json:"detail"`
+	Summary          storage.ResourceHealthSummary  `json:"summary"`
+	ByStatus         map[string]int                 `json:"byStatus"`
+	Resources        []storage.ResourceHealthRecord `json:"resources"`
+	ResourcesOmitted int                            `json:"resourcesOmitted,omitempty"`
+}
+
+func compactResourceHealthReport(report storage.ResourceHealthReport, limit int) compactResourceHealthResponse {
+	if limit <= 0 {
+		limit = 10
+	}
+	resources := make([]storage.ResourceHealthRecord, 0, limit)
+	omitted := 0
+	for _, record := range report.Resources {
+		if !isProblemResourceHealthRecord(record) {
+			continue
+		}
+		if len(resources) >= limit {
+			omitted++
+			continue
+		}
+		resources = append(resources, compactResourceHealthRecord(record))
+	}
+	return compactResourceHealthResponse{
+		CheckedAt:        report.CheckedAt,
+		Detail:           "compact",
+		Summary:          report.Summary,
+		ByStatus:         report.ByStatus,
+		Resources:        resources,
+		ResourcesOmitted: omitted,
+	}
+}
+
+func resourceHealthDetail(r *http.Request) string {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("detail"))) {
+	case "full":
+		return "full"
+	default:
+		return "compact"
+	}
+}
+
+func compactResourceHealthLimit(r *http.Request) int {
+	value := strings.TrimSpace(r.URL.Query().Get("problemLimit"))
+	if value == "" {
+		value = strings.TrimSpace(r.URL.Query().Get("limit"))
+	}
+	if value == "" {
+		return 10
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit <= 0 {
+		return 10
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+func compactResourceHealthRecord(record storage.ResourceHealthRecord) storage.ResourceHealthRecord {
+	record.Error = oneLineLimit(record.Error, 180)
+	return record
+}
+
+func isProblemResourceHealthRecord(record storage.ResourceHealthRecord) bool {
+	if record.Error != "" || record.Stale || record.Skipped {
+		return true
+	}
+	switch record.Status {
+	case "watching", "bookmark", "queued":
+		return false
+	default:
+		return true
+	}
+}
+
+func oneLineLimit(value string, maxRunes int) string {
+	line := strings.Join(strings.Fields(value), " ")
+	if maxRunes <= 0 {
+		return line
+	}
+	runes := []rune(line)
+	if len(runes) <= maxRunes {
+		return line
+	}
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-1]) + "..."
 }
 
 func parseResourceHealthOptions(r *http.Request) (storage.ResourceHealthOptions, error) {

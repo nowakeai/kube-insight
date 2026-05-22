@@ -19,6 +19,7 @@ var (
 type Store interface {
 	CreateSession(context.Context, CreateSessionInput) (Session, error)
 	GetSession(context.Context, string) (Session, error)
+	ListSessions(context.Context, ListSessionsOptions) (SessionList, error)
 	CreateRun(context.Context, string, CreateRunInput) (Run, error)
 	GetRun(context.Context, string) (Run, error)
 	ListRuns(context.Context, ListRunsOptions) (RunList, error)
@@ -73,12 +74,45 @@ func (s *MemoryStore) GetSession(ctx context.Context, id string) (Session, error
 	if !ok {
 		return Session{}, ErrSessionNotFound
 	}
+	session.Runs = s.sessionRunsLocked(id)
+	return cloneSession(session), nil
+}
+
+func (s *MemoryStore) ListSessions(ctx context.Context, opts ListSessionsOptions) (SessionList, error) {
+	if err := ctx.Err(); err != nil {
+		return SessionList{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions := make([]Session, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		session.Runs = s.sessionRunsLocked(session.ID)
+		sessions = append(sessions, session)
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].UpdatedAt.Equal(sessions[j].UpdatedAt) {
+			return sessions[i].ID > sessions[j].ID
+		}
+		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)
+	})
+	if opts.Limit > 0 && len(sessions) > opts.Limit {
+		sessions = sessions[:opts.Limit]
+	}
+	for i := range sessions {
+		sessions[i] = cloneSession(sessions[i])
+	}
+	return SessionList{Sessions: sessions}, nil
+}
+
+func (s *MemoryStore) sessionRunsLocked(sessionID string) []Run {
+	runs := make([]Run, 0)
 	for _, run := range s.runs {
-		if run.SessionID == id {
-			session.Runs = append(session.Runs, run)
+		if run.SessionID == sessionID {
+			runs = append(runs, run)
 		}
 	}
-	return cloneSession(session), nil
+	sortRunsOldestFirst(runs)
+	return runs
 }
 
 func (s *MemoryStore) CreateRun(ctx context.Context, sessionID string, input CreateRunInput) (Run, error) {
@@ -204,6 +238,15 @@ func (s *MemoryStore) ListRunEvents(ctx context.Context, runID string) ([]RunEve
 	return cloneEvents(s.events[runID]), nil
 }
 
+func sortRunsOldestFirst(runs []Run) {
+	sort.Slice(runs, func(i, j int) bool {
+		if runs[i].CreatedAt.Equal(runs[j].CreatedAt) {
+			return runs[i].ID < runs[j].ID
+		}
+		return runs[i].CreatedAt.Before(runs[j].CreatedAt)
+	})
+}
+
 func statusTerminal(status RunStatus) bool {
 	switch status {
 	case RunCompleted, RunFailed, RunCancelled:
@@ -235,6 +278,14 @@ func NewEventID() string {
 
 func NewMessageID() string {
 	return newID("msg")
+}
+
+func NewArtifactID() string {
+	return newID("artifact")
+}
+
+func NewCitationID() string {
+	return newID("citation")
 }
 
 func cloneSession(in Session) Session {

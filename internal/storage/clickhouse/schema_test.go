@@ -31,6 +31,9 @@ func TestCreateTableStatementsDefaultStringPayload(t *testing.T) {
 		"CREATE TABLE IF NOT EXISTS `kube_insight`.ingestion_offsets",
 		"ENGINE = ReplacingMergeTree(updated_at)",
 		"ORDER BY (cluster_id, api_group, api_version, resource, namespace, event)",
+		"CREATE TABLE IF NOT EXISTS `kube_insight`.agent_sessions",
+		"CREATE TABLE IF NOT EXISTS `kube_insight`.agent_runs",
+		"CREATE TABLE IF NOT EXISTS `kube_insight`.agent_run_events",
 		"ALTER TABLE `kube_insight`.`versions` ADD INDEX IF NOT EXISTS `versions_object_id_bf` `object_id` TYPE bloom_filter(0.01) GRANULARITY 4",
 		"ALTER TABLE `kube_insight`.`edges` ADD INDEX IF NOT EXISTS `edges_dst_id_bf` `dst_id` TYPE bloom_filter(0.01) GRANULARITY 4",
 	} {

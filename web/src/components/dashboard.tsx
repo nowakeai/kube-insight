@@ -191,13 +191,13 @@ export function Dashboard() {
                 <Metric label="Issues" value={numberValue(collectorIssueCount(summary))} tone={collectorIssueCount(summary) > 0 ? "warn" : "neutral"} />
                 <Metric label="Complete" value={summary?.complete ? "yes" : "no"} tone={summary?.complete ? "good" : "warn"} />
               </div>
-              <CollectorIssues resources={resources} loading={resourceHealth.isPending} error={resourceHealth.isError} />
+              <CollectorIssues resources={resources} omitted={health?.resourcesOmitted ?? 0} loading={resourceHealth.isPending} error={resourceHealth.isError} />
             </Panel>
 
             <Panel title="Endpoint links" description="Open the underlying server surfaces directly.">
               <div className="grid gap-2">
                 <EndpointLink href="/api/v1/storage/stats" label="/api/v1/storage/stats" />
-                <EndpointLink href="/api/v1/health?limit=500" label="/api/v1/health" />
+                <EndpointLink href="/api/v1/health?detail=full&limit=500" label="/api/v1/health?detail=full" />
                 <EndpointLink href="/api/v1/schema" label="/api/v1/schema" />
                 <EndpointLink href="/metrics" label="/metrics" />
               </div>
@@ -369,10 +369,12 @@ function TableFootprintTable({
 
 function CollectorIssues({
   resources,
+  omitted,
   loading,
   error,
 }: {
   resources: ResourceHealthRecordDTO[]
+  omitted: number
   loading: boolean
   error: boolean
 }) {
@@ -391,6 +393,7 @@ function CollectorIssues({
           <span className={statusDot(resource.status, resource.stale, Boolean(resource.error))} aria-hidden="true" />
         </div>
       ))}
+      {omitted > 0 ? <p className="text-xs text-muted-foreground">{formatCount(omitted)} more issue streams hidden in compact view.</p> : null}
     </div>
   )
 }

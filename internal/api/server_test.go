@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/storage"
@@ -159,6 +160,60 @@ func (f fakeReadStore) QuerySchema(context.Context) (storage.SQLSchema, error) {
 
 func (f fakeReadStore) QuerySQL(context.Context, storage.SQLQueryOptions) (storage.SQLQueryResult, error) {
 	return storage.SQLQueryResult{Columns: []string{"name"}, Rows: []map[string]any{{"name": "from-injected-store"}}, RowCount: 1}, nil
+}
+
+func (f fakeReadStore) ResourceHealth(context.Context, storage.ResourceHealthOptions) (storage.ResourceHealthReport, error) {
+	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	longError := strings.Repeat("watch stream internal error ", 20)
+	return storage.ResourceHealthReport{
+		CheckedAt: now,
+		Summary: storage.ResourceHealthSummary{
+			Resources: 3,
+			Healthy:   1,
+			Unstable:  2,
+			Warnings:  []string{"2 resource stream(s) are retrying"},
+		},
+		ByStatus: map[string]int{"watching": 1, "retrying": 2},
+		Resources: []storage.ResourceHealthRecord{
+			{ClusterID: "c1", Resource: "pods", Version: "v1", Kind: "Pod", Status: "watching", LatestObjects: 3},
+			{ClusterID: "c1", Resource: "jobs", Group: "batch", Version: "v1", Kind: "Job", Status: "retrying", Error: longError},
+			{ClusterID: "c1", Resource: "deployments", Group: "apps", Version: "v1", Kind: "Deployment", Status: "retrying", Error: longError},
+		},
+	}, nil
+}
+
+func TestResourceHealthDefaultsToCompactResponse(t *testing.T) {
+	closed := false
+	handler, err := NewServer(ServerOptions{OpenStore: func(context.Context) (ReadStore, error) {
+		return fakeReadStore{closed: &closed}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	body := getBody(t, server.URL+"/api/v1/health?problemLimit=1", http.StatusOK)
+	for _, want := range []string{`"detail": "compact"`, `"resourcesOmitted": 1`, `"resource": "jobs"`, `"error": "watch stream internal error`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("compact health response missing %q: %s", want, body)
+		}
+	}
+	for _, unwanted := range []string{`"resource": "pods"`, strings.Repeat("watch stream internal error ", 8)} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("compact health response unexpectedly contains %q: %s", unwanted, body)
+		}
+	}
+
+	full := getBody(t, server.URL+"/api/v1/health?detail=full", http.StatusOK)
+	for _, want := range []string{`"resource": "pods"`, `"resource": "jobs"`, `"resource": "deployments"`} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("full health response missing %q: %s", want, full)
+		}
+	}
+	if strings.Contains(full, `"detail": "compact"`) {
+		t.Fatalf("full health response should not be compact wrapper: %s", full)
+	}
 }
 
 func TestServerUsesInjectedReadStore(t *testing.T) {

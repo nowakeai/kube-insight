@@ -24,8 +24,10 @@ happen next.
 - [x] Topology artifacts use React Flow.
 - [x] JSON/YAML proof views use CodeMirror.
 - [x] Formal artifact kinds are part of the Web UI contract.
-- [x] Evidence citations are deterministic server/tool projections, not
-  best-effort text that the LLM must remember to produce.
+- [x] Evidence artifacts are deterministic server/tool projections; final
+  answer citations are LLM-selected and server-verified against artifact IDs,
+  object identities, version IDs, changes, facts, edges, or SQL rows from the
+  current run.
 - [x] A compact server dashboard is included as a secondary page.
 - [x] Web assets should build from `web/` and embed into the Go binary.
 
@@ -191,6 +193,13 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - [x] First pass: the server projects `kube_insight_search`, topology,
     history, and Service-investigation outputs into visual artifact events and
     citation events without relying on model-authored citations.
+  - [x] Extend deterministic artifact projection to `kube_insight_health` and
+    `kube_insight_sql` so health and SQL-only runs still produce dockable proof
+    panels.
+  - [x] Split candidate evidence artifacts from final answer citations: tools
+    create candidate proof panels, and `citation.created` is emitted only after
+    the final answer mentions stable evidence that the server verifies in the
+    run's artifact registry.
 - [ ] Add preflight and postflight hooks at the MCP/API tool layer for
   permission checks, SQL validation, output redaction, timeout control, output
   budgets, and audit records.
@@ -205,10 +214,20 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [ ] Add missing-input events for namespace, cluster, time range, destructive
   action approval, or ambiguous resource identity so the UI can ask the user
   instead of letting the agent guess.
-- [ ] Add an agent evaluation harness with representative questions such as
-  service health, OOMKilled investigation, recent changes, topology mapping,
-  history diff, and SQL evidence lookup; score tool choice, evidence quality,
-  citation coverage, and latency.
+- [x] Add a first-pass agent evaluation harness with representative questions
+  for service health, OOMKilled investigation, recent changes, and topology
+  mapping; score tool choice, evidence artifacts, citation coverage, answer
+  terms, failed tools, and latency from replayable run events.
+  - [x] Add an opt-in live LLM matrix that runs real OpenAI-compatible models
+    against controlled kube-insight fake tools and scores the emitted run
+    events with the same harness, including tool-call count efficiency budgets
+    and runner failure reports.
+  - [x] Smoke the matrix against MIMO `mimo-v2.5-pro`; the four default cases
+    pass with deterministic candidate artifacts, verified answer citations, and
+    tightened tool-use guidance.
+  - [ ] Extend the case set with history diff and SQL evidence lookup.
+  - [ ] Add an opt-in API live smoke that submits runs through the API and
+    scores returned SSE transcripts with the same harness.
 - [x] Export agent tool-call duration as Prometheus histogram
   `kube_insight_agent_tool_call_duration_seconds{tool,status}` and include
   duration in tool completed/failed/audit events.
@@ -262,6 +281,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   run is active, then summarize run citations under the final assistant answer
   after completion. Clicking a citation selects the corresponding visual
   artifact and opens the right-side panel dock.
+- [x] Add API/SSE coverage proving server-created artifact and citation events
+  stream through `GET /api/v1/agent/runs/{run_id}/events?follow=true` in the
+  shape consumed by the Web UI projection.
 
 ## Artifact Renderers
 
@@ -273,8 +295,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Implement `k8s.diff` renderer.
 - [x] Implement JSON/YAML proof viewer.
 - [x] Add fallback renderer for unknown artifact kinds.
-- [x] Keep panel dock scoped to visual investigation artifacts: Kubernetes
-  resources, resource lists, topology, history, and diff.
+- [x] Keep panel dock scoped to investigation artifacts: markdown proof panels,
+  Kubernetes resources, resource lists, topology, history, and diff.
 
 ## Dashboard
 

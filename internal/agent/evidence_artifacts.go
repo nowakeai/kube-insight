@@ -18,11 +18,8 @@ type evidenceArtifactDraft struct {
 func (r einoRunRecorder) appendEvidenceArtifacts(ctx context.Context, toolName string, output json.RawMessage) error {
 	for _, draft := range evidenceArtifactsFromToolOutput(toolName, output) {
 		artifactID := NewArtifactID()
-		if err := r.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{ID: artifactID, Kind: draft.Kind, Title: draft.Title, Data: draft.Data}}); err != nil {
-			return err
-		}
-		citationID := NewCitationID()
-		if err := r.append(ctx, EventCitation, CitationEventData{Citation: Citation{ID: citationID, ArtifactID: artifactID, Text: draft.CitationText, Target: draft.Target}}); err != nil {
+		artifactData := evidenceArtifactDataWithCitation(draft.Data, draft.CitationText, draft.Target)
+		if err := r.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{ID: artifactID, Kind: draft.Kind, Title: draft.Title, Data: artifactData}}); err != nil {
 			return err
 		}
 	}
@@ -35,6 +32,10 @@ func evidenceArtifactsFromToolOutput(toolName string, output json.RawMessage) []
 		return nil
 	}
 	switch toolName {
+	case "kube_insight_health":
+		return healthEvidenceArtifacts(value)
+	case "kube_insight_sql":
+		return sqlEvidenceArtifacts(value)
 	case "kube_insight_search":
 		return searchEvidenceArtifacts(value)
 	case "kube_insight_topology":
@@ -62,6 +63,51 @@ func toolEvidenceValue(output json.RawMessage) (any, bool) {
 		}
 	}
 	return value, true
+}
+
+func healthEvidenceArtifacts(value any) []evidenceArtifactDraft {
+	markdown := evidenceMarkdown("Health evidence", value)
+	if markdown == "" {
+		return nil
+	}
+	return []evidenceArtifactDraft{{
+		Kind:         ArtifactKindMarkdown,
+		Title:        "Health evidence",
+		Data:         jsonRaw(map[string]any{"markdown": markdown}),
+		CitationText: "Health evidence",
+		Target:       jsonRaw(map[string]any{"type": CitationTargetArtifact, "source": "kube_insight_health"}),
+	}}
+}
+
+func sqlEvidenceArtifacts(value any) []evidenceArtifactDraft {
+	record := valueRecord(value)
+	if record == nil {
+		markdown := evidenceMarkdown("SQL evidence", value)
+		if markdown == "" {
+			return nil
+		}
+		return []evidenceArtifactDraft{{
+			Kind:         ArtifactKindMarkdown,
+			Title:        "SQL evidence",
+			Data:         jsonRaw(map[string]any{"markdown": markdown}),
+			CitationText: "SQL evidence",
+			Target:       jsonRaw(map[string]any{"type": CitationTargetArtifact, "source": "kube_insight_sql"}),
+		}}
+	}
+	rows, _ := record["rows"].([]any)
+	rowCount := len(rows)
+	if count, ok := record["rowCount"]; ok {
+		rowCount = intNumber(count, rowCount)
+	}
+	title := fmt.Sprintf("SQL evidence (%d rows)", rowCount)
+	markdown := evidenceMarkdown(title, value)
+	return []evidenceArtifactDraft{{
+		Kind:         ArtifactKindMarkdown,
+		Title:        title,
+		Data:         jsonRaw(map[string]any{"markdown": markdown}),
+		CitationText: title,
+		Target:       jsonRaw(map[string]any{"type": CitationTargetSQLRow, "source": "kube_insight_sql", "rowCount": rowCount}),
+	}}
 }
 
 func searchEvidenceArtifacts(value any) []evidenceArtifactDraft {
@@ -261,15 +307,15 @@ func topologyNodes(record map[string]any) []map[string]any {
 	if edgeValues, ok := record["topology"].([]any); ok {
 		for _, edge := range edgeValues {
 			edgeRecord := valueRecord(edge)
-			addObject(edgeRecord["source"])
-			addObject(edgeRecord["target"])
+			addObject(firstNonNil(edgeRecord["source"], edgeRecord["src"]))
+			addObject(firstNonNil(edgeRecord["target"], edgeRecord["dst"]))
 		}
 	}
 	if edgeValues, ok := record["edges"].([]any); ok {
 		for _, edge := range edgeValues {
 			edgeRecord := valueRecord(edge)
-			addObject(edgeRecord["source"])
-			addObject(edgeRecord["target"])
+			addObject(firstNonNil(edgeRecord["source"], edgeRecord["src"]))
+			addObject(firstNonNil(edgeRecord["target"], edgeRecord["dst"]))
 		}
 	}
 	return nodes
@@ -286,8 +332,8 @@ func topologyEdges(record map[string]any) []map[string]any {
 		if edge == nil {
 			continue
 		}
-		source := objectID(valueRecord(edge["source"]))
-		target := objectID(valueRecord(edge["target"]))
+		source := objectID(valueRecord(firstNonNil(edge["source"], edge["src"])))
+		target := objectID(valueRecord(firstNonNil(edge["target"], edge["dst"])))
 		if source == "" || target == "" {
 			continue
 		}
@@ -323,6 +369,46 @@ func objectID(object map[string]any) string {
 func objectLabel(object map[string]any) string {
 	parts := []string{textField(object, "clusterId"), textField(object, "kind"), textField(object, "namespace"), textField(object, "name")}
 	return strings.Join(nonEmptyStrings(parts...), "/")
+}
+
+func evidenceMarkdown(title string, value any) string {
+	if text, ok := value.(string); ok {
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return ""
+		}
+		return "### " + title + "\n\n```text\n" + text + "\n```"
+	}
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return "### " + title + "\n\n```json\n" + string(data) + "\n```"
+}
+
+func intNumber(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		if parsed, err := typed.Int64(); err == nil {
+			return int(parsed)
+		}
+	}
+	return fallback
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func textField(record map[string]any, key string) string {

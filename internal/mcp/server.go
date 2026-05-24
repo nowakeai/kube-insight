@@ -381,7 +381,7 @@ func tools() []sdkmcp.Tool {
 	return []sdkmcp.Tool{
 		{
 			Name:        "kube_insight_schema",
-			Description: "Return the active kube-insight backend schema as a compact DSL for LLM SQL planning, including dialect notes, useful tables, columns, indexes, joins, and recipes. Call this before writing SQL because SQLite and ClickHouse table names differ.",
+			Description: "Return the active kube-insight backend schema as a compact DSL for LLM SQL planning, including dialect notes, useful tables, columns, indexes, joins, and recipes. Call this before writing SQL because SQLite and ClickHouse table names differ. Do not call schema when health, search, history, topology, or service investigation already provides enough evidence.",
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -389,7 +389,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -477,7 +477,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_topology",
-			Description: "Load the retained topology graph around one known Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search or SQL identifies a target; do not use it for broad discovery.",
+			Description: "Load the retained topology graph around one known Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search or SQL identifies a target; do not use it for broad discovery. One call around the best root is usually enough for a namespace map; do not call repeatedly for every returned node unless the graph is incomplete.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -492,7 +492,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_service_investigation",
-			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. Start with low limits, then expand only if the compact bundle does not answer the question.",
+			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. For Service health, this result plus kube_insight_health is usually enough; answer instead of calling schema, SQL, history, or topology again unless the bundle is incomplete. Do not use this tool just to answer recent-changes questions when search and history already returned changes. Start with low limits, then expand only if the compact bundle does not answer the question.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

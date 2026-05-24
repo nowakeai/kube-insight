@@ -129,6 +129,48 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 	}
 }
 
+func TestCreateAgentRunStreamsArtifactAndCitationEvents(t *testing.T) {
+	runner := &artifactAgentRunner{}
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var run struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"show health proof"}`, http.StatusCreated, &run)
+
+	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
+	for _, want := range []string{
+		"event: artifact.created",
+		"event: citation.created",
+		`"kind":"markdown"`,
+		`"title":"Health evidence"`,
+		`"artifactId":"artifact_health"`,
+		`"source":"kube_insight_health"`,
+		"event: answer.final",
+		"event: run.completed",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("events missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 	runner := &retryingAgentRunner{}
 	handler, err := NewServer(ServerOptions{
@@ -415,6 +457,60 @@ func (r *fakeAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (ag
 		return agent.EinoRunResult{}, err
 	}
 	return agent.EinoRunResult{FinalAnswer: "checked cluster health", Events: 1}, nil
+}
+
+type artifactAgentRunner struct{}
+
+func (r *artifactAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	run, err := input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunRunning, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunStarted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventArtifact,
+		Data: mustJSON(agent.ArtifactEventData{Artifact: agent.Artifact{
+			ID:    "artifact_health",
+			Kind:  "markdown",
+			Title: "Health evidence",
+			Data:  json.RawMessage(`{"markdown":"### Health evidence\\n\\nhealthy=3 stale=0"}`),
+		}}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventCitation,
+		Data: mustJSON(agent.CitationEventData{Citation: agent.Citation{
+			ID:         "citation_health",
+			ArtifactID: "artifact_health",
+			Text:       "Health evidence",
+			Target:     json.RawMessage(`{"type":"artifact","source":"kube_insight_health"}`),
+		}}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: "health proof is attached"}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	run, err = input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunCompleted, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunCompleted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	return agent.EinoRunResult{FinalAnswer: "health proof is attached", Events: 4}, nil
 }
 
 type fakeFailingAgentRunner struct {

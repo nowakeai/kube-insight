@@ -189,6 +189,27 @@ Rebuild derived facts, edges, and changes after extractor/profile changes:
 ./bin/kube-insight db reindex --db kubeinsight.db --yes
 ```
 
+Run the stable built-in agent evaluation tests. These score replayable
+`agent.RunEvent` transcripts for tool choice, candidate evidence artifacts,
+verified answer citation coverage, answer terms, failed tools, tool-call count,
+and latency without calling a live model:
+
+```bash
+go test ./internal/agent
+```
+
+Run the opt-in live LLM agent evaluation against one or more
+OpenAI-compatible models. This uses real models with controlled kube-insight
+fake tools and writes an optional JSON report:
+
+```bash
+KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODELS='gpt52|gpt-5.2|OPENAI_API_KEY|OPENAI_BASE_URL;mimo|mimo-v2.5-pro|MIMO_API_KEY|MIMO_OPENAI_BASEURL' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS=12 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-live" \
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
+```
+
 Run the local agent-vs-kubectl benchmark. Refresh the evidence database first
 when you need freshness-controlled numbers for documentation or release notes:
 

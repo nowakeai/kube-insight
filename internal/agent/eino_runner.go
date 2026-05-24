@@ -282,6 +282,9 @@ func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error
 		if err := r.append(ctx, EventFinalAnswer, MessageEventData{MessageID: NewMessageID(), Role: RoleAssistant, Content: finalAnswer}); err != nil {
 			return err
 		}
+		if err := r.appendVerifiedAnswerCitations(ctx, finalAnswer); err != nil {
+			return err
+		}
 	}
 	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunCompleted, "")
 	if err != nil {

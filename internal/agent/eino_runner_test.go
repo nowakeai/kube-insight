@@ -228,7 +228,7 @@ func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 8 || events[6].Type != EventArtifact || events[7].Type != EventCitation {
+	if len(events) != 7 || events[6].Type != EventArtifact {
 		t.Fatalf("events = %#v", events)
 	}
 	var artifact ArtifactEventData
@@ -238,13 +238,41 @@ func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 	if artifact.Artifact.Kind != ArtifactKindK8sResourceList || !strings.Contains(artifact.Artifact.Title, "Search evidence") || !strings.Contains(string(artifact.Artifact.Data), `"name":"api-0"`) {
 		t.Fatalf("artifact = %#v data=%s", artifact, string(artifact.Artifact.Data))
 	}
-	var citation CitationEventData
-	if err := json.Unmarshal(events[7].Data, &citation); err != nil {
+	if strings.Contains(eventsOfType(events, EventCitation), "citation") {
+		t.Fatalf("unexpected tool-time citation events = %#v", events)
+	}
+	if err := recorder.Complete(ctx, "Pod default/api-0 is relevant evidence."); err != nil {
 		t.Fatal(err)
 	}
-	if citation.Citation.ArtifactID != artifact.Artifact.ID || !strings.Contains(citation.Citation.Text, "Search evidence") {
-		t.Fatalf("citation = %#v", citation)
+	events, err = store.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	var citation CitationEventData
+	foundCitation := false
+	for _, event := range events {
+		if event.Type != EventCitation {
+			continue
+		}
+		foundCitation = true
+		if err := json.Unmarshal(event.Data, &citation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !foundCitation || citation.Citation.ArtifactID != artifact.Artifact.ID || !strings.Contains(citation.Citation.Text, "Search evidence") {
+		t.Fatalf("citation = %#v found=%v events=%#v", citation, foundCitation, events)
+	}
+}
+
+func eventsOfType(events []RunEvent, eventType RunEventType) string {
+	var builder strings.Builder
+	for _, event := range events {
+		if event.Type == eventType {
+			builder.WriteString(string(event.Type))
+			builder.WriteByte(' ')
+		}
+	}
+	return builder.String()
 }
 
 func TestEinoRunnerTreatsToolErrorsAsRecoverableToolMessages(t *testing.T) {

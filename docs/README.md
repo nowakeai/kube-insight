@@ -75,6 +75,7 @@ Development-stage checklists, closeout notes, validation plans, and local
 workflow records live under `docs/dev/` so user-facing docs stay focused.
 
 - [Development Commands](dev/commands.md)
+- [Agent Evaluation](dev/agent-evaluation.md)
 - [ClickHouse Local Workflow](dev/clickhouse-local-workflow.md)
 - [MVP Dev Checklist](dev/mvp-dev-checklist.md)
 - [MVP PR Summary](dev/mvp-pr-summary.md)

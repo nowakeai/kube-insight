@@ -445,5 +445,5 @@ export function shortID(value: string) {
 
 
 export function isPanelDockArtifact(kind: string) {
-  return kind === "k8s.resource" || kind === "k8s.resource_list" || kind === "k8s.topology" || kind === "k8s.history" || kind === "k8s.diff"
+  return kind === "markdown" || kind === "k8s.resource" || kind === "k8s.resource_list" || kind === "k8s.topology" || kind === "k8s.history" || kind === "k8s.diff"
 }

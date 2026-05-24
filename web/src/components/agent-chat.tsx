@@ -344,6 +344,7 @@ export function AgentChat() {
                     ) : visibleRuns.length > 0 ? (
                       <SessionConversation
                         activeRun={activeRun}
+                        artifactsById={artifactsById}
                         isRunning={isRunning}
                         onRetryRun={handleRetryRun}
                         onSelectArtifact={handleSelectArtifact}

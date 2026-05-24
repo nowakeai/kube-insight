@@ -2,9 +2,10 @@ import { Activity, ChevronDown, Copy, LoaderCircle, RotateCcw, UserRound } from 
 import { useEffect, useState } from "react"
 import type { ThreadMessage } from "@assistant-ui/react"
 
+import { EvidenceList } from "@/components/evidence-list"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
-import type { AgentRun, AgentRunEvent } from "@/lib/agent-store"
+import type { AgentArtifact, AgentRun, AgentRunEvent } from "@/lib/agent-store"
 import {
   conversationSegments,
   estimateTokenCount,
@@ -58,6 +59,7 @@ function threadMessageText(message: ThreadMessage) {
 
 type SessionConversationProps = {
   activeRun?: AgentRun
+  artifactsById: Record<string, AgentArtifact>
   eventsById: Record<string, AgentRunEvent>
   isRunning: boolean
   onRetryRun: (run: AgentRun) => void
@@ -68,6 +70,7 @@ type SessionConversationProps = {
 
 export function SessionConversation({
   activeRun,
+  artifactsById,
   eventsById,
   isRunning,
   onRetryRun,
@@ -79,6 +82,7 @@ export function SessionConversation({
       {runs.map((run) => (
         <RunConversation
           key={run.id}
+          artifactsById={artifactsById}
           events={run.eventIds.map((eventID) => eventsById[eventID]).filter((event): event is AgentRunEvent => Boolean(event))}
           isActive={run.id === activeRun?.id}
           isRunning={isRunning && run.id === activeRun?.id}
@@ -93,6 +97,7 @@ export function SessionConversation({
 }
 
 type RunConversationProps = {
+  artifactsById: Record<string, AgentArtifact>
   events: AgentRunEvent[]
   isActive: boolean
   isRunning: boolean
@@ -103,6 +108,7 @@ type RunConversationProps = {
 }
 
 function RunConversation({
+  artifactsById,
   events,
   isActive,
   isRunning,
@@ -134,6 +140,7 @@ function RunConversation({
       ) : null}
       {response.finalSegments.map((segment, index) => renderResponseSegment({
         activity,
+        artifactsById,
         citations: index === citationAnchorIndex ? citations : [],
         isRunning,
         onRetryRun,
@@ -182,6 +189,7 @@ export function RunComposerStats({
 
 function renderResponseSegment({
   activity,
+  artifactsById,
   citations = [],
   isRunning,
   onRetryRun,
@@ -190,6 +198,7 @@ function renderResponseSegment({
   segment,
 }: {
   activity: RunActivitySummary
+  artifactsById?: Record<string, AgentArtifact>
   citations?: EvidenceSegment[]
   isRunning: boolean
   onRetryRun: (run: AgentRun) => void
@@ -201,6 +210,7 @@ function renderResponseSegment({
     return (
       <AssistantStreamMessage
         key={segment.id}
+        artifactsById={artifactsById}
         citations={citations}
         onRetry={!isRunning ? () => onRetryRun(run) : undefined}
         onSelectArtifact={onSelectArtifact}
@@ -330,6 +340,7 @@ function UserStreamMessage({ text }: { text: string }) {
 }
 
 function AssistantStreamMessage({
+  artifactsById = {},
   citations = [],
   onRetry,
   onSelectArtifact,
@@ -338,6 +349,7 @@ function AssistantStreamMessage({
   showActions = true,
   text,
 }: {
+  artifactsById?: Record<string, AgentArtifact>
   citations?: EvidenceSegment[]
   onRetry?: () => void
   onSelectArtifact?: (artifactId?: string) => void
@@ -367,7 +379,7 @@ function AssistantStreamMessage({
           </div>
         ) : null}
         {text ? <MarkdownContent text={text} /> : <ThinkingPlaceholder active={Boolean(running)} />}
-        <CitationChips citations={citations} onSelectArtifact={onSelectArtifact} />
+        <EvidenceList artifactsById={artifactsById} citations={citations} onSelectArtifact={onSelectArtifact} />
         {canShowActions ? (
           <div className="mt-3 flex items-center gap-1 text-muted-foreground">
             <Button type="button" size="icon-sm" variant="ghost" className="size-8" title="Copy" aria-label="Copy response" onClick={copyText}>
@@ -384,39 +396,6 @@ function AssistantStreamMessage({
   )
 }
 
-
-function CitationChips({
-  citations,
-  onSelectArtifact,
-}: {
-  citations: EvidenceSegment[]
-  onSelectArtifact?: (artifactId?: string) => void
-}) {
-  if (citations.length === 0) return null
-  return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      <span className="shrink-0">Evidence</span>
-      {citations.map((citation, index) => {
-        const label = citation.text || `citation ${index + 1}`
-        const canOpen = Boolean(citation.artifactId && onSelectArtifact)
-        return (
-          <button
-            key={citation.id}
-            type="button"
-            className={canOpen
-              ? "inline-flex max-w-full items-center rounded-full bg-muted px-2.5 py-1 text-xs text-foreground transition hover:bg-secondary"
-              : "inline-flex max-w-full items-center rounded-full bg-muted/70 px-2.5 py-1 text-xs text-muted-foreground"}
-            disabled={!canOpen}
-            onClick={() => citation.artifactId ? onSelectArtifact?.(citation.artifactId) : undefined}
-            title={canOpen ? "Open evidence in panel dock" : "Evidence reference"}
-          >
-            <span className="truncate">{label}</span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 function ToolStreamMessage({
   segment,

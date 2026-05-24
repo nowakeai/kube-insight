@@ -272,6 +272,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   user manually toggles them. Once the model starts streaming the formal answer,
   that answer renders outside the prepare block. Tool-call raw output is retained
   as an audit artifact but is not pinned into the right-side panel dock.
+- [x] Render answer evidence as a collapsed count-first list. Expanding the list
+  shows readable per-evidence summaries, inline detail expansion, Summary/Table/
+  Markdown/JSON views when data is available, and a separate pin action for
+  evidence that should stay watched in the right-side dock.
 - [x] Add visible in-run liveness feedback with spinner/pulse states, current
   run stage, and approximate sent/received token counters while provider usage
   events are not available yet. Run stats are anchored above the sticky composer

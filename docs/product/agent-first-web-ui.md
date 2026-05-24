@@ -463,9 +463,10 @@ The run view contains:
   counters until backend provider usage events are available.
 - Artifact panel for selected Kubernetes resource, topology, history, diff, or
   proof view.
-- Citation affordances that jump from answer text or ordered chat-stream
-  evidence chips to exact proof artifacts. Clicking a citation selects the
-  corresponding artifact in the right-side panel dock.
+- Citation affordances render as a collapsed evidence list below the answer.
+  Expanding the list shows readable evidence summaries, per-item inline detail
+  views such as Summary/Table/Markdown/JSON, and an explicit pin action for
+  evidence that should stay visible in the right-side dock.
 - Stop, retry, and continue controls.
 
 Pinned panel state is a browser workspace preference, not server control-plane

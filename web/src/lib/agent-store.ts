@@ -29,6 +29,7 @@ export type AgentRun = {
   input: string
   finalAnswer?: string
   error?: string
+  metadata?: unknown
   createdAt: string
   updatedAt: string
   eventIds: string[]
@@ -259,6 +260,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
             status: run.status,
             input: run.input,
             error: run.error,
+            metadata: run.metadata,
             createdAt: run.createdAt,
             updatedAt: run.completedAt ?? run.startedAt ?? now,
             finalAnswer: previous?.finalAnswer,

@@ -341,7 +341,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - `POST /api/v1/agent/runs/{run_id}/retry` creates a new run in the same
     session for completed, failed, or cancelled runs, preserves the original
     run history, copies input/provider/model, and records `retryOfRunId` in the
-    new run metadata. Queued/running runs still require stop before retry.
+    new run metadata. Queued/running runs still require stop before retry. The
+    Web UI uses `retryOfRunId` as branch metadata: retry replaces the original
+    run and hides later runs in that visible branch instead of appending as a
+    new conversational turn.
 - [x] Add structured audit records for agent tool calls.
   - Eino tool completions now emit `tool.audit` events with run id, tool call
     id, name, input, output summary, output artifact id, status, and duration

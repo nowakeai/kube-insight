@@ -74,9 +74,10 @@ export function AgentChat() {
   const visiblePanelWorkspace = useAgentProjectionStore((state) => visibleSessionId ? state.panelWorkspaces[visibleSessionId] : undefined)
   const panelDockCollapsed = visiblePanelWorkspace?.dockCollapsed ?? false
   const visibleSession = visibleSessionId ? sessionsById[visibleSessionId] : undefined
-  const visibleRuns = (visibleSession?.runIds ?? [])
+  const sessionRuns = (visibleSession?.runIds ?? [])
     .map((runID) => runsById[runID])
     .filter((run): run is AgentRun => Boolean(run))
+  const visibleRuns = displayRunsForRetryBranches(sessionRuns, runsById)
   const visiblePanelArtifacts = (visiblePanelWorkspace?.pinnedArtifactIds ?? [])
     .map((artifactID) => artifactsById[artifactID])
     .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
@@ -234,8 +235,10 @@ export function AgentChat() {
     const session = state.sessions[sessionId]
     if (!session) return
     selectSession(sessionId)
-    const runId = session.runIds.at(-1)
-    const run = runId ? state.runs[runId] : undefined
+    const sessionRuns = session.runIds
+      .map((runID) => state.runs[runID])
+      .filter((run): run is AgentRun => Boolean(run))
+    const run = displayRunsForRetryBranches(sessionRuns, state.runs).at(-1)
     eventSubscriptionRef.current?.abort()
     activeServerRunRef.current = run?.status === "running" ? run.id : undefined
     setIsRunning(run?.status === "running")
@@ -653,6 +656,46 @@ function ChatComposer({
       )}
     </ComposerPrimitive.Root>
   )
+}
+
+function displayRunsForRetryBranches(runs: AgentRun[], runsById: Record<string, AgentRun>) {
+  const visible: AgentRun[] = []
+  for (const run of runs) {
+    const retryOf = retryOfRunId(run)
+    if (!retryOf) {
+      visible.push(run)
+      continue
+    }
+
+    const rootId = retryRootRunId(run, runsById)
+    const replaceIndex = visible.findIndex((candidate) => retryRootRunId(candidate, runsById) === rootId)
+    if (replaceIndex >= 0) {
+      visible.splice(replaceIndex, visible.length - replaceIndex, run)
+    } else {
+      visible.push(run)
+    }
+  }
+  return visible
+}
+
+function retryRootRunId(run: AgentRun, runsById: Record<string, AgentRun>) {
+  let root = run
+  const seen = new Set<string>()
+  while (!seen.has(root.id)) {
+    seen.add(root.id)
+    const retryOf = retryOfRunId(root)
+    const parent = retryOf ? runsById[retryOf] : undefined
+    if (!parent) break
+    root = parent
+  }
+  return root.id
+}
+
+function retryOfRunId(run: AgentRun) {
+  const metadata = run.metadata
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
+  const retryOf = (metadata as Record<string, unknown>).retryOfRunId
+  return typeof retryOf === "string" && retryOf ? retryOf : undefined
 }
 
 function appendMessageText(message: AppendMessage) {

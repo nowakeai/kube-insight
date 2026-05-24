@@ -267,10 +267,11 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   tool calls collapse into one `Tool calls` group, and completed runs collapse
   all intermediate progress text plus tool calls into a single `Worked for ...`
   prepare block so the final answer stays primary. While a run is still
-  preparing, the prepare block is expanded by default and individual tool calls
-  remain collapsed; once the model starts streaming the formal answer, that
-  answer renders outside the prepare block. Tool-call raw output is retained as
-  an audit artifact but is not pinned into the right-side panel dock.
+  preparing, the prepare block and grouped tool calls stay expanded by default;
+  they auto-collapse only after the run reaches a terminal response, unless the
+  user manually toggles them. Once the model starts streaming the formal answer,
+  that answer renders outside the prepare block. Tool-call raw output is retained
+  as an audit artifact but is not pinned into the right-side panel dock.
 - [x] Add visible in-run liveness feedback with spinner/pulse states, current
   run stage, and approximate sent/received token counters while provider usage
   events are not available yet. Run stats are anchored above the sticky composer

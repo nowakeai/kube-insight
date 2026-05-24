@@ -211,13 +211,18 @@ function renderResponseSegment({
     )
   }
   if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
-  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} segment={segment} />
+  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={false} segment={segment} />
   if (segment.type === "evidence") return <EvidenceStreamMessage key={segment.id} segment={segment} onSelectArtifact={onSelectArtifact} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
 
-function renderWorkSegment(segment: ResponseSegment, activity: RunActivitySummary, onSelectArtifact: (artifactId?: string) => void) {
+function renderWorkSegment(
+  segment: ResponseSegment,
+  activity: RunActivitySummary,
+  onSelectArtifact: (artifactId?: string) => void,
+  toolGroupDefaultExpanded: boolean,
+) {
   if (segment.type === "assistant") {
     return (
       <AssistantStreamMessage
@@ -230,7 +235,7 @@ function renderWorkSegment(segment: ResponseSegment, activity: RunActivitySummar
     )
   }
   if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
-  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} segment={segment} />
+  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={toolGroupDefaultExpanded} segment={segment} />
   if (segment.type === "evidence") return <EvidenceStreamMessage key={segment.id} segment={segment} onSelectArtifact={onSelectArtifact} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
@@ -275,7 +280,7 @@ function WorkStreamMessage({
         </button>
         {expanded ? (
           <div className="mt-3 space-y-4">
-            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact))}
+            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, defaultExpanded))}
           </div>
         ) : null}
       </div>
@@ -439,16 +444,23 @@ function ToolStreamMessage({
   )
 }
 
-function ToolGroupStreamMessage({ segment }: { segment: ToolGroupSegment }) {
+function ToolGroupStreamMessage({
+  defaultExpanded,
+  segment,
+}: {
+  defaultExpanded: boolean
+  segment: ToolGroupSegment
+}) {
   const status = toolGroupStatus(segment.tools)
   const hasActiveTool = segment.tools.some((tool) => isActiveToolStatus(tool.status))
   const [manualExpanded, setManualExpanded] = useState<boolean | undefined>(undefined)
-  const expanded = manualExpanded ?? hasActiveTool
+  const autoExpanded = defaultExpanded || hasActiveTool
+  const expanded = manualExpanded ?? autoExpanded
   const durationMs = toolGroupDuration(segment.tools)
   return (
     <div className="w-full text-sm">
       <div className="min-w-0 border-l border-border/80 pl-3">
-        <button type="button" className="group flex w-full items-center gap-2 py-1 text-left" onClick={() => setManualExpanded((value) => !(value ?? hasActiveTool))}>
+        <button type="button" className="group flex w-full items-center gap-2 py-1 text-left" onClick={() => setManualExpanded((value) => !(value ?? autoExpanded))}>
           <span className={streamStatusDot(status)} aria-hidden="true" />
           <span className="max-w-full truncate rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground group-hover:bg-secondary">Tool calls</span>
           <span className="shrink-0 text-xs text-muted-foreground">{segment.tools.length} calls</span>

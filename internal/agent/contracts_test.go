@@ -38,7 +38,7 @@ func TestArtifactAndCitationContractNames(t *testing.T) {
 
 func TestDefaultAgentInstructionRequiresEvidenceCitations(t *testing.T) {
 	instruction := DefaultAgentInstruction()
-	for _, want := range []string{"kube-insight Kubernetes investigation agent", "Evidence first", "kube_insight_health", "kube_insight_schema", "ClickHouse-compatible", "kube_insight_search", "includeDocs false", "maxRows bounded", "imaginary tables such as objects", "failed tool call is diagnostic evidence", "Parallel tool calls", "isError true", "cite the exact proof", "version IDs", "Evidence section"} {
+	for _, want := range []string{"kube-insight Kubernetes investigation agent", "Evidence first", "kube_insight_health", "kube_insight_schema", "ClickHouse-compatible", "kube_insight_search", "includeDocs false", "maxRows bounded", "imaginary tables such as objects", "failed tool call is diagnostic evidence", "Parallel tool calls", "Visible progress notes", "user-visible progress notes", "private chain-of-thought", "isError true", "cite the exact proof", "version IDs", "Evidence section"} {
 		if !strings.Contains(instruction, want) {
 			t.Fatalf("default instruction missing %q: %s", want, instruction)
 		}

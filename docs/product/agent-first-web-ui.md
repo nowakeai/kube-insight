@@ -274,10 +274,11 @@ Optimization principles:
   timestamps, and proof handles instead of full documents unless explicitly
   requested.
 - Human-visible tool execution. The UI should make exposed tools, tool calls,
-  parameters, status, duration, outputs, and errors visible. Current read-only
-  tools can run automatically, but future mutating tools require confirmation.
-  Tool calls should appear as compact ordered stream steps interleaved with
-  assistant text, not as a separate activity box that breaks the response flow.
+  visible assistant progress notes, parameters, status, duration, outputs, and
+  errors visible. Current read-only tools can run automatically, but future
+  mutating tools require confirmation. Tool calls should appear as compact
+  ordered stream steps interleaved with assistant text, not as a separate
+  activity box that breaks the response flow.
   Tool failures are recoverable model context: the tool message must tell the
   model what failed so it can revise SQL, choose another tool, or retry instead
   of immediately failing the whole run.
@@ -461,8 +462,10 @@ The run view contains:
 
 - Chat thread for user messages and assistant answers.
 - Navigation to recent sessions and the compact server dashboard.
-- Compact tool-call stream steps interleaved with text in the exact response
-  order, with completed steps collapsed by default.
+- Compact tool-call stream steps interleaved with visible assistant progress
+  notes in the exact response order. Intermediate notes and tool-call groups
+  live inside the `Worked for ...` research block; the final answer renders
+  outside that block.
 - Run liveness row with current stage and approximate sent/received token
   counters until backend provider usage events are available.
 - Artifact panel for selected Kubernetes resource, topology, history, diff, or

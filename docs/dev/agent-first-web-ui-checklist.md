@@ -107,7 +107,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   require schema-first SQL planning.
 - [x] Strengthen the default system prompt with explicit evidence-first rules,
   ClickHouse SQL discipline, recoverable tool-error retry behavior, parallel
-  tool-call guidance, and answer evidence formatting.
+  tool-call guidance, visible user-facing progress notes between tool-call
+  groups, and answer evidence formatting.
 - [ ] Update SQL tool descriptions dynamically for the active backend dialect so
   ClickHouse agents do not guess SQLite table names such as `latest_index`.
   Current static descriptions point agents to schema DSL/backend notes first;
@@ -267,14 +268,13 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
     control was removed.
 - [x] Implement tool calls as compact ordered chat-stream steps with input
   summary, output summary, status, duration, and error display. Consecutive
-  tool calls collapse into one `Tool calls` group, and completed runs collapse
-  all intermediate progress text plus tool calls into a single `Worked for ...`
-  prepare block so the final answer stays primary. While a run is still
-  preparing, the prepare block and grouped tool calls stay expanded by default;
-  they auto-collapse only after the run reaches a terminal response, unless the
-  user manually toggles them. Once the model starts streaming the formal answer,
-  that answer renders outside the prepare block. Tool-call raw output is retained
-  as an audit artifact but is not pinned into the right-side panel dock.
+  tool calls collapse into one `Tool calls` group, and intermediate visible
+  progress notes plus tool calls render together inside a single `Worked for ...`
+  research block so the final answer stays distinct. The research block and
+  grouped tool calls stay expanded by default while visible; the user can
+  collapse them manually. Once the model starts streaming the formal answer,
+  that answer renders outside the research block. Tool-call raw output is
+  retained as an audit artifact but is not pinned into the right-side panel dock.
 - [x] Render answer evidence as a collapsed count-first list. Expanding the list
   shows readable per-evidence summaries, inline detail expansion, Summary/Table/
   Markdown/JSON views when data is available, and a separate pin action for

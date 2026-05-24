@@ -270,7 +270,7 @@ function WorkStreamMessage({
   status: string
   run: AgentRun
 }) {
-  const defaultExpanded = running || status === "failed"
+  const defaultExpanded = running || status === "completed" || status === "failed"
   const [manualExpanded, setManualExpanded] = useState<boolean | undefined>(undefined)
   const expanded = manualExpanded ?? defaultExpanded
   const tools = toolSegmentsIn(segments)
@@ -290,7 +290,7 @@ function WorkStreamMessage({
         </button>
         {expanded ? (
           <div className="mt-3 space-y-4">
-            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, defaultExpanded))}
+            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, expanded))}
           </div>
         ) : null}
       </div>

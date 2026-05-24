@@ -38,6 +38,10 @@ operational notes, and design details in `docs/`.
   more behavior.
 - Preserve user changes. Do not revert unrelated dirty worktree changes.
 - Update docs alongside behavior changes.
+- During development or testing, if you discover a durable workflow rule,
+  constraint, validation prerequisite, or recurring pitfall, update this file
+  or the appropriate `docs/` page in the same change. Do not leave durable
+  process knowledge only in chat history or local scratch notes.
 - Prefer configuration, rule tables, and data-driven registries over hardcoded
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.

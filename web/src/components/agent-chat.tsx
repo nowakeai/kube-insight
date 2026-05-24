@@ -11,7 +11,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { SessionSidebar } from "@/components/agent-session-sidebar"
-import { isPanelDockArtifact, LocalMessageConversation, RunComposerStats, SessionConversation, type AgentRunRoute } from "@/components/agent-chat-stream"
+import { LocalMessageConversation, RunComposerStats, SessionConversation, type AgentRunRoute } from "@/components/agent-chat-stream"
+import { isPanelDockArtifact } from "@/components/agent-chat-stream-model"
 import { Button } from "@/components/ui/button"
 import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
@@ -30,7 +31,6 @@ const emptyEventIds: string[] = []
 
 export function AgentChat() {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
-  const [panelDockCollapsed, setPanelDockCollapsed] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [routeHydrating, setRouteHydrating] = useState(false)
   const [routeRun, setRouteRun] = useState(readRouteRun)
@@ -54,9 +54,10 @@ export function AgentChat() {
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const selectSession = useAgentProjectionStore((state) => state.selectSession)
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const setPanelDockCollapsed = useAgentProjectionStore((state) => state.setPanelDockCollapsed)
+  const unpinArtifactForSession = useAgentProjectionStore((state) => state.unpinArtifactForSession)
   const handleSelectArtifact = useCallback((artifactId?: string) => {
     selectArtifact(artifactId)
-    if (artifactId) setPanelDockCollapsed(false)
   }, [selectArtifact])
   const activeRun = useAgentProjectionStore((state) => routeRun ? state.runs[routeRun.runID] : undefined)
   const activeRunEventIds = useAgentProjectionStore((state) => {
@@ -70,16 +71,30 @@ export function AgentChat() {
     .filter((event): event is AgentRunEvent => Boolean(event))
   const selectedArtifactId = useAgentProjectionStore((state) => state.selectedArtifactId)
   const visibleSessionId = routeRun?.sessionID ?? activeSessionId
+  const visiblePanelWorkspace = useAgentProjectionStore((state) => visibleSessionId ? state.panelWorkspaces[visibleSessionId] : undefined)
+  const panelDockCollapsed = visiblePanelWorkspace?.dockCollapsed ?? false
   const visibleSession = visibleSessionId ? sessionsById[visibleSessionId] : undefined
   const visibleRuns = (visibleSession?.runIds ?? [])
     .map((runID) => runsById[runID])
     .filter((run): run is AgentRun => Boolean(run))
-  const visiblePanelArtifacts = visibleRuns.flatMap((run) => run.artifactIds
+  const visiblePanelArtifacts = (visiblePanelWorkspace?.pinnedArtifactIds ?? [])
     .map((artifactID) => artifactsById[artifactID])
-    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind)))
+    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
+  const handlePanelDockCollapsedChange = useCallback((collapsed: boolean) => {
+    if (!visibleSessionId) return
+    setPanelDockCollapsed(visibleSessionId, collapsed)
+  }, [setPanelDockCollapsed, visibleSessionId])
+  const handleCloseArtifactPanel = useCallback((artifactId: string) => {
+    if (!visibleSessionId) return
+    unpinArtifactForSession(visibleSessionId, artifactId)
+  }, [unpinArtifactForSession, visibleSessionId])
 
   useEffect(() => {
-    const onPopState = () => setRouteRun(readRouteRun())
+    const onPopState = () => {
+      const nextRouteRun = readRouteRun()
+      setRouteRun(nextRouteRun)
+      if (!nextRouteRun) setRouteHydrating(false)
+    }
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
   }, [])
@@ -98,7 +113,6 @@ export function AgentChat() {
   useEffect(() => {
     if (!routeRun) {
       hydratedRunRef.current = undefined
-      setRouteHydrating(false)
       return
     }
     if (hydratedRunRef.current === routeRun.runID) return
@@ -357,7 +371,13 @@ export function AgentChat() {
               </ThreadPrimitive.Viewport>
             </ThreadPrimitive.Root>
 
-            <ArtifactDock artifacts={visiblePanelArtifacts} selectedArtifactId={selectedArtifactId} collapsed={panelDockCollapsed} onCollapsedChange={setPanelDockCollapsed} />
+            <ArtifactDock
+              artifacts={visiblePanelArtifacts}
+              selectedArtifactId={selectedArtifactId}
+              collapsed={panelDockCollapsed}
+              onCollapsedChange={handlePanelDockCollapsedChange}
+              onCloseArtifact={handleCloseArtifactPanel}
+            />
           </div>
         </div>
       </main>

@@ -63,6 +63,13 @@ export type AgentCitation = {
   createdAt: string
 }
 
+export type AgentPanelWorkspace = {
+  pinnedArtifactIds: string[]
+  selectedArtifactId?: string
+  dockCollapsed: boolean
+  watchIntervalSeconds?: number
+}
+
 type AddRunEventInput = {
   id?: string
   type: string
@@ -96,6 +103,7 @@ type AgentProjectionState = {
   events: Record<string, AgentRunEvent>
   artifacts: Record<string, AgentArtifact>
   citations: Record<string, AgentCitation>
+  panelWorkspaces: Record<string, AgentPanelWorkspace>
   ensureSession: (title: string) => string
   startRun: (sessionId: string, input: string) => string
   upsertServerSession: (session: AgentSessionDTO, options?: UpsertServerOptions) => void
@@ -108,12 +116,16 @@ type AgentProjectionState = {
   upsertArtifact: (runId: string, input: UpsertArtifactInput) => string
   addCitation: (runId: string, input: AddCitationInput) => string
   selectArtifact: (artifactId?: string) => void
+  setPanelDockCollapsed: (sessionId: string, collapsed: boolean) => void
+  unpinArtifactForSession: (sessionId: string, artifactId: string) => void
   selectSession: (sessionId?: string) => void
   startNewSession: () => void
   reset: () => void
 }
 
-const initialProjection = {
+const panelWorkspaceStorageKey = "kube-insight.agent.panel-workspaces.v1"
+
+const initialProjection = () => ({
   activeSessionId: undefined,
   selectedArtifactId: undefined,
   sessionOrder: [],
@@ -122,10 +134,11 @@ const initialProjection = {
   events: {},
   artifacts: {},
   citations: {},
-}
+  panelWorkspaces: readPanelWorkspaces(),
+})
 
 export const useAgentProjectionStore = create<AgentProjectionState>((set, get) => ({
-  ...initialProjection,
+  ...initialProjection(),
 
   ensureSession: (title) => {
     const state = get()
@@ -425,12 +438,121 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     return id
   },
 
-  selectArtifact: (artifactId) => set({ selectedArtifactId: artifactId }),
-  selectSession: (sessionId) => set({ activeSessionId: sessionId, selectedArtifactId: undefined }),
+  selectArtifact: (artifactId) => {
+    set((current) => {
+      if (!artifactId) return { selectedArtifactId: undefined }
+      const sessionId = sessionIdForArtifact(current, artifactId)
+      if (!sessionId) return { selectedArtifactId: artifactId }
+      const workspace = current.panelWorkspaces[sessionId] ?? emptyPanelWorkspace()
+      const nextWorkspace: AgentPanelWorkspace = {
+        ...workspace,
+        dockCollapsed: false,
+        pinnedArtifactIds: workspace.pinnedArtifactIds.includes(artifactId)
+          ? workspace.pinnedArtifactIds
+          : [artifactId, ...workspace.pinnedArtifactIds],
+        selectedArtifactId: artifactId,
+      }
+      const panelWorkspaces = {
+        ...current.panelWorkspaces,
+        [sessionId]: nextWorkspace,
+      }
+      writePanelWorkspaces(panelWorkspaces)
+      return { selectedArtifactId: artifactId, panelWorkspaces }
+    })
+  },
+  setPanelDockCollapsed: (sessionId, collapsed) => {
+    set((current) => {
+      const workspace = current.panelWorkspaces[sessionId] ?? emptyPanelWorkspace()
+      const panelWorkspaces = {
+        ...current.panelWorkspaces,
+        [sessionId]: { ...workspace, dockCollapsed: collapsed },
+      }
+      writePanelWorkspaces(panelWorkspaces)
+      return { panelWorkspaces }
+    })
+  },
+  unpinArtifactForSession: (sessionId, artifactId) => {
+    set((current) => {
+      const workspace = current.panelWorkspaces[sessionId] ?? emptyPanelWorkspace()
+      const pinnedArtifactIds = workspace.pinnedArtifactIds.filter((id) => id !== artifactId)
+      const selectedArtifactId = workspace.selectedArtifactId === artifactId ? pinnedArtifactIds[0] : workspace.selectedArtifactId
+      const panelWorkspaces = {
+        ...current.panelWorkspaces,
+        [sessionId]: { ...workspace, pinnedArtifactIds, selectedArtifactId },
+      }
+      writePanelWorkspaces(panelWorkspaces)
+      return {
+        selectedArtifactId: current.selectedArtifactId === artifactId ? selectedArtifactId : current.selectedArtifactId,
+        panelWorkspaces,
+      }
+    })
+  },
+  selectSession: (sessionId) => set((current) => ({
+    activeSessionId: sessionId,
+    selectedArtifactId: sessionId ? current.panelWorkspaces[sessionId]?.selectedArtifactId : undefined,
+  })),
   startNewSession: () => set({ activeSessionId: undefined, selectedArtifactId: undefined }),
-  reset: () => set(initialProjection),
+  reset: () => set(initialProjection()),
 }))
 
+
+function emptyPanelWorkspace(): AgentPanelWorkspace {
+  return { pinnedArtifactIds: [], dockCollapsed: false }
+}
+
+function sessionIdForArtifact(state: AgentProjectionState, artifactId: string) {
+  const artifact = state.artifacts[artifactId]
+  if (!artifact) return undefined
+  return state.runs[artifact.runId]?.sessionId
+}
+
+function readPanelWorkspaces(): Record<string, AgentPanelWorkspace> {
+  const storage = browserLocalStorage()
+  if (!storage) return {}
+  try {
+    return sanitizePanelWorkspaces(JSON.parse(storage.getItem(panelWorkspaceStorageKey) ?? "{}"))
+  } catch {
+    return {}
+  }
+}
+
+function writePanelWorkspaces(workspaces: Record<string, AgentPanelWorkspace>) {
+  const storage = browserLocalStorage()
+  if (!storage) return
+  try {
+    storage.setItem(panelWorkspaceStorageKey, JSON.stringify(workspaces))
+  } catch {
+    // Browser storage is an enhancement; the projection store remains usable without it.
+  }
+}
+
+function browserLocalStorage(): Storage | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    return window.localStorage
+  } catch {
+    return undefined
+  }
+}
+
+function sanitizePanelWorkspaces(value: unknown): Record<string, AgentPanelWorkspace> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  const result: Record<string, AgentPanelWorkspace> = {}
+  for (const [sessionId, workspace] of Object.entries(value)) {
+    if (typeof sessionId !== "string" || !workspace || typeof workspace !== "object" || Array.isArray(workspace)) continue
+    const record = workspace as Record<string, unknown>
+    const pinnedArtifactIds = Array.isArray(record.pinnedArtifactIds)
+      ? uniqueValues(record.pinnedArtifactIds.filter((item): item is string => typeof item === "string"))
+      : []
+    const selectedArtifactId = typeof record.selectedArtifactId === "string" ? record.selectedArtifactId : undefined
+    const dockCollapsed = typeof record.dockCollapsed === "boolean" ? record.dockCollapsed : false
+    const watchIntervalSeconds = typeof record.watchIntervalSeconds === "number" && Number.isFinite(record.watchIntervalSeconds)
+      ? record.watchIntervalSeconds
+      : undefined
+    result[sessionId] = { pinnedArtifactIds, selectedArtifactId, dockCollapsed, watchIntervalSeconds }
+  }
+  return result
+}
 
 function sessionTitle(input: string) {
   const title = input.trim().replace(/\s+/g, " ")

@@ -11,7 +11,6 @@ import {
   formatCompactNumber,
   formatDuration,
   isActiveToolStatus,
-  isPanelDockArtifact,
   lastIndexOf,
   runActivitySummary,
   runCitations,
@@ -304,10 +303,7 @@ function ThinkingPlaceholder({ active }: { active: boolean }) {
 function useRunClock(active: boolean) {
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
-    if (!active) {
-      setNowMs(Date.now())
-      return undefined
-    }
+    if (!active) return undefined
     const id = window.setInterval(() => setNowMs(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [active])
@@ -543,7 +539,3 @@ function ErrorStreamMessage({ text }: { text: string }) {
     </div>
   )
 }
-
-
-
-export { isPanelDockArtifact }

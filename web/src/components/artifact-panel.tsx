@@ -1,5 +1,5 @@
 import { FileText, PanelRightClose, PanelRightOpen, X } from "lucide-react"
-import { lazy, Suspense, useMemo, useState, type ReactNode } from "react"
+import { lazy, Suspense, type ReactNode } from "react"
 
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact"
@@ -27,18 +27,14 @@ export function ArtifactDock({
   selectedArtifactId,
   collapsed,
   onCollapsedChange,
+  onCloseArtifact,
 }: {
   artifacts: AgentArtifact[]
   selectedArtifactId?: string
   collapsed: boolean
   onCollapsedChange: (collapsed: boolean) => void
+  onCloseArtifact: (artifactId: string) => void
 }) {
-  const [closedIds, setClosedIds] = useState<string[]>([])
-  const visibleArtifacts = useMemo(
-    () => artifacts.filter((artifact) => !closedIds.includes(artifact.id)),
-    [artifacts, closedIds],
-  )
-
   if (collapsed) {
     return (
       <aside className="hidden min-h-0 lg:block" aria-label="Panel dock collapsed">
@@ -54,7 +50,7 @@ export function ArtifactDock({
           >
             <PanelRightOpen className="size-3.5" aria-hidden="true" />
             <span className="sr-only">Panel dock</span>
-            {visibleArtifacts.length > 0 ? <span className="tabular-nums">{visibleArtifacts.length}</span> : null}
+            {artifacts.length > 0 ? <span className="tabular-nums">{artifacts.length}</span> : null}
           </Button>
         </div>
       </aside>
@@ -71,7 +67,7 @@ export function ArtifactDock({
               <span>Panel dock</span>
             </div>
             <h2 className="mt-1 truncate text-sm font-semibold text-foreground">
-              {visibleArtifacts.length > 0 ? `${visibleArtifacts.length} panel${visibleArtifacts.length === 1 ? "" : "s"}` : "No pinned panels"}
+              {artifacts.length > 0 ? `${artifacts.length} panel${artifacts.length === 1 ? "" : "s"}` : "No pinned panels"}
             </h2>
           </div>
           <Button type="button" size="icon-sm" variant="ghost" onClick={() => onCollapsedChange(true)} aria-label="Collapse panel dock">
@@ -80,17 +76,17 @@ export function ArtifactDock({
         </div>
 
         <div className="max-h-[calc(100svh-10rem)] space-y-3 overflow-auto p-3">
-          {visibleArtifacts.length === 0 ? (
+          {artifacts.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
               Pin resources, topology, history, or diff artifacts from the chat stream.
             </div>
           ) : (
-            visibleArtifacts.map((artifact) => (
+            artifacts.map((artifact) => (
               <DockPanel
                 key={artifact.id}
                 artifact={artifact}
                 selected={artifact.id === selectedArtifactId}
-                onClose={() => setClosedIds((current) => current.includes(artifact.id) ? current : [...current, artifact.id])}
+                onClose={() => onCloseArtifact(artifact.id)}
               />
             ))
           )}

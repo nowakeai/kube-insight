@@ -210,6 +210,22 @@ KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-live" \
 go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
 ```
 
+Run the opt-in real DB prompt-context comparison when evaluating whether a
+larger system prompt reduces discovery calls. This sends selected evidence DB
+content and user questions to the configured live model endpoint, so use only
+with approved data/export boundaries:
+
+```bash
+KUBE_INSIGHT_AGENT_REAL_PROMPT_EVAL=1 \
+KUBE_INSIGHT_AGENT_REAL_EVAL_DB="$PWD/testdata/generated/real-cluster/kubeinsight.db" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CONTEXT_FILE="$PWD/testdata/generated/real-cluster/context.md" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_QUESTIONS='Is ns/name Service healthy?;;Map topology around ns/name Service.' \
+KUBE_INSIGHT_AGENT_REAL_EVAL_MODES='baseline,rich' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODEL='mimo-v2.5-pro' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-real" \
+go test ./internal/agent -run TestRealDBPromptContextEvaluation -count=1 -v
+```
+
 Run the local agent-vs-kubectl benchmark. Refresh the evidence database first
 when you need freshness-controlled numbers for documentation or release notes:
 

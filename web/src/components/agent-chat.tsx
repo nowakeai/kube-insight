@@ -277,6 +277,7 @@ export function AgentChat() {
     onCancel,
     unstable_capabilities: { copy: true },
   })
+  const showHome = !routeHydrating && visibleRuns.length === 0 && messages.length === 0
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -310,7 +311,7 @@ export function AgentChat() {
 
             <ThreadPrimitive.Root className="min-h-0 border-x border-border/80">
               <ThreadPrimitive.Viewport className="flex h-full min-h-0 flex-col overflow-y-auto scroll-smooth">
-                <ThreadPrimitive.Empty>
+                {showHome ? (
                   <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-5 px-5 py-10">
                     <div className="flex flex-col gap-1">
                       <h1 className="text-3xl font-semibold tracking-normal text-foreground sm:text-4xl">
@@ -333,24 +334,20 @@ export function AgentChat() {
                     </div>
                     <ChatComposer autoFocus isRunning={isRunning} onCancel={onCancel} variant="home" />
                   </div>
-                </ThreadPrimitive.Empty>
-
-                <ThreadPrimitive.If empty={false}>
+                ) : (
                   <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
                     {routeHydrating ? (
                       <RouteRunLoading />
                     ) : visibleRuns.length > 0 ? (
-                      <>
-                        <SessionConversation
-                          activeRun={activeRun}
-                          isRunning={isRunning}
-                          onRetryRun={handleRetryRun}
-                          onSelectArtifact={handleSelectArtifact}
-                          runs={visibleRuns}
-                          eventsById={eventsById}
-                          status={activeRun?.status ?? (isRunning ? "running" : "completed")}
-                        />
-                      </>
+                      <SessionConversation
+                        activeRun={activeRun}
+                        isRunning={isRunning}
+                        onRetryRun={handleRetryRun}
+                        onSelectArtifact={handleSelectArtifact}
+                        runs={visibleRuns}
+                        eventsById={eventsById}
+                        status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                      />
                     ) : (
                       <LocalMessageConversation messages={messages} />
                     )}
@@ -367,7 +364,7 @@ export function AgentChat() {
                       <ChatComposer isRunning={isRunning} onCancel={onCancel} />
                     </ThreadPrimitive.ViewportFooter>
                   </div>
-                </ThreadPrimitive.If>
+                )}
               </ThreadPrimitive.Viewport>
             </ThreadPrimitive.Root>
 

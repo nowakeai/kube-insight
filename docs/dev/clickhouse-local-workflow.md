@@ -37,7 +37,9 @@ make clickhouse-down
 ## 2.1 Start ClickHouse And Watcher With Compose
 
 For a containerized local dev loop, use the compose file instead of running the
-watcher on the host:
+watcher on the host. This is also the default backend for Web UI/frontend
+development, so the Vite dev server should proxy to the compose watcher/API
+instead of requiring a separate host `kube-insight serve` process:
 
 ```bash
 make clickhouse-down

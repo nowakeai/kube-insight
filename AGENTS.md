@@ -42,6 +42,10 @@ operational notes, and design details in `docs/`.
   constraint, validation prerequisite, or recurring pitfall, update this file
   or the appropriate `docs/` page in the same change. Do not leave durable
   process knowledge only in chat history or local scratch notes.
+- For Web UI or frontend development, use the Docker compose dev backend
+  (`make dev-compose-up-detached`) instead of starting another host
+  `kube-insight serve` process. Start a separate host `serve` only for pure
+  backend tests or isolated smoke scripts, and stop it when the test is done.
 - Prefer configuration, rule tables, and data-driven registries over hardcoded
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.

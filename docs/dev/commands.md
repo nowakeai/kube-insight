@@ -55,17 +55,25 @@ Watch a selected resource set:
 ./bin/kube-insight watch pods services 'apps/v1/*' --db kubeinsight.db
 ```
 
-Run local service surfaces:
+Run local service surfaces for backend-only tests or isolated smoke runs:
 
 ```bash
 ./bin/kube-insight serve --watch --api --mcp --metrics --db kubeinsight.db
 ```
 
-Run the React Web UI dev server:
+For Web UI or frontend development, do not start a separate host
+`kube-insight serve` process. Use the Docker compose dev backend, then run the
+React Web UI dev server against that API:
 
 ```bash
+make dev-compose-up-detached
+make dev-compose-ps
 npm --prefix web run dev
 ```
+
+Stop one-off host `serve` processes after backend tests finish. Stop the compose
+backend with `make dev-compose-down` when the shared dev environment should be
+shut down.
 
 When the dev server is exposed through a remote workspace domain, configure Vite
 host checking in the gitignored root `.env` file:

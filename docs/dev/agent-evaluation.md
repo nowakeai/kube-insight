@@ -84,17 +84,45 @@ evidence checks, not exact text matching.
 
 ## API Live Smoke Path
 
-The next live path should reuse the same evaluator through the HTTP API:
+Use the opt-in HTTP smoke script to exercise the full service path with a
+synthetic fixture-backed SQLite database. The script ingests a small Service,
+Pod, EndpointSlice, and Event fixture, starts `kube-insight serve --api --mcp`
+with `server.chat.enabled`, submits agent runs through
+`POST /api/v1/agent/sessions/{session_id}/runs`, follows
+`GET /api/v1/agent/runs/{run_id}/events?follow=true`, and fails if terminal
+runs do not emit a final answer, candidate artifact, and verified citation.
 
-1. Create or reuse a small fixture-backed SQLite database with known Service,
-   Pod, Event, history, and topology evidence.
-2. Start `kube-insight serve --api --mcp --webui` with `server.chat.enabled`
-   and the provider key env configured.
-3. Submit one run per default evaluation case through
-   `POST /api/v1/agent/sessions/{session_id}/runs`.
-4. Read `GET /api/v1/agent/runs/{run_id}/events?follow=true` until terminal.
-5. Score the transcript with `agent.EvaluateRunEvents`.
-6. Save the report JSON under `testdata/generated/agent-eval-live/`.
+```bash
+make build
+KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
+KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
+KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
+scripts/agent-api-live-smoke.sh
+```
+
+Useful overrides:
+
+- `KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT`: output directory for DB, logs, SSE, and
+  summary JSON. Default: `testdata/generated/agent-api-live-smoke`.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS`: `;;`-separated question list.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_API_LISTEN` and
+  `KUBE_INSIGHT_AGENT_API_SMOKE_MCP_LISTEN`: local service addresses.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS`: max wait per run.
+
+## 2026-05-24 DeepSeek API Smoke
+
+Using `deepseek-v4-flash` against the synthetic fixture DB, the API smoke passed
+through the full HTTP service path after rebuilding `bin/kube-insight` from the
+current checkout:
+
+| Question | Status | Artifacts | Citations |
+| --- | --- | ---: | ---: |
+| Service health for `default/api` | `run.completed` | 5 | 3 |
+| Namespace topology for `default` | `run.completed` | 10 | 4 |
+
+This validates the end-to-end path that the Web UI consumes: session creation,
+run creation, server-owned Eino runner, MCP tool calls, SSE replay,
+`artifact.created`, final answer, and verified `citation.created` events.
 
 ## Next Test Cases
 

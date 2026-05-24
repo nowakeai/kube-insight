@@ -451,7 +451,33 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
 async function createRunInServerSession(prompt: string, options: RunServerPromptOptions) {
   const session = await ensureServerSession(prompt, options.activeSessionId)
   options.upsertServerSession(session)
-  return createAgentRun(session.id, { input: prompt })
+  return createAgentRun(session.id, { input: prompt, metadata: agentRunClientMetadata() })
+}
+
+function agentRunClientMetadata() {
+  const now = new Date()
+  const intlOptions = Intl.DateTimeFormat().resolvedOptions()
+  const timezoneOffsetMinutes = -now.getTimezoneOffset()
+  return {
+    clientContext: {
+      sentAt: now.toISOString(),
+      localTime: formatLocalTime(now),
+      timeZone: intlOptions.timeZone,
+      timezoneOffsetMinutes,
+      locale: navigator.language,
+      languages: navigator.languages,
+      pageURL: window.location.href,
+    },
+  }
+}
+
+function formatLocalTime(value: Date) {
+  const offsetMinutes = -value.getTimezoneOffset()
+  const sign = offsetMinutes >= 0 ? "+" : "-"
+  const abs = Math.abs(offsetMinutes)
+  const hours = String(Math.floor(abs / 60)).padStart(2, "0")
+  const minutes = String(abs % 60).padStart(2, "0")
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}T${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}:${String(value.getSeconds()).padStart(2, "0")}${sign}${hours}:${minutes}`
 }
 
 async function ensureServerSession(prompt: string, activeSessionId?: string): Promise<AgentSessionDTO> {

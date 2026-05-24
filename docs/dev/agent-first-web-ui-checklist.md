@@ -254,7 +254,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 
 - [x] Implement search-style chat home page.
 - [x] Chat composer submits to server sessions/runs first and replays SSE run
-  events, with local demo fallback when the API origin is unavailable.
+  events, with local demo fallback when the API origin is unavailable. New
+  browser-created runs include client time, local time, time zone, UTC offset,
+  locale, languages, and page URL metadata so the backend can orient the LLM for
+  relative time phrases.
 - [x] Implement run page with chat thread and composer.
 - [x] Render the current session as a continuous chat history across all runs so
   submitting a follow-up does not hide earlier messages.

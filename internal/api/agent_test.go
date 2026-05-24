@@ -107,15 +107,20 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 		ID     string `json:"id"`
 		Status string `json:"status"`
 	}
-	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"is the api healthy?"}`, http.StatusCreated, &run)
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"is the api healthy?","metadata":{"clientContext":{"sentAt":"2026-05-24T15:30:00.000Z","localTime":"2026-05-24T23:30:00+08:00","timeZone":"Asia/Shanghai","timezoneOffsetMinutes":480,"locale":"zh-CN","languages":["zh-CN","en-US"],"pageURL":"http://127.0.0.1:5173/"}}}`, http.StatusCreated, &run)
 	if run.ID == "" || run.Status != "queued" {
 		t.Fatalf("run = %#v", run)
 	}
 
 	select {
 	case input := <-runner.inputs:
-		if input.RunID != run.ID || len(input.Messages) != 1 || input.Messages[0].Content != "is the api healthy?" {
+		if input.RunID != run.ID || len(input.Messages) != 2 || input.Messages[0].Role != agent.RoleSystem || input.Messages[1].Content != "is the api healthy?" {
 			t.Fatalf("runner input = %#v", input)
+		}
+		for _, want := range []string{"Client context for this run", "2026-05-24T23:30:00+08:00", "Asia/Shanghai", "zh-CN"} {
+			if !strings.Contains(input.Messages[0].Content, want) {
+				t.Fatalf("client context missing %q: %s", want, input.Messages[0].Content)
+			}
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner was not started")

@@ -227,6 +227,10 @@ Tool design rules:
 - Tool-call raw output is an audit trail, not a user-facing proof panel. The
   panel dock should only pin visual investigation artifacts such as Kubernetes
   resource lists, individual resources, topology, history, and diffs.
+- Each client-created run should include browser client context such as send
+  time, local time, time zone, UTC offset, locale, and page URL. The server
+  injects this as orientation for interpreting relative time phrases; it is not
+  evidence about Kubernetes state.
 - The system should let the LLM plan freely, but tool contracts must make the
   high-quality path obvious and the dangerous path hard.
 

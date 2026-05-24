@@ -210,7 +210,7 @@ func liveEvalTools() []tool.BaseTool {
 		},
 		liveEvalTool{
 			name: "kube_insight_search",
-			desc: "Discover candidate Kubernetes objects from names, symptoms, facts, changes, events, labels, and namespaces. Use this before topology or history when the target is broad or symptom-based.",
+			desc: "Discover candidate Kubernetes objects from names, symptoms, facts, changes, events, labels, and namespaces. Use this before topology or history when the target is broad or symptom-based. Do not use search when the user already gave an exact kind plus namespace/name target; use the target-specific typed tool directly.",
 			params: map[string]*schema.ParameterInfo{
 				"query":     {Type: schema.String, Desc: "Search text such as api, OOMKilled, restart, change, topology, or default namespace."},
 				"namespace": {Type: schema.String, Desc: "Optional namespace."},
@@ -258,16 +258,17 @@ func liveEvalTools() []tool.BaseTool {
 		},
 		liveEvalTool{
 			name: "kube_insight_service_investigation",
-			desc: "Load compact Service evidence for an exact Service namespace/name. Use this for Service health after health confirms coverage. In this eval, health plus service investigation is enough; answer instead of calling schema, SQL, history, or topology again unless this bundle is incomplete. Do not use this tool just to answer recent-changes questions when search and history already returned changes.",
+			desc: "Load compact Service evidence for an exact Service namespace/name. Use this for Service health after health confirms coverage. In this eval, health plus service investigation is complete terminal evidence; after this tool returns, answer immediately and do not call search, schema, SQL, history, or topology unless this bundle is missing Service, EndpointSlice, Pod, or Event evidence. Do not use this tool just to answer recent-changes questions when search and history already returned changes.",
 			params: map[string]*schema.ParameterInfo{
 				"namespace": {Type: schema.String, Required: true, Desc: "Service namespace."},
 				"name":      {Type: schema.String, Required: true, Desc: "Service name."},
 			},
 			output: map[string]any{
-				"service": map[string]any{"object": liveEvalObject("Service", "default", "api"), "summary": map[string]any{"facts": 2, "edges": 3, "versions": 2, "evidenceScore": 9}},
+				"summary": map[string]any{"completeForServiceHealth": true, "endpointSlices": 1, "pods": 1, "readyEndpointPods": 0, "terminalReason": "Service api has one endpoint Pod api-0 and the bundle includes endpoint and pod evidence. Answer from this bundle without extra tools."},
+				"service": map[string]any{"object": liveEvalObject("Service", "default", "api"), "summary": map[string]any{"facts": 2, "edges": 3, "versions": 2, "evidenceScore": 9}, "facts": []any{map[string]any{"factKey": "service.type", "factValue": "ClusterIP"}}},
 				"objects": []any{
-					map[string]any{"object": liveEvalObject("EndpointSlice", "default", "api-abc"), "summary": map[string]any{"facts": 1, "edges": 2, "versions": 1}},
-					map[string]any{"object": liveEvalObject("Pod", "default", "api-0"), "summary": map[string]any{"facts": 2, "edges": 2, "versions": 3}},
+					map[string]any{"object": liveEvalObject("EndpointSlice", "default", "api-abc"), "summary": map[string]any{"facts": 2, "edges": 2, "versions": 1}, "facts": []any{map[string]any{"factKey": "endpoints.ready", "factValue": "false"}}},
+					map[string]any{"object": liveEvalObject("Pod", "default", "api-0"), "summary": map[string]any{"facts": 3, "edges": 2, "versions": 3}, "facts": []any{map[string]any{"factKey": "pod_status.last_reason", "factValue": "OOMKilled"}, map[string]any{"factKey": "pod_status.restart_count", "factValue": "1"}}},
 				},
 				"topology": liveEvalTopologyEdges(),
 			},

@@ -57,7 +57,7 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 		}
 		return nil, nil, err
 	}
-	return runner, closeTools, nil
+	return withAgentRuntimeContext(runner, dbPath), closeTools, nil
 }
 
 func newConfiguredChatModel(ctx context.Context, chat appconfig.ChatConfig) (*openaimodel.ChatModel, error) {

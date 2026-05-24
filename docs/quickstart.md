@@ -272,6 +272,13 @@ started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
 Agents should call `kube_insight_schema` first because SQLite and
 ClickHouse-compatible backends expose different SQL table names.
 
+When the built-in Web UI/API chat agent runs against a SQLite DB, kube-insight
+adds a small runtime orientation message before each run. It includes collector
+coverage, compact object counts, a few high-signal Service hints, and routing
+rules such as using `kube_insight_service_investigation` for exact Service
+questions. This context is not evidence; answers still need tool-backed
+artifacts and citations.
+
 MCP currently exposes:
 
 - `kube_insight_schema`

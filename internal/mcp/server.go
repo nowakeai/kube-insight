@@ -436,7 +436,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_search",
-			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Start with includeBundles=false and narrow by kind, namespace, cluster, or time; set includeBundles=true only for top targets that need compact proof.",
+			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; call the target-specific typed tool directly. Start with includeBundles=false and narrow by kind, namespace, cluster, or time; set includeBundles=true only for top targets that need compact proof.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -492,7 +492,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_service_investigation",
-			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. For Service health, this result plus kube_insight_health is usually enough; answer instead of calling schema, SQL, history, or topology again unless the bundle is incomplete. Do not use this tool just to answer recent-changes questions when search and history already returned changes. Start with low limits, then expand only if the compact bundle does not answer the question.",
+			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. For exact Service health, endpoint readiness, or impact questions, this result plus kube_insight_health is terminal evidence: stop and answer instead of calling search, schema, SQL, history, or topology again unless this bundle is missing the requested Service, EndpointSlice, Pod, or Event evidence. Do not use this tool just to answer recent-changes questions when search and history already returned changes. Start with low limits, then expand only if the compact bundle does not answer the question.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

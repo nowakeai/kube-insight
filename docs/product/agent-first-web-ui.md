@@ -468,6 +468,14 @@ The run view contains:
   corresponding artifact in the right-side panel dock.
 - Stop, retry, and continue controls.
 
+Pinned panel state is a browser workspace preference, not server control-plane
+state. The first implementation should store pinned panel IDs, order, selected
+artifact/view, dock collapsed state, and watch interval in browser storage keyed
+by session ID. The server remains authoritative for sessions, runs, replayable
+events, artifacts, and citations; the browser can reconstruct a pinned panel by
+loading the session run events. Do not add backend pinned-panel tables or APIs
+until there is a multi-user/shared-workspace requirement.
+
 assistant-ui provides the thread, composer, message primitives, markdown
 surface, and tool/data rendering extension points. kube-insight owns the typed
 artifact renderers.

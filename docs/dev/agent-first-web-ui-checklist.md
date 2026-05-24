@@ -297,6 +297,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add fallback renderer for unknown artifact kinds.
 - [x] Keep panel dock scoped to investigation artifacts: markdown proof panels,
   Kubernetes resources, resource lists, topology, history, and diff.
+- [ ] Store pinned panel workspace state in browser storage keyed by session ID:
+  pinned artifact IDs, order, selected view, dock collapsed state, and watch
+  interval. Do not add backend pinned-panel persistence for the first milestone;
+  reconstruct panel contents from server-owned run events/artifacts/citations.
 
 ## Dashboard
 

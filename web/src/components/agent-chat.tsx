@@ -7,7 +7,7 @@ import {
   type ThreadMessage,
 } from "@assistant-ui/react"
 import { ArrowUp, CircleStop, LayoutDashboard, Search, Sparkles } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { SessionSidebar } from "@/components/agent-session-sidebar"
@@ -19,6 +19,7 @@ import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agen
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
 import { displayRunIdsForRetryBranches } from "@/lib/agent-retry-branches"
+import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 const starterPrompts = [
@@ -35,6 +36,7 @@ export function AgentChat() {
   const [isRunning, setIsRunning] = useState(false)
   const [routeHydrating, setRouteHydrating] = useState(false)
   const [routeRun, setRouteRun] = useState(readRouteRun)
+  const [emptyDockExpandedBySession, setEmptyDockExpandedBySession] = useState<Record<string, boolean>>({})
   const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
   const activeServerRunRef = useRef<string | undefined>(undefined)
   const hydratedRunRef = useRef<string | undefined>(undefined)
@@ -85,14 +87,26 @@ export function AgentChat() {
   const visiblePanelArtifacts = (visiblePanelWorkspace?.pinnedArtifactIds ?? [])
     .map((artifactID) => artifactsById[artifactID])
     .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
+  const emptyDockExpanded = visibleSessionId ? emptyDockExpandedBySession[visibleSessionId] ?? false : false
+  const panelDockExpanded = !panelDockCollapsed && (visiblePanelArtifacts.length > 0 || emptyDockExpanded)
+  const shellGridClass = panelDockExpanded
+    ? "relative grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_24rem] xl:grid-cols-[18rem_minmax(0,1fr)_28rem]"
+    : "relative grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)]"
   const handlePanelDockCollapsedChange = useCallback((collapsed: boolean) => {
     if (!visibleSessionId) return
+    setEmptyDockExpandedBySession((current) => ({ ...current, [visibleSessionId]: !collapsed && visiblePanelArtifacts.length === 0 }))
     setPanelDockCollapsed(visibleSessionId, collapsed)
-  }, [setPanelDockCollapsed, visibleSessionId])
+  }, [setPanelDockCollapsed, visiblePanelArtifacts.length, visibleSessionId])
   const handleCloseArtifactPanel = useCallback((artifactId: string) => {
     if (!visibleSessionId) return
     unpinArtifactForSession(visibleSessionId, artifactId)
-  }, [unpinArtifactForSession, visibleSessionId])
+    if (visiblePanelArtifacts.length <= 1) {
+      setEmptyDockExpandedBySession((current) => ({ ...current, [visibleSessionId]: false }))
+      setPanelDockCollapsed(visibleSessionId, true)
+    }
+  }, [setPanelDockCollapsed, unpinArtifactForSession, visiblePanelArtifacts.length, visibleSessionId])
+  const activeRunIsRunning = Boolean(activeRun && isActiveRunStatus(activeRun.status))
+  const effectiveIsRunning = isRunning || activeRunIsRunning
 
   useEffect(() => {
     const onPopState = () => {
@@ -218,11 +232,11 @@ export function AgentChat() {
       ),
     )
     eventSubscriptionRef.current?.abort()
-    const serverRunID = activeServerRunRef.current
+    const serverRunID = activeServerRunRef.current ?? (activeRun && isActiveRunStatus(activeRun.status) ? activeRun.id : undefined) ?? latestRunningRunID()
     if (serverRunID) void cancelAgentRun(serverRunID).catch(() => undefined)
     const latestRunningRun = latestRunningRunID()
     if (latestRunningRun) cancelRun(latestRunningRun)
-  }, [cancelRun])
+  }, [activeRun, cancelRun])
 
   const handleNewSession = useCallback(() => {
     startNewSession()
@@ -259,7 +273,7 @@ export function AgentChat() {
   }, [selectSession])
 
   const handleRetryRun = useCallback(async (run: AgentRun) => {
-    if (isRunning) return
+    if (effectiveIsRunning) return
     try {
       await runServerPrompt(run.input, {
         activeSessionId: run.sessionId,
@@ -273,14 +287,18 @@ export function AgentChat() {
         upsertServerRun,
         upsertServerSession,
       })
-    } catch {
-      await runPrompt(run.input)
+    } catch (error) {
+      setIsRunning(false)
+      appendRunEvent(run.id, {
+        type: "error",
+        data: { message: `Retry failed: ${retryErrorMessage(error)}` },
+      })
     }
-  }, [applyServerEvent, isRunning, runPrompt, upsertServerRun, upsertServerSession])
+  }, [appendRunEvent, applyServerEvent, effectiveIsRunning, upsertServerRun, upsertServerSession])
 
   const runtime = useExternalStoreRuntime({
     messages,
-    isRunning,
+    isRunning: effectiveIsRunning,
     onNew,
     onCancel,
     unstable_capabilities: { copy: true },
@@ -306,10 +324,10 @@ export function AgentChat() {
             </Button>
           </header>
 
-          <div className={panelDockCollapsed ? "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_5rem]" : "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)_24rem] xl:grid-cols-[18rem_minmax(0,1fr)_28rem]"}>
+          <div className={shellGridClass}>
             <SessionSidebar
               activeSessionId={activeSessionId}
-              disabled={isRunning}
+              disabled={effectiveIsRunning}
               onNew={handleNewSession}
               onSelect={handleSelectSession}
               runs={runsById}
@@ -340,7 +358,7 @@ export function AgentChat() {
                         </ThreadPrimitive.Suggestion>
                       ))}
                     </div>
-                    <ChatComposer autoFocus isRunning={isRunning} onCancel={onCancel} variant="home" />
+                    <ChatComposer autoFocus isRunning={effectiveIsRunning} onCancel={onCancel} variant="home" />
                   </div>
                 ) : (
                   <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
@@ -350,27 +368,30 @@ export function AgentChat() {
                       <SessionConversation
                         activeRun={activeRun}
                         artifactsById={artifactsById}
-                        isRunning={isRunning}
+                        isRunning={effectiveIsRunning}
                         onRetryRun={handleRetryRun}
                         onSelectArtifact={handleSelectArtifact}
                         runs={visibleRuns}
                         eventsById={eventsById}
-                        status={activeRun?.status ?? (isRunning ? "running" : "completed")}
+                        status={activeRun?.status ?? (effectiveIsRunning ? "running" : "completed")}
                       />
                     ) : (
                       <LocalMessageConversation messages={messages} />
                     )}
                     <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background/95 py-4 backdrop-blur">
-                      {!routeHydrating ? (
-                        <RunComposerStats
-                          events={activeRunEvents}
-                          isRunning={isRunning}
-                          routeRun={routeRun}
-                          run={activeRun}
-                          status={activeRun?.status ?? (isRunning ? "running" : "completed")}
-                        />
-                      ) : null}
-                      <ChatComposer isRunning={isRunning} onCancel={onCancel} />
+                      <ChatComposer
+                        isRunning={effectiveIsRunning}
+                        onCancel={onCancel}
+                        status={!routeHydrating ? (
+                          <RunComposerStats
+                            events={activeRunEvents}
+                            isRunning={effectiveIsRunning}
+                            routeRun={routeRun}
+                            run={activeRun}
+                            status={activeRun?.status ?? (effectiveIsRunning ? "running" : "completed")}
+                          />
+                        ) : null}
+                      />
                     </ThreadPrimitive.ViewportFooter>
                   </div>
                 )}
@@ -380,7 +401,7 @@ export function AgentChat() {
             <ArtifactDock
               artifacts={visiblePanelArtifacts}
               selectedArtifactId={selectedArtifactId}
-              collapsed={panelDockCollapsed}
+              collapsed={!panelDockExpanded}
               onCollapsedChange={handlePanelDockCollapsedChange}
               onCloseArtifact={handleCloseArtifactPanel}
             />
@@ -407,7 +428,7 @@ type RunServerPromptOptions = {
 
 async function runServerPrompt(prompt: string, options: RunServerPromptOptions) {
   const run = options.retryRunId
-    ? await retryAgentRun(options.retryRunId, { metadata: agentRunClientMetadata() })
+    ? await retryOrCreateReplacementRun(prompt, options)
     : await createRunInServerSession(prompt, options)
   options.upsertServerRun(run)
   options.activeServerRunRef.current = run.id
@@ -453,17 +474,28 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
   }
 }
 
-async function createRunInServerSession(prompt: string, options: RunServerPromptOptions) {
-  const session = await ensureServerSession(prompt, options.activeSessionId)
-  options.upsertServerSession(session)
-  return createAgentRun(session.id, { input: prompt, metadata: agentRunClientMetadata() })
+async function retryOrCreateReplacementRun(prompt: string, options: RunServerPromptOptions) {
+  if (!options.retryRunId) return createRunInServerSession(prompt, options)
+  try {
+    return await retryAgentRun(options.retryRunId, { metadata: agentRunClientMetadata() })
+  } catch (error) {
+    if (!shouldCreateReplacementRunForRetryError(error)) throw error
+    return createRunInServerSession(prompt, options, retryReplacementMetadata(options.retryRunId))
+  }
 }
 
-function agentRunClientMetadata() {
+async function createRunInServerSession(prompt: string, options: RunServerPromptOptions, metadata?: Record<string, unknown>) {
+  const session = await ensureServerSession(prompt, options.activeSessionId)
+  options.upsertServerSession(session)
+  return createAgentRun(session.id, { input: prompt, metadata: agentRunClientMetadata(metadata) })
+}
+
+function agentRunClientMetadata(metadata: Record<string, unknown> = {}) {
   const now = new Date()
   const intlOptions = Intl.DateTimeFormat().resolvedOptions()
   const timezoneOffsetMinutes = -now.getTimezoneOffset()
   return {
+    ...metadata,
     clientContext: {
       sentAt: now.toISOString(),
       localTime: formatLocalTime(now),
@@ -586,6 +618,10 @@ function isTerminalRunStatus(status: string) {
   return status === "completed" || status === "failed" || status === "cancelled"
 }
 
+function isActiveRunStatus(status: string) {
+  return status === "queued" || status === "running"
+}
+
 async function hydrateSiblingRunEvents(
   runs: AgentRunDTO[],
   activeRunID: string,
@@ -647,20 +683,22 @@ function ChatComposer({
   autoFocus = false,
   isRunning = false,
   onCancel,
+  status,
   variant = "thread",
 }: {
   autoFocus?: boolean
   isRunning?: boolean
   onCancel?: () => void
+  status?: ReactNode
   variant?: "home" | "thread"
 }) {
   const isHome = variant === "home"
-  return (
+  const inputRow = (
     <ComposerPrimitive.Root
       className={
         isHome
           ? "flex min-h-16 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-md shadow-muted/40"
-          : "flex min-h-14 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
+          : "flex min-h-14 w-full items-end gap-2 bg-card p-2"
       }
     >
       {isHome ? <Search className="mb-3 ml-2 size-5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
@@ -687,6 +725,13 @@ function ChatComposer({
         </ComposerPrimitive.Send>
       )}
     </ComposerPrimitive.Root>
+  )
+  if (isHome) return inputRow
+  return (
+    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm shadow-muted/30">
+      {status}
+      {inputRow}
+    </div>
   )
 }
 
@@ -809,7 +854,8 @@ function latestRunningRunID() {
   const activeSession = state.activeSessionId ? state.sessions[state.activeSessionId] : undefined
   if (!activeSession) return undefined
   for (const runID of [...activeSession.runIds].reverse()) {
-    if (state.runs[runID]?.status === "running") return runID
+    const run = state.runs[runID]
+    if (run && isActiveRunStatus(run.status)) return runID
   }
   return undefined
 }

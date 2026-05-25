@@ -329,10 +329,12 @@ tool time bounds should still use UTC.
 
 For Web UI retry changes, run the retry projection tests. Retry should rewind to
 the retried run checkpoint, replace that branch, and never append a duplicate
-user/assistant turn after the old answer:
+user/assistant turn after the old answer. If the original run has already been
+removed by retention, the fallback replacement run must still carry
+`retryOfRunId` metadata instead of becoming a plain append:
 
 ```bash
-npm --prefix web run test -- src/lib/agent-retry-branches.spec.ts src/lib/agent-store.spec.ts
+npm --prefix web run test -- src/lib/agent-retry-branches.spec.ts src/lib/agent-retry-policy.spec.ts src/lib/agent-store.spec.ts
 ```
 
 Run the opt-in real DB prompt-context comparison when evaluating whether a

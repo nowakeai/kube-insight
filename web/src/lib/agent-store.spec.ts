@@ -37,6 +37,16 @@ test("server session hydration keeps retry branch projection stable", () => {
   expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
 })
 
+test("retry fallback replacement still rewinds later turns", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerRun(runDTO("run_1", "question"))
+  store.upsertServerRun(runDTO("run_2", "follow-up"))
+  store.upsertServerRun(runDTO("run_retry", "question", { retryOfRunId: "run_1", retryFallback: "missing-original-run" }))
+
+  expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
+})
+
 function runDTO(id: string, input: string, metadata?: unknown): AgentRunDTO {
   return {
     id,

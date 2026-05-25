@@ -169,11 +169,11 @@ export function RunComposerStats({
   const segments = conversationSegments(run, events, status, nowMs)
   const activity = runActivitySummary(run, events, segments, status)
   return (
-    <div className="mb-2 flex items-center justify-between gap-3 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm">
+    <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground">
       <div className="flex min-w-0 items-center gap-2">
         <span className={streamStatusDot(status)} aria-hidden="true" />
         <span className="truncate">{routeRun ? `run ${shortID(routeRun.runID)}` : "run"}</span>
-        <span className="rounded-md border border-border px-2 py-0.5 capitalize">{runStatusLabel(status)}</span>
+        <span className="rounded-md border border-border bg-background/80 px-2 py-0.5 capitalize">{runStatusLabel(status)}</span>
       </div>
       <div className="flex min-w-0 flex-1 items-center justify-end gap-2 text-[0.72rem]">
         {isRunning ? <LoaderCircle className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden="true" /> : <Activity className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}

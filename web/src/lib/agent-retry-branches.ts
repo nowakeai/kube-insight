@@ -1,11 +1,12 @@
 export type RetryBranchRun = {
   id: string
+  createdAt?: string
   metadata?: unknown
 }
 
 export function displayRunIdsForRetryBranches<T extends RetryBranchRun>(runIds: string[], runsById: Record<string, T | undefined>) {
   const visible: string[] = []
-  for (const runId of runIds) {
+  for (const runId of chronologicalRunIds(runIds, runsById)) {
     const run = runsById[runId]
     if (!run) continue
     const retryOf = retryOfRunId(run)
@@ -26,6 +27,22 @@ export function displayRunIdsForRetryBranches<T extends RetryBranchRun>(runIds: 
     }
   }
   return visible
+}
+
+function chronologicalRunIds<T extends RetryBranchRun>(runIds: string[], runsById: Record<string, T | undefined>) {
+  return runIds
+    .map((id, index) => ({ id, index, createdAt: parseCreatedAt(runsById[id]?.createdAt) }))
+    .sort((a, b) => {
+      if (a.createdAt !== undefined && b.createdAt !== undefined && a.createdAt !== b.createdAt) return a.createdAt - b.createdAt
+      return a.index - b.index
+    })
+    .map((item) => item.id)
+}
+
+function parseCreatedAt(value: string | undefined) {
+  if (!value) return undefined
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : undefined
 }
 
 export function retryRootRunId<T extends RetryBranchRun>(run: T, runsById: Record<string, T | undefined>) {

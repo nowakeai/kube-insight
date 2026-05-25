@@ -37,45 +37,41 @@ export function ArtifactDock({
 }) {
   if (collapsed) {
     return (
-      <aside className="hidden min-h-0 lg:block" aria-label="Panel dock collapsed">
-        <div className="sticky top-20 flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="shadow-sm"
-            onClick={() => onCollapsedChange(false)}
-            aria-label="Expand panel dock"
-            title="Expand panel dock"
-          >
-            <PanelRightOpen className="size-3.5" aria-hidden="true" />
-            <span className="sr-only">Panel dock</span>
-            {artifacts.length > 0 ? <span className="tabular-nums">{artifacts.length}</span> : null}
-          </Button>
-        </div>
+      <aside className="pointer-events-none absolute right-3 top-4 z-20 hidden lg:block" aria-label="Panel dock collapsed">
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className="pointer-events-auto size-10 bg-background/95 shadow-md backdrop-blur"
+          onClick={() => onCollapsedChange(false)}
+          aria-label="Expand panel dock"
+          title="Expand panel dock"
+        >
+          <PanelRightOpen className="size-4" aria-hidden="true" />
+          <span className="sr-only">Panel dock</span>
+          {artifacts.length > 0 ? <span className="absolute -left-1 -top-1 rounded-full bg-primary px-1.5 py-0.5 text-[0.65rem] leading-none text-primary-foreground tabular-nums">{artifacts.length}</span> : null}
+        </Button>
       </aside>
     )
   }
 
   return (
-    <aside className="hidden min-h-0 lg:block" aria-label="Panel dock">
-      <div className="sticky top-20 max-h-[calc(100svh-6rem)] overflow-hidden rounded-md border border-border bg-card shadow-sm">
-        <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <FileText className="size-3.5" aria-hidden="true" />
-              <span>Panel dock</span>
+    <aside className="hidden h-full min-h-0 flex-col border-l border-border bg-card lg:flex" aria-label="Panel dock">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-foreground">Panel dock</h2>
+              <p className="truncate text-[0.7rem] text-muted-foreground">{artifacts.length} pinned</p>
             </div>
-            <h2 className="mt-1 truncate text-sm font-semibold text-foreground">
-              {artifacts.length > 0 ? `${artifacts.length} panel${artifacts.length === 1 ? "" : "s"}` : "No pinned panels"}
-            </h2>
           </div>
           <Button type="button" size="icon-sm" variant="ghost" onClick={() => onCollapsedChange(true)} aria-label="Collapse panel dock">
-            <PanelRightClose className="size-3.5" aria-hidden="true" />
+            <PanelRightClose className="size-4" aria-hidden="true" />
           </Button>
         </div>
 
-        <div className="max-h-[calc(100svh-10rem)] space-y-3 overflow-auto p-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
           {artifacts.length === 0 ? (
             <div className="rounded-md border border-dashed border-border bg-background px-3 py-8 text-center text-sm text-muted-foreground">
               Pin resources, topology, history, or diff artifacts from the chat stream.

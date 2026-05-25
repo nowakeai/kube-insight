@@ -32,6 +32,43 @@ func TestEvidenceArtifactsIncludeHealthAndSQLProofPanels(t *testing.T) {
 	}
 }
 
+func TestSQLEvidenceArtifactsUseSemanticFactTitleAndTable(t *testing.T) {
+	artifacts := evidenceArtifactsFromToolOutput("kube_insight_sql", jsonRaw(map[string]any{
+		"columns":  []any{"kind", "namespace", "name", "fact_key", "fact_value", "rows", "first_seen", "last_seen"},
+		"rowCount": 2,
+		"rows": []any{
+			map[string]any{"kind": "Pod", "namespace": "vm", "name": "vmagent-0", "fact_key": "pod_status.last_reason", "fact_value": "OOMKilled", "rows": 12, "first_seen": "2026-05-24T00:00:00Z", "last_seen": "2026-05-25T00:00:00Z"},
+			map[string]any{"kind": "Pod", "namespace": "default", "name": "api-0", "fact_key": "pod_status.reason", "fact_value": "OOMKilled", "rows": 1, "first_seen": "2026-05-24T01:00:00Z", "last_seen": "2026-05-24T01:00:00Z"},
+		},
+	}))
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %#v", artifacts)
+	}
+	if artifacts[0].Title != "OOMKilled facts by Pod (2 rows)" || artifacts[0].CitationText != artifacts[0].Title {
+		t.Fatalf("artifact title/citation = %#v", artifacts[0])
+	}
+	data := string(artifacts[0].Data)
+	for _, want := range []string{"| kind | namespace | name | fact_key | fact_value | rows | first_seen | last_seen |", "vmagent-0", "OOMKilled"} {
+		if !strings.Contains(data, want) {
+			t.Fatalf("artifact data missing %q: %s", want, data)
+		}
+	}
+}
+
+func TestSQLEvidenceArtifactsInferOOMTitleFromAggregateColumn(t *testing.T) {
+	artifacts := evidenceArtifactsFromToolOutput("kube_insight_sql", jsonRaw(map[string]any{
+		"columns":  []any{"kind", "namespace", "name", "oom_count"},
+		"rowCount": 1,
+		"rows":     []any{map[string]any{"kind": "Pod", "namespace": "vm", "name": "vmagent-0", "oom_count": 244}},
+	}))
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %#v", artifacts)
+	}
+	if artifacts[0].Title != "OOMKilled facts by Pod (1 rows)" {
+		t.Fatalf("artifact title = %q", artifacts[0].Title)
+	}
+}
+
 func TestTopologyEvidenceArtifactsAcceptSrcDstEdges(t *testing.T) {
 	artifact := evidenceArtifactsFromToolOutput("kube_insight_topology", jsonRaw(map[string]any{
 		"root": liveTestObject("Service", "default", "api"),
@@ -47,6 +84,31 @@ func TestTopologyEvidenceArtifactsAcceptSrcDstEdges(t *testing.T) {
 	data := string(artifact[0].Data)
 	if !strings.Contains(data, "service_selects_endpointslice") || !strings.Contains(data, "EndpointSlice") {
 		t.Fatalf("topology artifact data = %s", data)
+	}
+}
+
+func TestSearchEvidenceArtifactsIncludeNestedMatchReasons(t *testing.T) {
+	artifacts := evidenceArtifactsFromToolOutput("kube_insight_search", jsonRaw(map[string]any{
+		"matches": []any{map[string]any{
+			"object": map[string]any{"clusterId": "c1", "kind": "Pod", "namespace": "default", "name": "api-0"},
+			"score":  0.92,
+			"reasons": []any{
+				"fact:pod_status.last_reason=OOMKilled",
+				"fact:pod_status.restart_count=3",
+			},
+		}},
+	}))
+	if len(artifacts) != 1 || artifacts[0].Kind != ArtifactKindK8sResourceList {
+		t.Fatalf("artifacts = %#v", artifacts)
+	}
+	if artifacts[0].Title != "OOMKilled Pod candidates (1 resources)" {
+		t.Fatalf("artifact title = %q", artifacts[0].Title)
+	}
+	data := string(artifacts[0].Data)
+	for _, want := range []string{"api-0", "OOMKilled", "pod_status.last_reason"} {
+		if !strings.Contains(data, want) {
+			t.Fatalf("artifact data missing %q: %s", want, data)
+		}
 	}
 }
 

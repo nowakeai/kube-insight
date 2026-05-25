@@ -201,6 +201,16 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
     create candidate proof panels, and `citation.created` is emitted only after
     the final answer mentions stable evidence that the server verifies in the
     run's artifact registry.
+  - [x] Remove legacy evidence stream chips. The final answer now carries
+    inline evidence citation chips. The LLM supplies short labels through
+    temporary `{{evidence: ...}}` markers, the server removes unverified labels
+    and binds verified labels to `citation.created`, and the evidence list
+    renders semantic summaries plus expandable table/markdown/JSON views for
+    the verified supporting artifacts.
+  - [x] Keep the work group expanded until a run completes. Only `answer.final`
+    is treated as the final answer; earlier assistant text stays in the work
+    group as visible progress notes. Private chain-of-thought/reasoning tokens
+    are not surfaced as UI content.
 - [ ] Add preflight and postflight hooks at the MCP/API tool layer for
   permission checks, SQL validation, output redaction, timeout control, output
   budgets, and audit records.
@@ -348,11 +358,12 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add retry semantics for terminal runs.
   - `POST /api/v1/agent/runs/{run_id}/retry` creates a new run in the same
     session for completed, failed, or cancelled runs, preserves the original
-    run history, copies input/provider/model, and records `retryOfRunId` in the
-    new run metadata. Queued/running runs still require stop before retry. The
-    Web UI uses `retryOfRunId` as branch metadata: retry replaces the original
-    run and hides later runs in that visible branch instead of appending as a
-    new conversational turn.
+    run history, copies input/provider/model, records `retryOfRunId`, and accepts
+    fresh client metadata so relative-time prompts such as "recent" and
+    "today" do not reuse stale browser time from the original run. Queued/running
+    runs still require stop before retry. The Web UI uses `retryOfRunId` as
+    branch metadata: retry replaces the original run and hides later runs in
+    that visible branch instead of appending as a new conversational turn.
 - [x] Add structured audit records for agent tool calls.
   - Eino tool completions now emit `tool.audit` events with run id, tool call
     id, name, input, output summary, output artifact id, status, and duration
@@ -362,6 +373,53 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add user-facing errors for missing provider keys and unsupported providers.
   - Chat runs now surface `error`/`run.failed` messages in the ordered stream,
     and retry uses the server retry endpoint instead of resubmitting as a new prompt.
+
+
+## Agent Query Efficiency
+
+- [x] Time-scoped relative prompts.
+  - Browser client context now gives the runner a concrete local/UTC time base;
+    retry sends fresh metadata so "recent" and "today" are recalculated per run.
+  - Agent instructions now require absolute `from`/`to` bounds for relative-time
+    tool calls and SQL predicates instead of leaving broad scans unbounded.
+- [x] General indexed-first investigation guidance.
+  - Prompt and ClickHouse/SQLite schema notes steer models toward exact
+    facts/changes/edges with cluster, kind, namespace, name, and timestamp
+    predicates before raw JSON, blob, `doc`, `detail`, `ILIKE`, `LIKE`, or
+    `positionCaseInsensitive` scans.
+  - ClickHouse schema recipes include reusable fast paths for collector
+    coverage, recent fact rollups, recent change rollups, and post-candidate
+    proof queries. These are generic patterns, not Pod-only or OOM-only rules.
+- [ ] Add an automated agent efficiency eval suite.
+  - Suggested pass criteria for broad symptom prompts: <=5 tool calls, <=1
+    zero-result broad search, every "recent" query carries a time bound, and no
+    proof-document scan unless indexed facts/changes/edges were insufficient.
+
+
+## Agent Retention And Compaction
+
+- [x] Add an agent retention job for hidden retry branches and unused artifacts.
+  - Successful runs trigger a default retention pass. Failed or cancelled runs do
+    not trigger automatic artifact cleanup, preserving debugging context.
+  - The API server runs the default retention job periodically when
+    `server.agentRetention.enabled` is true. The default config runs on startup
+    and every 600 seconds.
+  - `POST /api/v1/agent/retention/compact` runs the same job manually. Request
+    body fields are optional: `pruneSupersededRuns`,
+    `pruneUnreferencedArtifacts`, and `dryRun`.
+  - Retry branch compaction follows the Web UI projection semantics: when a
+    completed retry replaces an earlier root run, terminal runs hidden by that
+    branch replacement are pruned from `agent_runs` and `agent_run_events`.
+  - Artifact compaction removes terminal-run `artifact.created` /
+    `artifact.updated` events that are not referenced by any `citation.created`
+    event in the same retained run. In-progress runs are skipped because
+    citations may arrive after artifacts. Referenced evidence artifacts remain
+    available for final-answer citations; compact `tool.completed` and
+    `tool.audit` summaries remain even when full tool output artifacts are
+    removed.
+  - SQLite deletes rows in a transaction. ClickHouse emits `ALTER TABLE ...
+    DELETE` mutations, so physical cleanup is asynchronous and should not be run
+    in a tight loop.
 
 ## Validation
 
@@ -376,6 +434,6 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Browser-test desktop and mobile viewports with Playwright or Chrome DevTools.
 - [x] Verify the embedded binary serves the built React app.
 - [x] Verify dashboard health calls work with and without metrics enabled.
-  - Vite dev server can proxy `/api`, `/healthz`, and `/metrics` to configured
-    local service targets; verified collector coverage and metrics through the
-    5173 dev origin and allowed authproxy host.
+  - Compose Web UI service runs Vite on 5173 and proxies `/api`, `/healthz`,
+    and `/metrics` to the compose watcher/API service; verified collector
+    coverage and metrics through the 5173 dev origin and allowed authproxy host.

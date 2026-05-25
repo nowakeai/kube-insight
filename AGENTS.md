@@ -42,16 +42,31 @@ operational notes, and design details in `docs/`.
   constraint, validation prerequisite, or recurring pitfall, update this file
   or the appropriate `docs/` page in the same change. Do not leave durable
   process knowledge only in chat history or local scratch notes.
-- For Web UI or frontend development, use the Docker compose dev backend
+- For Web UI or frontend development, use the Docker compose dev environment
   (`make dev-compose-up-detached`) instead of starting another host
-  `kube-insight serve` process. Start a separate host `serve` only for pure
-  backend tests or isolated smoke scripts, and stop it when the test is done.
+  `kube-insight serve` process or a host Vite dev server. Compose owns the
+  ClickHouse, watcher/API, metrics, and Web UI services; use the compose Web UI
+  for Vite reloads and rebuild/recreate compose services after backend changes.
+  Start a separate host `serve` only for pure backend tests or isolated smoke
+  scripts, and stop it when the test is done.
 - Prefer configuration, rule tables, and data-driven registries over hardcoded
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.
+- Agent investigation efficiency is a product constraint. For broad symptom,
+  health, topology, or recent-change prompts, prefer time-scoped exact facts,
+  changes, and edges before raw JSON/document scans; pass absolute time bounds
+  from client context for relative-time prompts; avoid repeated broad searches
+  without kind/namespace/cluster/time filters.
 - Keep compression, delta logic, and retention policy above storage backends so
   SQLite/chDB/ClickHouse and any SQL compatibility backends can share the same
   product semantics.
+- Agent retention is server-owned and should run periodically from the API
+  server. Do not prune unreferenced artifact events from in-progress runs;
+  citations can arrive after artifacts during a live agent loop.
+- The built-in agent's private MCP client/server session must not idle-timeout
+  under normal API server operation. The external `/mcp` HTTP surface may keep a
+  bounded session timeout, but the in-process agent should not hold a stale MCP
+  client that later fails tool calls after the LLM response succeeds.
 
 ## Dependency Preferences
 

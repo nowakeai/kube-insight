@@ -144,7 +144,7 @@ ClickHouse agent metadata tables:
 | --- | --- |
 | `agent_sessions` | Conversation metadata: title, provider/model, created time, updated time. |
 | `agent_runs` | One row version per run state change using `ReplacingMergeTree(updated_at)`. |
-| `agent_run_events` | Append-only replay stream for messages, tool calls, artifacts, citations, status, errors, and final answers. |
+| `agent_run_events` | Replay stream for messages, tool calls, artifacts, citations, status, errors, and final answers. Agent retention may prune superseded retry-branch events and unreferenced transient artifact events after a successful replacement run. |
 
 The API server must not depend on local filesystem state when
 `storage.driver=clickhouse`. If multiple API pods run later, active run ownership,
@@ -221,12 +221,21 @@ Tool design rules:
   version, fact, change, edge, SQL row, or artifact ID.
 - Evidence references must not depend on the LLM remembering to cite its own
   claims. The server-side runner projects structured MCP tool outputs into
-  `artifact.created` and `citation.created` events deterministically. The model
-  may mention evidence in natural language, but the UI evidence chips come from
-  tool outputs and stored artifact IDs.
+  `artifact.created` candidate artifacts, verifies which artifacts are actually
+  used by the final answer, then emits `citation.created` events for those
+  artifacts. The LLM may provide a short human-readable label with temporary
+  `{{evidence: ...}}` markers near a supported claim; the server only preserves
+  that label when it can bind the claim to a verified artifact. The rendered
+  answer uses inline evidence chips such as `OOM pod history` near the supported
+  claim, and the evidence list provides expandable semantic summaries instead
+  of disconnected stream chips.
 - Tool-call raw output is an audit trail, not a user-facing proof panel. The
   panel dock should only pin visual investigation artifacts such as Kubernetes
   resource lists, individual resources, topology, history, and diffs.
+- The work group should stay expanded while the run is still investigating or
+  has not produced a completed final answer. Assistant text before
+  `answer.final` is a visible progress note; private chain-of-thought or
+  provider reasoning tokens are not displayed or relied on.
 - Each client-created run should include browser client context such as send
   time, local time, time zone, UTC offset, locale, and page URL. The server
   injects this as orientation for interpreting relative time phrases; it is not
@@ -545,7 +554,7 @@ The initial replayable event contract uses these event names:
 | `tool.audit` | Normalized tool audit record with input, output summary, output artifact id, status, and duration. |
 | `artifact.created` | Typed artifact was created. |
 | `artifact.updated` | Existing artifact changed, such as history travel state. |
-| `citation.created` | Citation target was created. |
+| `citation.created` | Verified citation target for a final-answer evidence marker was created. |
 | `error` | Non-tool runtime or provider error. |
 
 Payload shapes live in the `internal/agent` package so API handlers, the Eino

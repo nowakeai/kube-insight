@@ -26,6 +26,10 @@ export type CreateAgentRunRequest = {
   metadata?: unknown
 }
 
+export type RetryAgentRunRequest = {
+  metadata?: unknown
+}
+
 export type AgentAPIOptions = {
   baseURL?: string
   signal?: AbortSignal
@@ -106,13 +110,13 @@ export function cancelAgentRun(runId: string, options?: AgentAPIOptions) {
   )
 }
 
-export function retryAgentRun(runId: string, options?: AgentAPIOptions) {
+export function retryAgentRun(runId: string, input: RetryAgentRunRequest = {}, options?: AgentAPIOptions) {
   return agentRequestJSON<AgentRunDTO>(
     `/api/v1/agent/runs/${encodeURIComponent(runId)}/retry`,
     {
       ...options,
       method: "POST",
-      body: {},
+      body: input,
     },
     parseAgentRun,
   )

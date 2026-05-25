@@ -402,7 +402,7 @@ type RunServerPromptOptions = {
 
 async function runServerPrompt(prompt: string, options: RunServerPromptOptions) {
   const run = options.retryRunId
-    ? await retryAgentRun(options.retryRunId)
+    ? await retryAgentRun(options.retryRunId, { metadata: agentRunClientMetadata() })
     : await createRunInServerSession(prompt, options)
   options.upsertServerRun(run)
   options.activeServerRunRef.current = run.id

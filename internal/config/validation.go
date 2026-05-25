@@ -87,6 +87,9 @@ func (c Config) Validate() error {
 			return errors.New("server.chat.apiKeyEnv is required when chat is enabled")
 		}
 	}
+	if c.Server.AgentRetention.Enabled && c.Server.AgentRetention.IntervalSeconds <= 0 {
+		return errors.New("server.agentRetention.intervalSeconds must be positive when agent retention is enabled")
+	}
 	return nil
 }
 

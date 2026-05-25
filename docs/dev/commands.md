@@ -62,24 +62,103 @@ Run local service surfaces for backend-only tests or isolated smoke runs:
 ```
 
 For Web UI or frontend development, do not start a separate host
-`kube-insight serve` process. Use the Docker compose dev backend, then run the
-React Web UI dev server against that API:
+`kube-insight serve` process, and do not run Vite directly on the host. Use the
+Docker compose dev environment; it runs ClickHouse, the watcher/API, and the
+Vite Web UI service together:
 
 ```bash
 make dev-compose-up-detached
 make dev-compose-ps
-npm --prefix web run dev
 ```
 
-Stop one-off host `serve` processes after backend tests finish. Stop the compose
-backend with `make dev-compose-down` when the shared dev environment should be
-shut down.
+The Web UI is served on `http://127.0.0.1:5173` and proxies API requests to the
+compose `watcher` service. Stop one-off host `serve` processes after backend
+tests finish. Stop the compose environment with `make dev-compose-down` when the
+shared dev environment should be shut down.
+
+### Full Docker Compose Dev Loop
+
+Use this loop for normal Web UI, agent UI, and live-cluster development:
+
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+make dev-compose-logs
+```
+
+The compose stack owns these local surfaces:
+
+- `web`: Vite dev server on `http://127.0.0.1:5173`.
+- `watcher`: kube-insight watcher/API on `http://127.0.0.1:8080` and metrics on
+  `http://127.0.0.1:9090`.
+- `clickhouse`: local ClickHouse HTTP endpoint on `http://127.0.0.1:8123`.
+
+Frontend source files are bind-mounted from `./web` into the `web` container.
+Vite hot module reload is enabled there, and `CHOKIDAR_USEPOLLING=true` is the
+compose default so file changes are detected reliably from remote workspaces and
+Docker-backed filesystems. After editing React, CSS, Vite config, or other
+frontend source files, keep the browser on `http://127.0.0.1:5173`; the page
+should reload without restarting any host process.
+
+If frontend dependencies change, rebuild the compose Web UI service so the
+container-managed `node_modules` volume matches `web/package-lock.json`:
+
+```bash
+make dev-compose-rebuild-web
+```
+
+If dependency state is still stale after a package-lock change, remove only the
+compose `web-node-modules` volume and start again. The default volume name is
+`kube-insight_web-node-modules`; replace the project prefix if Docker Compose is
+using a different project name. Do not remove the ClickHouse volume unless you
+intentionally want to discard the local evidence database:
+
+```bash
+make dev-compose-down
+docker volume rm kube-insight_web-node-modules
+make dev-compose-up-detached
+```
+
+Backend Go code and config are baked into the `watcher` image. After backend
+changes, use the safe default target so Docker rebuilds images and recreates
+services that need updating:
+
+```bash
+make dev-compose-up-detached
+```
+
+For a targeted backend rebuild while leaving ClickHouse data intact:
+
+```bash
+make dev-compose-rebuild-watcher
+```
+
+Use service-scoped logs while iterating:
+
+```bash
+make dev-compose-logs-web
+make dev-compose-logs-watcher
+make dev-compose-logs-clickhouse
+```
+
+Quick health checks:
+
+```bash
+curl -fsS http://127.0.0.1:5173/healthz
+curl -fsS 'http://127.0.0.1:5173/api/v1/agent/sessions?limit=1'
+curl -fsS http://127.0.0.1:8080/healthz
+```
+
+Use host `./bin/kube-insight serve` only for backend-only tests or isolated
+smoke runs. When you do that, stop the host process before returning to Web UI
+development so port 8080 and API behavior are not split across multiple
+backends.
 
 When the dev server is exposed through a remote workspace domain, configure Vite
 host checking in the gitignored root `.env` file:
 
 ```dotenv
-KUBE_INSIGHT_WEB_ALLOWED_HOSTS=5173--main--rj--renjie.coder.autonome.fun
+KUBE_INSIGHT_WEB_ALLOWED_HOSTS=<MY HOSTNAME>
 ```
 
 Use a comma or whitespace separated list for multiple hosts. `VITE_ALLOWED_HOSTS`
@@ -122,8 +201,8 @@ tables without dropping them. `make clickhouse-clean-system-logs` flushes and
 truncates local ClickHouse `system.*_log` diagnostic tables without touching the
 `kube_insight` database. Use `make clickhouse-serve-dev` to run the local
 ClickHouse watcher/API/metrics loop. Use `make dev-compose-up-detached` to run
-both ClickHouse and the watcher in containers, and `make dev-compose-ps` to
-inspect their status. See [ClickHouse Local Workflow](clickhouse-local-workflow.md) for
+ClickHouse, the watcher/API, and the Vite Web UI in containers, and
+`make dev-compose-ps` to inspect their status. See [ClickHouse Local Workflow](clickhouse-local-workflow.md) for
 the full profile loop.
 
 `make clickhouse-smoke` starts a separate temporary container on `127.0.0.1:18123`
@@ -369,6 +448,36 @@ footprint gauges such as `kube_insight_storage_compression_ratio`,
 `kube_insight_storage_compressed_bytes_per_row`, active/inactive
 `kube_insight_storage_bytes` labels, and `kube_insight_storage_parts` labels for
 ClickHouse database part state.
+
+
+### Agent Retention Compaction
+
+Run a dry-run from the compose/dev API before deleting hidden retry branches or
+unreferenced transient artifacts:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact \
+  -H "content-type: application/json" \
+  -d "{\"dryRun\":true}"
+```
+
+Apply the default compaction:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact -d "{}"
+```
+
+The API server also runs this retention job periodically when
+`server.agentRetention.enabled` is true. The default interval is 600 seconds and
+`runOnStart` is enabled in `config/kube-insight.example.yaml`; change
+`server.agentRetention.intervalSeconds` for faster or slower cleanup in a local
+dev config.
+
+The default job prunes completed retry branches that are no longer visible in the
+chat projection and removes terminal-run artifact events that are not referenced
+by final citations. It intentionally skips in-progress runs because citations can
+arrive after artifacts. ClickHouse cleanup is mutation-based and completes
+asynchronously.
 
 More user-facing examples live in `docs/quickstart.md` and
 `docs/configuration/configuration.md`.

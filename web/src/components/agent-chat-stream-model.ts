@@ -2,10 +2,9 @@ import type { AgentRun, AgentRunEvent } from "@/lib/agent-store"
 
 export type ConversationSegment =
   | { type: "user"; id: string; content: string }
-  | { type: "assistant"; id: string; messageId: string; content: string; running?: boolean }
+  | { type: "assistant"; id: string; messageId: string; content: string; final?: boolean; running?: boolean }
   | ToolSegment
   | ToolGroupSegment
-  | EvidenceSegment
   | { type: "error"; id: string; content: string }
 
 export type UserSegment = Extract<ConversationSegment, { type: "user" }>
@@ -22,27 +21,21 @@ export function splitRunResponse(segments: ConversationSegment[], isRunning: boo
   const responseSegments = segments.filter((segment): segment is ResponseSegment => segment.type !== "user")
   if (responseSegments.length === 0) return { finalSegments: [], userSegments, workSegments: [] }
 
-  const finalAssistantIndex = lastIndexOf(responseSegments, (segment) => segment.type === "assistant" && Boolean(segment.content.trim()))
-  if (finalAssistantIndex < 0) return { finalSegments: [], userSegments, workSegments: responseSegments }
-
   if (isRunning || !isTerminalStreamStatus(status)) {
-    const finalCandidate = responseSegments[finalAssistantIndex]
-    if (finalCandidate.type === "assistant" && finalAssistantIndex === responseSegments.length - 1) {
-      return {
-        finalSegments: [{ ...finalCandidate, running: true }],
-        userSegments,
-        workSegments: responseSegments.slice(0, finalAssistantIndex),
-      }
-    }
     return { finalSegments: [], userSegments, workSegments: responseSegments }
   }
 
-  if (finalAssistantIndex === 0) return { finalSegments: responseSegments, userSegments, workSegments: [] }
+  const finalAssistantIndex = lastIndexOf(responseSegments, (segment) => segment.type === "assistant" && Boolean(segment.final) && Boolean(segment.content.trim()))
+  const fallbackAssistantIndex = lastIndexOf(responseSegments, (segment) => segment.type === "assistant" && Boolean(segment.content.trim()))
+  const answerIndex = finalAssistantIndex >= 0 ? finalAssistantIndex : fallbackAssistantIndex
+  if (answerIndex < 0) return { finalSegments: [], userSegments, workSegments: responseSegments }
+
+  if (answerIndex === 0) return { finalSegments: responseSegments, userSegments, workSegments: [] }
 
   return {
-    finalSegments: responseSegments.slice(finalAssistantIndex),
+    finalSegments: responseSegments.slice(answerIndex),
     userSegments,
-    workSegments: responseSegments.slice(0, finalAssistantIndex),
+    workSegments: responseSegments.slice(0, answerIndex),
   }
 }
 
@@ -159,7 +152,6 @@ export function conversationSegments(run: AgentRun | undefined, events: AgentRun
   let hasAssistantText = false
 
   for (const event of events) {
-    if (event.type === "answer.final" && hasAssistantText) continue
     if (event.type === "message.created" || event.type === "message.delta" || event.type === "message.completed" || event.type === "answer.final") {
       const data = eventDataRecord(event.data)
       if (data.role !== "assistant") continue
@@ -167,6 +159,17 @@ export function conversationSegments(run: AgentRun | undefined, events: AgentRun
       const content = typeof data.content === "string" ? data.content : ""
       if (!delta && !content) continue
       const messageId = typeof data.messageId === "string" ? data.messageId : event.id
+      if (event.type === "answer.final" && content) {
+        const assistantIndex = lastIndexOf(segments, (segment) => segment.type === "assistant")
+        if (assistantIndex >= 0) {
+          const previous = segments[assistantIndex]
+          if (previous.type === "assistant") segments[assistantIndex] = { ...previous, content, final: true, messageId }
+        } else {
+          segments.push({ type: "assistant", id: `assistant_${event.id}`, final: true, messageId, content })
+        }
+        hasAssistantText = true
+        continue
+      }
       const previous = segments.at(-1)
       if (previous?.type === "assistant" && previous.messageId === messageId) {
         previous.content = content || `${previous.content}${delta}`
@@ -211,14 +214,6 @@ export function conversationSegments(run: AgentRun | undefined, events: AgentRun
       } else {
         const previous = segments[index]
         if (previous.type === "tool") segments[index] = { ...previous, ...next, input: next.input ?? previous.input, durationMs: next.durationMs ?? previous.durationMs }
-      }
-      continue
-    }
-
-    if (event.type === "citation.created") {
-      const citation = citationData(event.data)
-      if (citation) {
-        segments.push({ type: "evidence", id: `evidence_${event.id}`, artifactId: citation.artifactId, text: citation.text, target: citation.target })
       }
       continue
     }

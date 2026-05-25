@@ -214,15 +214,16 @@ func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 		Model     string          `json:"model"`
 		Metadata  json.RawMessage `json:"metadata"`
 	}
-	postJSON(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/retry", `{}`, http.StatusCreated, &retried)
+	postJSON(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/retry", `{"metadata":{"clientContext":{"sentAt":"2026-05-25T02:10:00.000Z","timeZone":"Asia/Shanghai"}}}`, http.StatusCreated, &retried)
 	if retried.ID == "" || retried.ID == run.ID || retried.SessionID != session.ID || retried.Status != "queued" || retried.Input != "retry this" || retried.Provider != "openai-compatible" || retried.Model != "mimo-v2.5-pro" {
 		t.Fatalf("retried run = %#v", retried)
 	}
-	var metadata map[string]string
+	var metadata map[string]any
 	if err := json.Unmarshal(retried.Metadata, &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if metadata["retryOfRunId"] != run.ID || metadata["source"] != "test" {
+	clientContext, _ := metadata["clientContext"].(map[string]any)
+	if metadata["retryOfRunId"] != run.ID || metadata["source"] != "test" || clientContext["sentAt"] != "2026-05-25T02:10:00.000Z" {
 		t.Fatalf("retry metadata = %#v", metadata)
 	}
 
@@ -244,12 +245,115 @@ func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 	if retriedCompleted.ID == "" || retriedCompleted.ID == retried.ID || retriedCompleted.SessionID != session.ID || retriedCompleted.Status != "queued" || retriedCompleted.Input != "retry this" {
 		t.Fatalf("retried completed run = %#v", retriedCompleted)
 	}
-	metadata = map[string]string{}
+	metadata = map[string]any{}
 	if err := json.Unmarshal(retriedCompleted.Metadata, &metadata); err != nil {
 		t.Fatal(err)
 	}
 	if metadata["retryOfRunId"] != retried.ID || metadata["source"] != "test" {
 		t.Fatalf("retry completed metadata = %#v", metadata)
+	}
+}
+
+func TestCompactAgentRetentionEndpointPrunesRetryBranchAndArtifacts(t *testing.T) {
+	store := agent.NewMemoryStore()
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentStore: store,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run1, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run1.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	run2, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "retry", Metadata: json.RawMessage(`{"retryOfRunId":"` + run1.ID + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run2.ID, agent.AppendEventInput{Type: agent.EventArtifact, Data: mustJSON(agent.ArtifactEventData{Artifact: agent.Artifact{ID: "artifact_drop", Kind: agent.ArtifactKindMarkdown}})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run2.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	var report agent.RetentionReport
+	postJSON(t, server.URL+"/api/v1/agent/retention/compact", `{}`, http.StatusOK, &report)
+	if report.SupersededRunsDeleted != 1 || report.UnreferencedArtifactEventsDeleted != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	if _, err := store.GetRun(ctx, run1.ID); err != agent.ErrRunNotFound {
+		t.Fatalf("run1 err = %v", err)
+	}
+	events, err := store.ListRunEvents(ctx, run2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("run2 events after compaction = %#v", events)
+	}
+}
+
+func TestAgentRetentionRunsPeriodically(t *testing.T) {
+	store := agent.NewMemoryStore()
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentStore:               store,
+		AgentRetentionInterval:   10 * time.Millisecond,
+		AgentRetentionRunOnStart: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close()
+
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "periodic retention"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{Type: agent.EventArtifact, Data: mustJSON(agent.ArtifactEventData{Artifact: agent.Artifact{ID: "artifact_drop", Kind: agent.ArtifactKindMarkdown}})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		events, err := store.ListRunEvents(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) == 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("retention did not prune unreferenced artifact events: %#v", events)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -299,6 +403,69 @@ func TestCancelAgentRunCancelsRunnerContext(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestServerCloseWaitsForInFlightAgentRunBeforeCloseFunc(t *testing.T) {
+	runner := newCloseWaitAgentRunner()
+	closeCalled := make(chan struct{})
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+		Close: func() error {
+			close(closeCalled)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var run struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"long running check"}`, http.StatusCreated, &run)
+	select {
+	case <-runner.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not start")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- handler.Close() }()
+	select {
+	case <-runner.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner context was not cancelled")
+	}
+	select {
+	case <-closeCalled:
+		t.Fatal("server close func ran before agent runner returned")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(runner.release)
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("server close did not finish")
+	}
+	select {
+	case <-closeCalled:
+	default:
+		t.Fatal("server close func was not called")
 	}
 }
 
@@ -593,4 +760,23 @@ func (r *retryingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput)
 		return agent.EinoRunResult{}, err
 	}
 	return agent.EinoRunResult{FinalAnswer: "retried successfully", Events: 1}, nil
+}
+
+type closeWaitAgentRunner struct {
+	started   chan struct{}
+	cancelled chan struct{}
+	release   chan struct{}
+	once      sync.Once
+}
+
+func newCloseWaitAgentRunner() *closeWaitAgentRunner {
+	return &closeWaitAgentRunner{started: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (r *closeWaitAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	r.once.Do(func() { close(r.started) })
+	<-ctx.Done()
+	close(r.cancelled)
+	<-r.release
+	return agent.EinoRunResult{}, ctx.Err()
 }

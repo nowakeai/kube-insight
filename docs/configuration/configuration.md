@@ -232,6 +232,25 @@ same shape later. `baseUrlEnv` is optional for OpenAI-compatible endpoints and
 points to the environment variable containing the API base URL; the URL value is
 not exposed by server info responses.
 
+Agent session retention is also server-side. The API server periodically removes
+completed retry branches that the chat projection can no longer reach and
+terminal-run artifact events that the final answer did not cite. Keep this
+enabled for Web UI development so retries and LLM-selected evidence do not leave
+unbounded transient rows behind:
+
+```yaml
+server:
+  agentRetention:
+    enabled: true
+    intervalSeconds: 600
+    runOnStart: true
+```
+
+The same compaction can be run manually with
+`POST /api/v1/agent/retention/compact`; the periodic job uses the default
+non-dry-run options. In-progress runs are not artifact-compacted because
+citations may be emitted after artifacts.
+
 ## Supported Running Modes
 
 Kube-insight supports these operational shapes:

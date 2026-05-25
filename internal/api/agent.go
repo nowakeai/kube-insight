@@ -27,6 +27,43 @@ type createAgentRunRequest struct {
 	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
+type compactAgentRetentionRequest struct {
+	PruneSupersededRuns        *bool `json:"pruneSupersededRuns,omitempty"`
+	PruneUnreferencedArtifacts *bool `json:"pruneUnreferencedArtifacts,omitempty"`
+	DryRun                     bool  `json:"dryRun,omitempty"`
+}
+
+type retryAgentRunRequest struct {
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
+func (s *Server) handleCompactAgentRetention(w http.ResponseWriter, r *http.Request) {
+	var input compactAgentRetentionRequest
+	if err := decodeOptionalJSON(r.Body, &input); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json body: %w", err))
+		return
+	}
+	retentionStore, ok := s.agentStore.(agent.RetentionStore)
+	if !ok {
+		writeUnsupported(w, "agent retention")
+		return
+	}
+	opts := agent.DefaultRetentionOptions()
+	if input.PruneSupersededRuns != nil {
+		opts.PruneSupersededRuns = *input.PruneSupersededRuns
+	}
+	if input.PruneUnreferencedArtifacts != nil {
+		opts.PruneUnreferencedArtifacts = *input.PruneUnreferencedArtifacts
+	}
+	opts.DryRun = input.DryRun
+	report, err := retentionStore.ApplyAgentRetention(r.Context(), opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
 func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request) {
 	var input createAgentSessionRequest
 	if err := decodeOptionalJSON(r.Body, &input); err != nil {
@@ -113,6 +150,11 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
+	var input retryAgentRunRequest
+	if err := decodeOptionalJSON(r.Body, &input); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json body: %w", err))
+		return
+	}
 	original, err := s.agentStore.GetRun(r.Context(), r.PathValue("run_id"))
 	if err != nil {
 		writeAgentStoreError(w, err)
@@ -126,7 +168,7 @@ func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
 		Input:    original.Input,
 		Provider: original.Provider,
 		Model:    original.Model,
-		Metadata: retryAgentRunMetadata(original),
+		Metadata: retryAgentRunMetadata(original, input.Metadata),
 	})
 	if err != nil {
 		writeAgentStoreError(w, err)
@@ -152,16 +194,25 @@ func (s *Server) recordRunCreated(ctx context.Context, run agent.Run) error {
 	return err
 }
 
-func retryAgentRunMetadata(original agent.Run) json.RawMessage {
+func retryAgentRunMetadata(original agent.Run, override json.RawMessage) json.RawMessage {
 	metadata := map[string]any{}
-	if len(original.Metadata) > 0 && json.Valid(original.Metadata) {
-		var existing map[string]any
-		if err := json.Unmarshal(original.Metadata, &existing); err == nil && existing != nil {
-			metadata = existing
-		}
-	}
+	mergeRawObject(metadata, original.Metadata)
+	mergeRawObject(metadata, override)
 	metadata["retryOfRunId"] = original.ID
 	return mustJSON(metadata)
+}
+
+func mergeRawObject(target map[string]any, raw json.RawMessage) {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return
+	}
+	var value map[string]any
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return
+	}
+	for key, item := range value {
+		target[key] = item
+	}
 }
 
 func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +322,9 @@ func (s *Server) startAgentRun(run agent.Run) {
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
 	s.registerAgentRunCancel(run.ID, cancel)
+	s.agentRunWG.Add(1)
 	go func() {
+		defer s.agentRunWG.Done()
 		defer s.unregisterAgentRunCancel(run.ID)
 		_, err := s.agentRunner.Run(runCtx, agent.EinoRunInput{
 			Messages: agentMessagesForRun(run),
@@ -280,8 +333,59 @@ func (s *Server) startAgentRun(run agent.Run) {
 		})
 		if err != nil {
 			s.recordAgentRunFailure(context.Background(), run.ID, err)
+			return
+		}
+		s.runAgentRetentionJob(context.Background())
+	}()
+}
+
+func (s *Server) startAgentRetentionLoop(interval time.Duration, runOnStart bool) {
+	if interval <= 0 {
+		return
+	}
+	if _, ok := s.agentStore.(agent.RetentionStore); !ok {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.agentRetentionCancel = cancel
+	s.agentRetentionDone = done
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		if runOnStart {
+			s.runAgentRetentionJob(ctx)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.runAgentRetentionJob(ctx)
+			}
 		}
 	}()
+}
+
+func (s *Server) stopAgentRetentionLoop() {
+	if s.agentRetentionCancel == nil {
+		return
+	}
+	s.agentRetentionCancel()
+	<-s.agentRetentionDone
+	s.agentRetentionCancel = nil
+	s.agentRetentionDone = nil
+}
+
+func (s *Server) runAgentRetentionJob(ctx context.Context) {
+	retentionStore, ok := s.agentStore.(agent.RetentionStore)
+	if !ok {
+		return
+	}
+	s.agentRetentionMu.Lock()
+	defer s.agentRetentionMu.Unlock()
+	_, _ = retentionStore.ApplyAgentRetention(ctx, agent.DefaultRetentionOptions())
 }
 
 func agentMessagesForRun(run agent.Run) []agent.Message {
@@ -416,6 +520,22 @@ func (s *Server) cancelAgentRuns() {
 	s.agentRunMu.Unlock()
 	for _, cancel := range cancels {
 		cancel()
+	}
+}
+
+func (s *Server) waitAgentRuns(timeout time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		s.agentRunWG.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(timeout):
 	}
 }
 

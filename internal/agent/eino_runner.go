@@ -185,6 +185,7 @@ type toolAuditDraft struct {
 
 type toolTiming struct {
 	Name       string
+	Input      json.RawMessage
 	StartedAt  time.Time
 	DurationMS int64
 }
@@ -230,7 +231,7 @@ func (m toolTimingMiddleware) WrapInvokableToolCall(ctx context.Context, endpoin
 		start := time.Now()
 		result, err := endpoint(ctx, argumentsInJSON, opts...)
 		if tCtx != nil {
-			m.timings.put(tCtx.CallID, toolTiming{Name: tCtx.Name, StartedAt: start, DurationMS: toolAuditDurationMS(start)})
+			m.timings.put(tCtx.CallID, toolTiming{Name: tCtx.Name, Input: normalizedToolInput(argumentsInJSON), StartedAt: start, DurationMS: toolAuditDurationMS(start)})
 		}
 		return result, err
 	}, nil
@@ -279,11 +280,18 @@ func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error
 		return nil
 	}
 	if finalAnswer != "" {
-		if err := r.append(ctx, EventFinalAnswer, MessageEventData{MessageID: NewMessageID(), Role: RoleAssistant, Content: finalAnswer}); err != nil {
+		citations, err := r.verifiedAnswerCitations(ctx, finalAnswer)
+		if err != nil {
 			return err
 		}
-		if err := r.appendVerifiedAnswerCitations(ctx, finalAnswer); err != nil {
+		annotatedAnswer := annotateAnswerWithEvidenceReferences(finalAnswer, citations)
+		if err := r.append(ctx, EventFinalAnswer, MessageEventData{MessageID: NewMessageID(), Role: RoleAssistant, Content: annotatedAnswer}); err != nil {
 			return err
+		}
+		for _, citation := range citations {
+			if err := r.append(ctx, EventCitation, CitationEventData{Citation: citation.Citation}); err != nil {
+				return err
+			}
 		}
 	}
 	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunCompleted, "")
@@ -309,6 +317,14 @@ func (r einoRunRecorder) Fail(ctx context.Context, runErr error) error {
 		return err
 	}
 	return r.append(ctx, EventRunFailed, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status, Error: message})
+}
+
+func normalizedToolInput(arguments string) json.RawMessage {
+	input := json.RawMessage(arguments)
+	if json.Valid(input) {
+		return input
+	}
+	return jsonRaw(map[string]string{"arguments": arguments})
 }
 
 func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (einoRecordedMessage, error) {
@@ -337,10 +353,7 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (ein
 		}
 	}
 	for _, call := range msg.ToolCalls {
-		input := json.RawMessage(call.Function.Arguments)
-		if !json.Valid(input) {
-			input = jsonRaw(map[string]string{"arguments": call.Function.Arguments})
-		}
+		input := normalizedToolInput(call.Function.Arguments)
 		r.toolCalls[call.ID] = toolAuditDraft{Name: call.Function.Name, Input: input, StartedAt: time.Now()}
 		if err := r.append(ctx, EventToolStarted, ToolCallEventData{ToolCallID: call.ID, Name: call.Function.Name, Status: "started", Input: input}); err != nil {
 			return recorded, err
@@ -352,6 +365,9 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (ein
 		if timing, ok := r.takeToolTiming(msg.ToolCallID); ok {
 			if draft.Name == "" {
 				draft.Name = timing.Name
+			}
+			if len(draft.Input) == 0 {
+				draft.Input = timing.Input
 			}
 			if draft.StartedAt.IsZero() {
 				draft.StartedAt = timing.StartedAt

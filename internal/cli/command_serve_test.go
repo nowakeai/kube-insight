@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	appconfig "kube-insight/internal/config"
 	"kube-insight/internal/storage/clickhouse"
@@ -116,5 +117,8 @@ func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	}
 	if _, ok := opts.AgentStore.(*clickhouse.Store); !ok {
 		t.Fatalf("clickhouse agent store = %T", opts.AgentStore)
+	}
+	if opts.AgentRetentionInterval != time.Duration(cfg.Server.AgentRetention.IntervalSeconds)*time.Second || !opts.AgentRetentionRunOnStart {
+		t.Fatalf("agent retention options = interval %s runOnStart %v", opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
 	}
 }

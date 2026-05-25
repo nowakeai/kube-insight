@@ -521,6 +521,10 @@ func apiServerOptions(cfg appconfig.Config, dbPath string, selections ...serveSe
 		selection = selections[0]
 	}
 	opts := api.ServerOptions{DBPath: dbPath, ServerInfo: apiServerInfo(cfg, dbPath, selection)}
+	if cfg.Server.AgentRetention.Enabled {
+		opts.AgentRetentionInterval = time.Duration(cfg.Server.AgentRetention.IntervalSeconds) * time.Second
+		opts.AgentRetentionRunOnStart = cfg.Server.AgentRetention.RunOnStart
+	}
 	switch storageDriver(cfg) {
 	case "clickhouse":
 		opts.DBPath = ""

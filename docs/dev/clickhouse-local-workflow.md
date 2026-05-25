@@ -38,7 +38,7 @@ make clickhouse-down
 
 For a containerized local dev loop, use the compose file instead of running the
 watcher on the host. This is also the default backend for Web UI/frontend
-development, so the Vite dev server should proxy to the compose watcher/API
+development, so the compose Web UI service proxies to the compose watcher/API
 instead of requiring a separate host `kube-insight serve` process:
 
 ```bash
@@ -46,7 +46,7 @@ make clickhouse-down
 make dev-compose-up
 ```
 
-The compose workflow starts two services:
+The compose workflow starts three services:
 
 - `clickhouse` on `127.0.0.1:8123` with the compose project's default
   `clickhouse-data` volume. This keeps the checked-in compose file portable
@@ -56,6 +56,9 @@ The compose workflow starts two services:
 - `watcher`, built from `docker/dev-watcher.Dockerfile`, running
   `serve --watch --api --api-listen 0.0.0.0:8080 --metrics
   --metrics-listen 0.0.0.0:9090` against the ClickHouse service name.
+- `web`, built from `docker/dev-web.Dockerfile`, running Vite on
+  `127.0.0.1:5173` and proxying API and metrics requests to the compose
+  `watcher` service.
 
 The watcher container mounts local Kubernetes credentials by default:
 
@@ -103,7 +106,30 @@ the container. Stop the compose stack with:
 make dev-compose-down
 ```
 
-Use `make dev-compose-logs` to follow logs from both services.
+Use `make dev-compose-logs` to follow logs from the ClickHouse, watcher, and web services.
+
+The `web` service bind-mounts `./web` and keeps dependencies in the
+`web-node-modules` Docker volume. Vite hot module reload should pick up normal
+frontend source changes automatically. If `package.json` or
+`package-lock.json` changes, rebuild the Web UI service:
+
+```bash
+make dev-compose-rebuild-web
+```
+
+The `watcher` service is image-based, so backend Go/config changes require a
+compose rebuild/recreate. The normal safe command is:
+
+```bash
+make dev-compose-up-detached
+```
+
+For targeted log streams during development:
+
+```bash
+make dev-compose-logs-web
+make dev-compose-logs-watcher
+```
 
 ### 2.2 Dev Volume Hygiene
 

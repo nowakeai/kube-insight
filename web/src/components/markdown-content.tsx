@@ -1,4 +1,3 @@
-import { ExternalLink } from "lucide-react"
 import type { ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -70,20 +69,45 @@ export function MarkdownContent({ text }: { text: string }) {
 function CitationJump({ href, children }: { href: string; children: ReactNode }) {
   const citationId = decodeURIComponent(href.replace("#citation:", ""))
   const citations = useAgentProjectionStore((state) => state.citations)
+  const artifacts = useAgentProjectionStore((state) => state.artifacts)
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const citation = citations[citationId]
+  const artifact = citation?.artifactId ? artifacts[citation.artifactId] : undefined
+  const marker = citationMarker(children)
+  const childText = reactText(children).trim()
+  const label = citationLabel(/^E\d+$/i.test(childText) ? citation?.text || artifact?.title || childText : childText || citation?.text || artifact?.title || "Evidence")
   const onClick = () => {
-    const citation = citations[citationId]
     if (citation?.artifactId) selectArtifact(citation.artifactId)
-    document.getElementById("evidence")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    window.dispatchEvent(new CustomEvent("kube-insight:evidence-jump", { detail: { citationId } }))
+    const target = document.getElementById(`evidence-${citationId}`) ?? document.getElementById("evidence")
+    target?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
   return (
     <button
       type="button"
-      className="inline-flex min-h-11 items-center gap-1 rounded-md border border-border bg-muted px-3 py-2 text-[0.85em] font-medium text-foreground transition hover:border-primary/40"
+      className="mx-1 inline-flex max-w-[14rem] items-center rounded-full bg-muted px-2.5 py-1 align-[0.08em] text-[0.78em] font-medium leading-none text-muted-foreground shadow-none ring-1 ring-border/40 transition hover:bg-muted/80 hover:text-foreground hover:ring-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onClick}
+      title={marker ? `${marker}: ${label}` : `Evidence: ${label}`}
+      aria-label={marker ? `Jump to evidence ${marker}: ${label}` : `Jump to evidence: ${label}`}
     >
-      {children}
-      <ExternalLink className="size-3" aria-hidden="true" />
+      <span className="truncate">{label}</span>
     </button>
   )
+}
+
+function citationMarker(children: ReactNode) {
+  const text = reactText(children).trim()
+  return /^E\d+$/i.test(text) ? text.toUpperCase() : ""
+}
+
+function citationLabel(value: string) {
+  const cleaned = value.replace(/\s+/g, " ").trim()
+  if (!cleaned) return "Evidence"
+  return cleaned.length > 28 ? `${cleaned.slice(0, 25).trimEnd()}...` : cleaned
+}
+
+function reactText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(reactText).join("")
+  return ""
 }

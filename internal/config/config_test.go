@@ -55,6 +55,9 @@ func TestLoadExampleConfig(t *testing.T) {
 	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.BaseURLEnv != "OPENAI_BASE_URL" || cfg.Server.Chat.Model == "" {
 		t.Fatalf("chat = %#v", cfg.Server.Chat)
 	}
+	if !cfg.Server.AgentRetention.Enabled || cfg.Server.AgentRetention.IntervalSeconds <= 0 || !cfg.Server.AgentRetention.RunOnStart {
+		t.Fatalf("agent retention = %#v", cfg.Server.AgentRetention)
+	}
 	for _, want := range []string{"resource_version", "status_condition_timestamps", "leader_election_configmap", "report_skip"} {
 		if !hasProcessingFilter(cfg.Processing.Filters, want) {
 			t.Fatalf("filter %q missing: %#v", want, cfg.Processing.Filters)
@@ -413,6 +416,16 @@ func TestValidateAcceptsLegacyOpenAIAPIKeyEnv(t *testing.T) {
 	}
 	if cfg.Server.Chat.EffectiveAPIKeyEnv() != "OPENAI_API_KEY" {
 		t.Fatalf("api key env = %q", cfg.Server.Chat.EffectiveAPIKeyEnv())
+	}
+}
+
+func TestValidateRejectsAgentRetentionWithoutInterval(t *testing.T) {
+	cfg := Default()
+	cfg.Server.AgentRetention.Enabled = true
+	cfg.Server.AgentRetention.IntervalSeconds = 0
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "server.agentRetention.intervalSeconds") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

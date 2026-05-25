@@ -171,7 +171,7 @@ func TestEinoRunRecorderUsesMiddlewareToolTimingWhenStartedEventIsMissing(t *tes
 		t.Fatal(err)
 	}
 	timings := newToolTimingStore()
-	timings.put("tool_1", toolTiming{Name: "kube_insight_health", StartedAt: time.Now().Add(-25 * time.Millisecond), DurationMS: 25})
+	timings.put("tool_1", toolTiming{Name: "kube_insight_health", Input: json.RawMessage(`{"limit":5}`), StartedAt: time.Now().Add(-25 * time.Millisecond), DurationMS: 25})
 	recorder := newEinoRunRecorder(store, run.ID, timings)
 	if err := recorder.Start(ctx); err != nil {
 		t.Fatal(err)
@@ -197,6 +197,27 @@ func TestEinoRunRecorderUsesMiddlewareToolTimingWhenStartedEventIsMissing(t *tes
 	}
 	if !found || completed.DurationMS != 25 {
 		t.Fatalf("completed duration = %#v found=%v", completed, found)
+	}
+	var artifact ArtifactEventData
+	var audit ToolAuditEventData
+	for _, event := range events {
+		switch event.Type {
+		case EventArtifact:
+			var candidate ArtifactEventData
+			if err := json.Unmarshal(event.Data, &candidate); err != nil {
+				t.Fatal(err)
+			}
+			if candidate.Artifact.Kind == ArtifactKindToolCall {
+				artifact = candidate
+			}
+		case EventToolAudit:
+			if err := json.Unmarshal(event.Data, &audit); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if !strings.Contains(string(artifact.Artifact.Data), `"input":{"limit":5}`) || string(audit.Input) != `{"limit":5}` {
+		t.Fatalf("missing recovered tool input artifact=%s audit=%s", string(artifact.Artifact.Data), string(audit.Input))
 	}
 }
 
@@ -241,7 +262,7 @@ func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 	if strings.Contains(eventsOfType(events, EventCitation), "citation") {
 		t.Fatalf("unexpected tool-time citation events = %#v", events)
 	}
-	if err := recorder.Complete(ctx, "Pod default/api-0 is relevant evidence."); err != nil {
+	if err := recorder.Complete(ctx, "Pod default/api-0 is relevant evidence. {{evidence: API pod facts}}"); err != nil {
 		t.Fatal(err)
 	}
 	events, err = store.ListRunEvents(ctx, run.ID)
@@ -249,18 +270,28 @@ func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	var citation CitationEventData
+	var final MessageEventData
 	foundCitation := false
+	foundFinal := false
 	for _, event := range events {
-		if event.Type != EventCitation {
-			continue
-		}
-		foundCitation = true
-		if err := json.Unmarshal(event.Data, &citation); err != nil {
-			t.Fatal(err)
+		switch event.Type {
+		case EventCitation:
+			foundCitation = true
+			if err := json.Unmarshal(event.Data, &citation); err != nil {
+				t.Fatal(err)
+			}
+		case EventFinalAnswer:
+			foundFinal = true
+			if err := json.Unmarshal(event.Data, &final); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	if !foundCitation || citation.Citation.ArtifactID != artifact.Artifact.ID || !strings.Contains(citation.Citation.Text, "Search evidence") {
+	if !foundCitation || citation.Citation.ArtifactID != artifact.Artifact.ID || citation.Citation.Text != "API pod facts" {
 		t.Fatalf("citation = %#v found=%v events=%#v", citation, foundCitation, events)
+	}
+	if !foundFinal || strings.Contains(final.Content, "{{evidence:") || !strings.Contains(final.Content, "[API pod facts](#citation:"+citation.Citation.ID+")") {
+		t.Fatalf("final = %#v found=%v citation=%#v", final, foundFinal, citation)
 	}
 }
 

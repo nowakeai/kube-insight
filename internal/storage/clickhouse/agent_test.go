@@ -65,23 +65,73 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	}
 }
 
+func TestClickHouseAgentRetentionPlansDeleteMutations(t *testing.T) {
+	client := newFakeAgentClickHouseClient()
+	store := &Store{Client: client, Database: "ki"}
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{Title: "retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run1, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "first"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run1.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	run2, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "retry", Metadata: []byte(`{"retryOfRunId":"` + run1.ID + `"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keepArtifact := "artifact_keep"
+	if _, err := store.AppendRunEvent(ctx, run2.ID, agent.AppendEventInput{Type: agent.EventArtifact, Data: []byte(`{"artifact":{"id":"` + keepArtifact + `","kind":"markdown"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run2.ID, agent.AppendEventInput{Type: agent.EventArtifact, Data: []byte(`{"artifact":{"id":"artifact_drop","kind":"markdown"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run2.ID, agent.AppendEventInput{Type: agent.EventCitation, Data: []byte(`{"citation":{"id":"citation_1","artifactId":"` + keepArtifact + `"}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run2.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.ApplyAgentRetention(ctx, agent.DefaultRetentionOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SupersededRunsDeleted != 1 || report.UnreferencedArtifactEventsDeleted != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	joined := strings.Join(client.appliedStatements, "\n")
+	for _, want := range []string{"ALTER TABLE `ki`.agent_run_events DELETE WHERE id IN", "ALTER TABLE `ki`.agent_run_events DELETE WHERE run_id IN", "ALTER TABLE `ki`.agent_runs DELETE WHERE id IN"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing mutation %q in:\n%s", want, joined)
+		}
+	}
+}
+
 type fakeAgentClickHouseClient struct {
-	mu            sync.Mutex
-	applyCalls    int
-	sessions      map[string]map[string]any
-	runs          map[string]map[string]any
-	eventsByRunID map[string][]map[string]any
+	mu                sync.Mutex
+	applyCalls        int
+	appliedStatements []string
+	sessions          map[string]map[string]any
+	runs              map[string]map[string]any
+	eventsByRunID     map[string][]map[string]any
 }
 
 func newFakeAgentClickHouseClient() *fakeAgentClickHouseClient {
 	return &fakeAgentClickHouseClient{sessions: map[string]map[string]any{}, runs: map[string]map[string]any{}, eventsByRunID: map[string][]map[string]any{}}
 }
 
-func (c *fakeAgentClickHouseClient) ApplySchema(context.Context, []string) (ApplyResult, error) {
+func (c *fakeAgentClickHouseClient) ApplySchema(_ context.Context, statements []string) (ApplyResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.applyCalls++
-	return ApplyResult{Applied: 3}, nil
+	c.appliedStatements = append(c.appliedStatements, statements...)
+	return ApplyResult{Applied: len(statements)}, nil
 }
 
 func (c *fakeAgentClickHouseClient) InsertRows(_ context.Context, _ string, table string, rows []map[string]any) error {

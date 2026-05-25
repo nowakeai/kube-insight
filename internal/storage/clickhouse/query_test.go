@@ -357,4 +357,17 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 	if len(queries) != 2 || len(schema.Tables) != 1 || schema.Tables[0].Name != "versions" || schema.Tables[0].Columns[0].Name != "object_id" {
 		t.Fatalf("queries=%#v schema=%#v", queries, schema)
 	}
+	joinedNotes := strings.Join(schema.Notes, "\n")
+	if !strings.Contains(joinedNotes, "facts.ts") || !strings.Contains(joinedNotes, "Prefer sorted columns") {
+		t.Fatalf("schema notes missing query discipline: %#v", schema.Notes)
+	}
+	var recipeNames string
+	for _, recipe := range schema.Recipes {
+		recipeNames += recipe.Name + "\n"
+	}
+	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "object_proof_after_candidate"} {
+		if !strings.Contains(recipeNames, want) {
+			t.Fatalf("schema recipes missing %q: %#v", want, schema.Recipes)
+		}
+	}
 }

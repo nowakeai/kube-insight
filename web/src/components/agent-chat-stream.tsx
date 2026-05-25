@@ -130,7 +130,6 @@ function RunConversation({
         <WorkStreamMessage
           activity={activity}
           events={events}
-          onSelectArtifact={onSelectArtifact}
           running={isRunning}
           segments={response.workSegments}
           status={status}
@@ -222,7 +221,6 @@ function renderResponseSegment({
   }
   if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
   if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={false} segment={segment} />
-  if (segment.type === "evidence") return <EvidenceStreamMessage key={segment.id} segment={segment} onSelectArtifact={onSelectArtifact} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
@@ -230,7 +228,6 @@ function renderResponseSegment({
 function renderWorkSegment(
   segment: ResponseSegment,
   activity: RunActivitySummary,
-  onSelectArtifact: (artifactId?: string) => void,
   toolGroupDefaultExpanded: boolean,
 ) {
   if (segment.type === "assistant") {
@@ -246,7 +243,6 @@ function renderWorkSegment(
   }
   if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
   if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={toolGroupDefaultExpanded} segment={segment} />
-  if (segment.type === "evidence") return <EvidenceStreamMessage key={segment.id} segment={segment} onSelectArtifact={onSelectArtifact} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
@@ -255,7 +251,6 @@ function WorkStreamMessage({
   activity,
   events,
   nowMs,
-  onSelectArtifact,
   running,
   segments,
   status,
@@ -264,15 +259,14 @@ function WorkStreamMessage({
   activity: RunActivitySummary
   events: AgentRunEvent[]
   nowMs: number
-  onSelectArtifact: (artifactId?: string) => void
   running: boolean
   segments: ResponseSegment[]
   status: string
   run: AgentRun
 }) {
-  const defaultExpanded = running || status === "completed" || status === "failed"
+  const forceExpanded = status !== "completed"
   const [manualExpanded, setManualExpanded] = useState<boolean | undefined>(undefined)
-  const expanded = manualExpanded ?? defaultExpanded
+  const expanded = forceExpanded || (manualExpanded ?? false)
   const tools = toolSegmentsIn(segments)
   const assistantSteps = segments.filter((segment) => segment.type === "assistant" && segment.content).length
   const duration = runElapsedLabel(run, events, running ? nowMs : undefined)
@@ -282,7 +276,7 @@ function WorkStreamMessage({
   return (
     <div className="w-full text-sm">
       <div className="min-w-0 border-l border-border/80 pl-3">
-        <button type="button" className="group flex w-full items-center gap-2 py-1 text-left" onClick={() => setManualExpanded((value) => !(value ?? defaultExpanded))}>
+        <button type="button" className="group flex w-full items-center gap-2 py-1 text-left" onClick={() => forceExpanded ? undefined : setManualExpanded((value) => !(value ?? false))}>
           <span className={streamStatusDot(status)} aria-hidden="true" />
           <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground group-hover:bg-secondary">{running ? `Working for ${duration}` : `Worked for ${duration}`}</span>
           <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">{running ? activity.stage : summaryParts.join(" · ")}</span>
@@ -290,7 +284,7 @@ function WorkStreamMessage({
         </button>
         {expanded ? (
           <div className="mt-3 space-y-4">
-            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, expanded))}
+            {segments.map((segment) => renderWorkSegment(segment, activity, expanded))}
           </div>
         ) : null}
       </div>
@@ -495,30 +489,6 @@ function ToolGroupRow({ segment }: { segment: ToolSegment }) {
       </button>
       <div className="mt-1 truncate text-xs text-muted-foreground">{toolSegmentSummary(segment)}</div>
       {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{toolSegmentDetail(segment)}</pre> : null}
-    </div>
-  )
-}
-
-function EvidenceStreamMessage({
-  segment,
-  onSelectArtifact,
-}: {
-  segment: EvidenceSegment
-  onSelectArtifact: (artifactId?: string) => void
-}) {
-  return (
-    <div className="w-full text-sm">
-      <div className="min-w-0 border-l border-accent/40 pl-3">
-        <button
-          type="button"
-          className="inline-flex max-w-full items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-          onClick={() => onSelectArtifact(segment.artifactId)}
-        >
-          <span className="size-1.5 rounded-full bg-accent" aria-hidden="true" />
-          <span className="truncate">{segment.text || "Evidence"}</span>
-          <span className="shrink-0 text-foreground">Pin</span>
-        </button>
-      </div>
     </div>
   )
 }

@@ -119,8 +119,12 @@ ORDER BY table, position`, quoteString(database)))
 			"Active SQL backend: ClickHouse-compatible (ClickHouse or chDB).",
 			"ClickHouse timestamps use DateTime64 UTC columns unless noted otherwise.",
 			"Use observations and versions for proof; use facts, edges, and changes for investigation candidates.",
+			"For recent/today/last-N queries, include UTC time bounds on facts.ts, changes.ts, observations.observed_at, versions.observed_at, edges.valid_from, or ingestion_offsets.updated_at.",
+			"Prefer sorted columns before text search: facts(cluster_id,fact_key,fact_value,ts), changes(cluster_id,change_family,path,ts), observations(cluster_id,kind,namespace,name,observed_at), edges(cluster_id,edge_type,src_id,valid_from_ms).",
+			"Avoid doc/detail text scans until candidates are narrowed by cluster, kind, namespace, name, exact fact/change/edge keys, and time.",
 			"SQL access is read-only; use SELECT/WITH/EXPLAIN/DESCRIBE/SHOW only.",
 		},
+		Recipes: clickHouseSchemaRecipes(),
 	}
 	for _, row := range tablesResult.Data {
 		name := stringValue(row["name"])
@@ -132,6 +136,69 @@ ORDER BY table, position`, quoteString(database)))
 		})
 	}
 	return schema, nil
+}
+
+func clickHouseSchemaRecipes() []storage.SQLSchemaRecipe {
+	return []storage.SQLSchemaRecipe{
+		{
+			Name:        "coverage_latest",
+			Description: "Check current collector coverage before claiming absence or current health. Keep cluster_id if returned rows show multiple clusters.",
+			SQL: `select cluster_id, kind, resource, namespace,
+       argMax(status, updated_at) as status,
+       argMax(error, updated_at) as error,
+       max(updated_at) as updated_at
+from ingestion_offsets
+where cluster_id = 'CLUSTER_ID'
+group by cluster_id, kind, resource, namespace
+having status in ('not_started','retrying','list_error','watch_error')
+order by status, resource, namespace
+limit 50`,
+		},
+		{
+			Name:        "recent_fact_rollup",
+			Description: "Generic fast path for broad symptoms and status questions. Replace CLUSTER_ID, the time bound, and exact fact filters; prefer this before proof document scans.",
+			SQL: `select kind, namespace, name, fact_key, fact_value,
+       count() as rows,
+       min(ts) as first_seen,
+       max(ts) as last_seen
+from facts
+where cluster_id = 'CLUSTER_ID'
+  and ts >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+  and fact_key = 'EXACT_FACT_KEY'
+  and fact_value = 'EXACT_FACT_VALUE'
+group by kind, namespace, name, fact_key, fact_value
+order by rows desc, last_seen desc
+limit 50`,
+		},
+		{
+			Name:        "recent_change_rollup",
+			Description: "Generic fast path for recent changes. Use exact change_family/path/kind filters when known; avoid old_scalar/new_scalar text scans until narrowed.",
+			SQL: `select kind, namespace, name, change_family, path,
+       count() as changes,
+       min(ts) as first_seen,
+       max(ts) as last_seen
+from changes
+where cluster_id = 'CLUSTER_ID'
+  and ts >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+  and change_family in ('status','spec','topology')
+group by kind, namespace, name, change_family, path
+order by changes desc, last_seen desc
+limit 50`,
+		},
+		{
+			Name:        "object_proof_after_candidate",
+			Description: "Fetch retained proof only after facts/changes/search identify a specific object.",
+			SQL: `select object_id, seq, observed_at, resource_version, doc_hash, materialization, raw_size, stored_size
+from versions
+where cluster_id = 'CLUSTER_ID'
+  and kind = 'KIND'
+  and namespace = 'NAMESPACE'
+  and name = 'NAME'
+  and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+order by observed_at desc, seq desc
+limit 20`,
+		},
+	}
 }
 
 func validateReadOnlyQuery(query string) error {

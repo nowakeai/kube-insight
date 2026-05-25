@@ -186,6 +186,8 @@ order by type, name`)
 		"Join latest_raw_index.kind_id, latest_index.kind_id, or objects.kind_id to object_kinds.id, then object_kinds.api_resource_id to api_resources.id.",
 		"object_observations records every observed object event; versions records retained content documents.",
 		"Use object_facts and object_changes for fast investigation candidates; use versions/blob_ref/blobs.data for proof when exact retained JSON is needed.",
+		"For recent/today/last-N queries, include Unix-millisecond bounds on object_facts.ts, object_changes.ts, object_observations.observed_at, versions.observed_at, or object_edges.valid_from.",
+		"Prefer indexed fields before text/blob scans: cluster_id, fact_key, fact_value, object kind, namespace, name, time, edge_type, and change_family/path.",
 		"object_edges.src_id and object_edges.dst_id reference objects.id.",
 		"Prefer object_facts/object_edges/object_changes before scanning blobs.data; blob scans are proof fallback and can be slower.",
 		"Use latest_raw_documents for the latest observed sanitized cluster snapshot; use latest_documents for the latest retained/normalized proof document.",

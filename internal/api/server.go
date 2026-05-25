@@ -17,13 +17,15 @@ import (
 )
 
 type ServerOptions struct {
-	DBPath        string
-	OpenStore     StoreOpener
-	KeepStoreOpen bool
-	Close         func() error
-	AgentStore    agent.Store
-	AgentRunner   AgentRunner
-	ServerInfo    ServerInfo
+	DBPath                   string
+	OpenStore                StoreOpener
+	KeepStoreOpen            bool
+	Close                    func() error
+	AgentStore               agent.Store
+	AgentRunner              AgentRunner
+	AgentRetentionInterval   time.Duration
+	AgentRetentionRunOnStart bool
+	ServerInfo               ServerInfo
 }
 
 type StoreOpener func(context.Context) (ReadStore, error)
@@ -37,17 +39,23 @@ type ReadStore interface {
 }
 
 type Server struct {
-	dbPath              string
-	openStore           StoreOpener
-	closeStoreOnRequest bool
-	closeFunc           func() error
-	agentStore          agent.Store
-	agentRunner         AgentRunner
-	agentRunMu          sync.Mutex
-	agentRunCancels     map[string]context.CancelFunc
-	serverInfo          ServerInfo
-	mux                 *http.ServeMux
+	dbPath               string
+	openStore            StoreOpener
+	closeStoreOnRequest  bool
+	closeFunc            func() error
+	agentStore           agent.Store
+	agentRunner          AgentRunner
+	agentRunMu           sync.Mutex
+	agentRunCancels      map[string]context.CancelFunc
+	agentRunWG           sync.WaitGroup
+	agentRetentionMu     sync.Mutex
+	agentRetentionCancel context.CancelFunc
+	agentRetentionDone   chan struct{}
+	serverInfo           ServerInfo
+	mux                  *http.ServeMux
 }
+
+const agentRunShutdownWait = 5 * time.Second
 
 type sqlRequest struct {
 	SQL     string `json:"sql"`
@@ -81,6 +89,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, agentRunCancels: map[string]context.CancelFunc{}, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
+	s.startAgentRetentionLoop(opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
 	return s, nil
 }
 
@@ -108,6 +117,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) Close() error {
 	s.cancelAgentRuns()
+	s.waitAgentRuns(agentRunShutdownWait)
+	s.stopAgentRetentionLoop()
 	if s.closeFunc == nil {
 		return nil
 	}
@@ -131,6 +142,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/search", s.handleSearch)
 	s.mux.HandleFunc("GET /api/v1/services/{namespace}/{name}/investigation", s.handleServiceInvestigation)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
+	s.mux.HandleFunc("POST /api/v1/agent/retention/compact", s.handleCompactAgentRetention)
 	s.mux.HandleFunc("POST /api/v1/agent/sessions", s.handleCreateAgentSession)
 	s.mux.HandleFunc("GET /api/v1/agent/sessions", s.handleListAgentSessions)
 	s.mux.HandleFunc("GET /api/v1/agent/sessions/{session_id}", s.handleGetAgentSession)

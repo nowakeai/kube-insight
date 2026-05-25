@@ -10,20 +10,78 @@ import (
 
 const maxVerifiedAnswerCitations = 8
 
-var evidenceTokenPattern = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9._:/-]{2,}`)
+var (
+	evidenceTokenPattern = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9._:/-]{2,}`)
+	evidenceLabelPattern = regexp.MustCompile(`\{\{evidence:\s*([^{}\n]{1,64})\s*\}\}`)
+)
 
-func (r einoRunRecorder) appendVerifiedAnswerCitations(ctx context.Context, finalAnswer string) error {
+type verifiedAnswerCitation struct {
+	Citation Citation
+	Tokens   []string
+}
+
+type answerCitationCandidate struct {
+	Artifact Artifact
+	Meta     evidenceCitationMetadata
+	Tokens   []string
+	Source   string
+	Text     string
+}
+
+func (r einoRunRecorder) verifiedAnswerCitations(ctx context.Context, finalAnswer string) ([]verifiedAnswerCitation, error) {
 	finalAnswer = strings.TrimSpace(finalAnswer)
 	if !r.enabled() || finalAnswer == "" {
-		return nil
+		return nil, nil
 	}
 	events, err := r.store.ListRunEvents(ctx, r.runID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	answer := strings.ToLower(finalAnswer)
+	candidates := answerCitationCandidates(events)
 	seenArtifacts := map[string]bool{}
-	emitted := 0
+	citations := make([]verifiedAnswerCitation, 0, maxVerifiedAnswerCitations)
+	appendCitation := func(candidate answerCitationCandidate, label string) {
+		seenArtifacts[candidate.Artifact.ID] = true
+		text := firstNonEmptyString(label, candidate.Meta.Text, candidate.Artifact.Title, candidate.Artifact.Kind)
+		citation := Citation{
+			ID:         NewCitationID(),
+			ArtifactID: candidate.Artifact.ID,
+			Text:       text,
+			Target:     candidate.Meta.Target,
+		}
+		if len(citation.Target) == 0 {
+			citation.Target = jsonRaw(map[string]any{"type": CitationTargetArtifact, "artifactId": candidate.Artifact.ID})
+		}
+		citations = append(citations, verifiedAnswerCitation{Citation: citation, Tokens: candidate.Tokens})
+	}
+	labels := uniqueEvidenceLabels(finalAnswer)
+	for _, label := range labels {
+		if len(citations) >= maxVerifiedAnswerCitations {
+			break
+		}
+		if candidate, ok := bestCandidateForEvidenceLabel(label, candidates, seenArtifacts, answer); ok {
+			appendCitation(candidate, label)
+		}
+	}
+	if len(labels) > 0 && len(citations) > 0 {
+		return citations, nil
+	}
+	for _, candidate := range candidates {
+		if len(citations) >= maxVerifiedAnswerCitations {
+			break
+		}
+		if seenArtifacts[candidate.Artifact.ID] || !answerMentionsEvidence(answer, candidate.Tokens) {
+			continue
+		}
+		appendCitation(candidate, "")
+	}
+	return citations, nil
+}
+
+func answerCitationCandidates(events []RunEvent) []answerCitationCandidate {
+	candidates := make([]answerCitationCandidate, 0, len(events))
+	seenArtifacts := map[string]bool{}
 	for _, event := range events {
 		if event.Type != EventArtifact {
 			continue
@@ -36,30 +94,252 @@ func (r einoRunRecorder) appendVerifiedAnswerCitations(ctx context.Context, fina
 		if artifact.ID == "" || artifact.Kind == ArtifactKindToolCall || seenArtifacts[artifact.ID] {
 			continue
 		}
+		seenArtifacts[artifact.ID] = true
 		meta := citationMetadataFromArtifact(artifact)
-		tokens := evidenceCitationTokens(artifact)
-		if !answerMentionsEvidence(answer, tokens) {
+		candidates = append(candidates, answerCitationCandidate{
+			Artifact: artifact,
+			Meta:     meta,
+			Tokens:   evidenceCitationTokens(artifact),
+			Source:   citationTargetSource(meta.Target),
+			Text:     strings.ToLower(artifact.Title + " " + string(artifact.Data)),
+		})
+	}
+	return candidates
+}
+
+func uniqueEvidenceLabels(answer string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, label := range evidenceLabelsInBlock(answer) {
+		key := strings.ToLower(label)
+		if key == "" || seen[key] {
 			continue
 		}
-		seenArtifacts[artifact.ID] = true
-		citation := Citation{
-			ID:         NewCitationID(),
-			ArtifactID: artifact.ID,
-			Text:       firstNonEmptyString(meta.Text, artifact.Title, artifact.Kind),
-			Target:     meta.Target,
+		seen[key] = true
+		out = append(out, label)
+	}
+	return out
+}
+
+func bestCandidateForEvidenceLabel(label string, candidates []answerCitationCandidate, seen map[string]bool, answer string) (answerCitationCandidate, bool) {
+	bestIndex := -1
+	bestScore := 0
+	for index, candidate := range candidates {
+		if seen[candidate.Artifact.ID] {
+			continue
 		}
-		if len(citation.Target) == 0 {
-			citation.Target = jsonRaw(map[string]any{"type": CitationTargetArtifact, "artifactId": artifact.ID})
-		}
-		if err := r.append(ctx, EventCitation, CitationEventData{Citation: citation}); err != nil {
-			return err
-		}
-		emitted++
-		if emitted >= maxVerifiedAnswerCitations {
-			break
+		score := evidenceLabelCandidateScore(label, candidate, answer)
+		if score > bestScore {
+			bestScore = score
+			bestIndex = index
 		}
 	}
-	return nil
+	if bestIndex < 0 || bestScore < 25 {
+		return answerCitationCandidate{}, false
+	}
+	return candidates[bestIndex], true
+}
+
+func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate, answer string) int {
+	label = strings.ToLower(label)
+	text := candidate.Text
+	score := 0
+	if answerMentionsEvidence(answer, candidate.Tokens) {
+		score += 5
+	}
+	if strings.Contains(label, "health") || strings.Contains(label, "collector") || strings.Contains(label, "收集") {
+		if candidate.Source == "kube_insight_health" {
+			score += 90
+		}
+		if strings.Contains(text, "health") || strings.Contains(text, "collector") {
+			score += 20
+		}
+	}
+	if strings.Contains(label, "oom") || strings.Contains(label, "restart") || strings.Contains(label, "facts") || strings.Contains(label, "事实") {
+		if candidate.Source == "kube_insight_sql" {
+			score += 55
+		}
+		if strings.Contains(text, "oomkilled") || strings.Contains(text, "oom") {
+			score += 35
+		}
+		if strings.Contains(text, "fact_key") || strings.Contains(text, "factkey") || strings.Contains(text, "facts") {
+			score += 20
+		}
+		if candidate.Source == "kube_insight_search" {
+			score += 10
+		}
+	}
+	if strings.Contains(label, "history") || strings.Contains(label, "历史") {
+		if candidate.Source == "kube_insight_history" {
+			score += 70
+		}
+	}
+	if strings.Contains(label, "search") || strings.Contains(label, "candidate") || strings.Contains(label, "resource") || strings.Contains(label, "候选") || strings.Contains(label, "资源") {
+		if candidate.Source == "kube_insight_search" {
+			score += 60
+		}
+	}
+	for _, word := range strings.Fields(label) {
+		word = strings.Trim(word, "`*_[](){}<>#.,;:")
+		if len(word) >= 3 && strings.Contains(text, word) {
+			score += 8
+		}
+	}
+	return score
+}
+
+func citationTargetSource(target json.RawMessage) string {
+	var record map[string]any
+	if len(target) == 0 || json.Unmarshal(target, &record) != nil {
+		return ""
+	}
+	return textField(record, "source")
+}
+
+func annotateAnswerWithEvidenceReferences(answer string, citations []verifiedAnswerCitation) string {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return answer
+	}
+	if len(citations) == 0 {
+		return strings.TrimSpace(stripEvidenceLabels(answer))
+	}
+	blocks := markdownBlocks(answer)
+	if len(blocks) == 0 {
+		return strings.TrimSpace(stripEvidenceLabels(answer))
+	}
+	markersByBlock := map[int][]string{}
+	labelsByBlock := map[int][]string{}
+	labelCursorByBlock := map[int]int{}
+	lastTextBlock := 0
+	for index, block := range blocks {
+		labelsByBlock[index] = evidenceLabelsInBlock(block)
+		if strings.TrimSpace(stripEvidenceLabels(block)) != "" {
+			lastTextBlock = index
+		}
+	}
+	for index, citation := range citations {
+		if citation.Citation.ID == "" {
+			continue
+		}
+		if strings.Contains(answer, "#citation:"+citation.Citation.ID) {
+			continue
+		}
+		blockIndex := citationLabelBlockIndex(citation.Citation.Text, labelsByBlock)
+		if blockIndex < 0 {
+			for candidateIndex, block := range blocks {
+				trimmed := strings.TrimSpace(stripEvidenceLabels(block))
+				if trimmed == "" || strings.HasPrefix(trimmed, "```") {
+					continue
+				}
+				if answerMentionsEvidence(strings.ToLower(trimmed), citation.Tokens) {
+					blockIndex = candidateIndex
+					break
+				}
+			}
+		}
+		if blockIndex < 0 {
+			blockIndex = lastTextBlock
+		}
+		label := evidenceLabelForBlock(labelsByBlock[blockIndex], labelCursorByBlock[blockIndex])
+		if label != "" {
+			labelCursorByBlock[blockIndex]++
+			citations[index].Citation.Text = label
+		}
+		markerText := firstNonEmptyString(label, citation.Citation.Text, fmt.Sprintf("E%d", index+1))
+		marker := fmt.Sprintf("[%s](#citation:%s)", markdownLinkText(markerText), citation.Citation.ID)
+		markersByBlock[blockIndex] = append(markersByBlock[blockIndex], marker)
+	}
+	for index := range blocks {
+		blocks[index] = stripEvidenceLabels(blocks[index])
+		if markers := markersByBlock[index]; len(markers) > 0 {
+			blocks[index] = appendMarkdownMarkers(blocks[index], markers)
+		}
+	}
+	return strings.TrimSpace(strings.Join(blocks, ""))
+}
+
+func citationLabelBlockIndex(text string, labelsByBlock map[int][]string) int {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return -1
+	}
+	for index, labels := range labelsByBlock {
+		for _, label := range labels {
+			if strings.ToLower(label) == text {
+				return index
+			}
+		}
+	}
+	return -1
+}
+
+func markdownBlocks(answer string) []string {
+	matches := regexp.MustCompile(`(?s)(.*?(?:\n\s*\n|$))`).FindAllString(answer, -1)
+	blocks := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if match != "" {
+			blocks = append(blocks, match)
+		}
+	}
+	return blocks
+}
+
+func appendMarkdownMarkers(block string, markers []string) string {
+	trimmed := strings.TrimRight(block, " \t\r\n")
+	if trimmed == "" || len(markers) == 0 {
+		return block
+	}
+	suffix := block[len(trimmed):]
+	return trimmed + " " + strings.Join(markers, " ") + suffix
+}
+
+func evidenceLabelsInBlock(block string) []string {
+	matches := evidenceLabelPattern.FindAllStringSubmatch(block, -1)
+	labels := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		if label := sanitizeEvidenceLabel(match[1]); label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return labels
+}
+
+func stripEvidenceLabels(block string) string {
+	return evidenceLabelPattern.ReplaceAllString(block, "")
+}
+
+func evidenceLabelForBlock(labels []string, index int) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	if index >= 0 && index < len(labels) {
+		return labels[index]
+	}
+	return labels[len(labels)-1]
+}
+
+func sanitizeEvidenceLabel(label string) string {
+	label = strings.Join(strings.Fields(strings.TrimSpace(label)), " ")
+	label = strings.Trim(label, "`*_[](){}<>#")
+	if label == "" {
+		return ""
+	}
+	if len([]rune(label)) > 36 {
+		runes := []rune(label)
+		label = strings.TrimSpace(string(runes[:36]))
+	}
+	return label
+}
+
+func markdownLinkText(text string) string {
+	text = strings.ReplaceAll(text, "[", "(")
+	text = strings.ReplaceAll(text, "]", ")")
+	text = strings.ReplaceAll(text, "\n", " ")
+	return strings.TrimSpace(text)
 }
 
 type evidenceCitationMetadata struct {

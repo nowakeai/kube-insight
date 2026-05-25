@@ -1,5 +1,5 @@
 import { Braces, ChevronDown, FileText, Pin, Table2 } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
@@ -19,6 +19,7 @@ type EvidenceItem = {
   citation: EvidenceSegment
   detailLines: string[]
   jsonValue: unknown
+  marker: string
   markdown?: string
   summary: string
   tableRows: Record<string, unknown>[]
@@ -31,10 +32,23 @@ export function EvidenceList({ artifactsById, citations, onSelectArtifact }: Evi
     () => citations.map((citation, index) => evidenceItem(citation, artifactsById[citation.artifactId ?? ""], index)),
     [artifactsById, citations],
   )
+  useEffect(() => {
+    const onJump = (event: Event) => {
+      const citationId = event instanceof CustomEvent && typeof event.detail?.citationId === "string" ? event.detail.citationId : ""
+      if (!citationId || !items.some((item) => item.citation.id === citationId)) return
+      setExpanded(true)
+      window.setTimeout(() => {
+        document.getElementById(`evidence-${citationId}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, 0)
+    }
+    window.addEventListener("kube-insight:evidence-jump", onJump)
+    return () => window.removeEventListener("kube-insight:evidence-jump", onJump)
+  }, [items])
+
   if (items.length === 0) return null
 
   return (
-    <div className="mt-4 rounded-md border border-border bg-card text-sm">
+    <div id="evidence" className="mt-4 rounded-md border border-border bg-card text-sm">
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
@@ -44,7 +58,7 @@ export function EvidenceList({ artifactsById, citations, onSelectArtifact }: Evi
         <FileText className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium text-foreground">Evidence</span>
         <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{items.map((item) => item.title).slice(0, 2).join(" · ")}</span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{items.map((item) => `${item.marker} ${item.title}`).slice(0, 2).join(" · ")}</span>
         <ChevronDown className={expanded ? "ml-auto size-3.5 rotate-180 text-muted-foreground transition" : "ml-auto size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       {expanded ? (
@@ -65,15 +79,16 @@ function EvidenceCard({ item, onSelectArtifact }: { item: EvidenceItem; onSelect
   const canPin = Boolean(item.artifact?.id && onSelectArtifact)
 
   return (
-    <div className="rounded-md border border-border bg-background">
+    <div id={`evidence-${item.citation.id}`} className="scroll-mt-24 rounded-md border border-border bg-background">
       <div className="flex items-start gap-2 px-3 py-2">
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
           <div className="flex min-w-0 items-center gap-2">
             <ChevronDown className={expanded ? "size-3.5 shrink-0 rotate-180 text-muted-foreground transition" : "size-3.5 shrink-0 text-muted-foreground transition"} aria-hidden="true" />
+            <span className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[0.68rem] font-semibold text-foreground">{item.marker}</span>
             <span className="truncate font-medium text-foreground">{item.title}</span>
             {item.artifact?.kind ? <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">{item.artifact.kind}</span> : null}
           </div>
-          <div className="mt-1 line-clamp-2 pl-5 text-xs leading-5 text-muted-foreground">{item.summary}</div>
+          <div className="mt-1 line-clamp-2 pl-12 text-xs leading-5 text-muted-foreground">{item.summary}</div>
         </button>
         <Button
           type="button"
@@ -82,7 +97,7 @@ function EvidenceCard({ item, onSelectArtifact }: { item: EvidenceItem; onSelect
           className="mt-0.5 shrink-0"
           disabled={!canPin}
           title={canPin ? "Pin evidence to dock" : "No panel artifact available"}
-          aria-label="Pin evidence to dock"
+          aria-label={`Pin ${item.marker} to dock`}
           onClick={() => item.artifact?.id ? onSelectArtifact?.(item.artifact.id) : undefined}
         >
           <Pin className="size-3.5" aria-hidden="true" />
@@ -161,6 +176,7 @@ function evidenceItem(citation: EvidenceSegment, artifact: AgentArtifact | undef
   const parsedMarkdown = parseMarkdownJSON(markdown)
   const jsonValue = parsedMarkdown ?? stripCitation(data) ?? citation.target ?? {}
   const rows = evidenceRows(jsonValue, data)
+  const marker = `E${index + 1}`
   const title = readableTitle(citation, artifact, index, rows, jsonValue)
   const detailLines = evidenceDetails(jsonValue, data, rows)
   return {
@@ -168,8 +184,9 @@ function evidenceItem(citation: EvidenceSegment, artifact: AgentArtifact | undef
     citation,
     detailLines,
     jsonValue,
+    marker,
     markdown,
-    summary: readableSummary(artifact, rows, jsonValue, detailLines),
+    summary: readableSummary(artifact, rows, jsonValue, detailLines, markdown),
     tableRows: rows,
     title,
   }
@@ -185,17 +202,55 @@ function readableTitle(citation: EvidenceSegment, artifact: AgentArtifact | unde
   return base
 }
 
-function readableSummary(artifact: AgentArtifact | undefined, rows: Record<string, unknown>[], value: unknown, details: string[]) {
-  if (rows.length > 0) {
-    const sample = rows.slice(0, 2).map((row) => rowLabel(row)).filter(Boolean).join("; ")
-    const columns = tableColumns(rows).slice(0, 5).join(", ")
-    return `${rows.length} row${rows.length === 1 ? "" : "s"}${columns ? ` with ${columns}` : ""}${sample ? `. Sample: ${sample}` : ""}`
-  }
+function readableSummary(artifact: AgentArtifact | undefined, rows: Record<string, unknown>[], value: unknown, details: string[], markdown?: string) {
+  if (artifact?.kind === "k8s.history") return historySummary(rows, value, details)
+  if (artifact?.kind === "k8s.resource_list") return resourceListSummary(rows)
   if (artifact?.kind === "k8s.topology") return details.join("; ") || "Topology evidence with Kubernetes nodes and edges."
-  if (artifact?.kind === "k8s.history") return details.join("; ") || "History evidence with observed resource versions."
+  if (artifact?.kind === "markdown") return markdownSummary(markdown, rows, details, value)
+  if (rows.length > 0) return genericRowsSummary(rows)
   if (details.length > 0) return details.slice(0, 3).join("; ")
   if (typeof value === "string") return truncate(value, 160)
   return "Structured evidence captured from the agent tool output."
+}
+
+function markdownSummary(markdown: string | undefined, rows: Record<string, unknown>[], details: string[], value: unknown) {
+  const summaryLine = markdownLine(markdown, "summary")
+  const warningLine = markdownLine(markdown, "warning")
+  if (summaryLine || warningLine) return [summaryLine ? `Cluster health: ${summaryLine}` : "", warningLine ? `Warning: ${warningLine}` : ""].filter(Boolean).join("; ")
+  if (rows.length > 0) return genericRowsSummary(rows)
+  if (details.length > 0) return details.slice(0, 3).join("; ")
+  if (typeof value === "string") return truncate(value, 160)
+  return "Markdown evidence captured from agent tool output."
+}
+
+function historySummary(rows: Record<string, unknown>[], value: unknown, details: string[]) {
+  const record = asRecord(value)
+  const identity = identityLabel(asRecord(record?.identity)) || details.find((line) => line.startsWith("Object: "))?.replace("Object: ", "") || "resource"
+  const range = observedRange(rows)
+  const changed = maxNumericField(rows, "contentChangedObservations")
+  const objectKind = identity.split("/").at(-3) || "resource"
+  const subject = containsText([identity, ...rows.map((row) => compactValue(row))], "oom") ? `OOM history for ${identity}` : `${objectKind} history for ${identity}`
+  return `${subject}: ${rows.length} observed version${rows.length === 1 ? "" : "s"}${range ? ` from ${range}` : ""}${changed !== undefined ? `; ${changed} content-changing observation${changed === 1 ? "" : "s"}` : ""}.`
+}
+
+function resourceListSummary(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) return "Resource list evidence with no rows."
+  const identities = rows.map((row) => asRecord(row.identity) ?? row)
+  const kinds = topValues(identities.map((row) => textField(row, "kind"))).slice(0, 3)
+  const namespaces = topValues(identities.map((row) => textField(row, "namespace"))).slice(0, 3)
+  const keys = topEvidenceKeys(rows).slice(0, 4)
+  const joined = [rows.map((row) => JSON.stringify(row)).join(" "), keys.join(" ")].join(" ").toLowerCase()
+  const oom = joined.includes("oom") || joined.includes("oomkilled")
+  const restart = joined.includes("restart") || joined.includes("last_reason") || joined.includes("reason")
+  const scope = [kinds.length ? kinds.join("/") : "resource", namespaces.length ? `in ${namespaces.join(", ")}` : ""].filter(Boolean).join(" ")
+  const topic = oom ? "OOM-related" : restart ? "restart/reason" : "matched"
+  return `${rows.length} ${topic} ${scope} record${rows.length === 1 ? "" : "s"}${keys.length ? `; evidence keys: ${keys.join(", ")}` : ""}.`
+}
+
+function genericRowsSummary(rows: Record<string, unknown>[]) {
+  const sample = rows.slice(0, 2).map((row) => rowLabel(row)).filter(Boolean).join("; ")
+  const columns = tableColumns(rows).slice(0, 5).join(", ")
+  return `${rows.length} row${rows.length === 1 ? "" : "s"}${columns ? ` with ${columns}` : ""}${sample ? `. Sample: ${sample}` : ""}`
 }
 
 function evidenceRows(value: unknown, data: Record<string, unknown> | undefined): Record<string, unknown>[] {
@@ -218,7 +273,9 @@ function evidenceDetails(value: unknown, data: Record<string, unknown> | undefin
     if (text) lines.push(`${key}: ${text}`)
   }
   add("Rows", rows.length || record?.rowCount)
-  add("Object", identityLabel(asRecord(record?.object) ?? asRecord(dataRecord?.identity)))
+  add("Object", identityLabel(asRecord(record?.identity) ?? asRecord(record?.object) ?? asRecord(dataRecord?.identity)))
+  add("Namespaces", topValues(rows.map((row) => textField(asRecord(row.identity) ?? row, "namespace"))).slice(0, 5).join(", "))
+  add("Evidence keys", topEvidenceKeys(rows).slice(0, 6).join(", "))
   add("Nodes", recordArray(record?.nodes ?? dataRecord?.nodes).length || undefined)
   add("Edges", recordArray(record?.edges ?? dataRecord?.edges).length || undefined)
   add("Versions", recordArray(record?.versions ?? dataRecord?.versions).length || undefined)
@@ -263,6 +320,13 @@ function parseMarkdownJSON(markdown: string | undefined) {
   }
 }
 
+function markdownLine(markdown: string | undefined, key: string) {
+  if (!markdown) return ""
+  const pattern = new RegExp(`^\\s*${key}\\s*:\\s*(.+)$`, "im")
+  const match = markdown.match(pattern)
+  return match ? truncate(match[1].trim(), 140) : ""
+}
+
 function stripCitation(record: Record<string, unknown> | undefined) {
   if (!record) return undefined
   const rest = { ...record }
@@ -280,7 +344,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function textField(record: Record<string, unknown> | undefined, key: string) {
   const value = record?.[key]
-  return typeof value === "string" ? value : ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  return ""
 }
 
 function compactValue(value: unknown) {
@@ -288,6 +354,49 @@ function compactValue(value: unknown) {
   if (typeof value === "string") return truncate(value, 96)
   if (typeof value === "number" || typeof value === "boolean") return String(value)
   return truncate(JSON.stringify(value), 96)
+}
+
+function topEvidenceKeys(rows: Record<string, unknown>[]) {
+  const values: string[] = []
+  for (const row of rows) {
+    values.push(...fieldStrings(row.facts), ...fieldStrings(row.reasons), ...fieldStrings(row.changes), ...fieldStrings(row.summary))
+  }
+  return topValues(values.flatMap((value) => value.split(/[=\s,]+/).filter((part) => part.includes(".") || part.includes("reason") || part.toLowerCase().includes("oom"))))
+}
+
+function fieldStrings(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => compactValue(item)).filter(Boolean)
+  const text = compactValue(value)
+  return text ? [text] : []
+}
+
+function topValues(values: string[]) {
+  const counts = new Map<string, number>()
+  for (const raw of values) {
+    const value = raw.trim()
+    if (!value) continue
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([value]) => value)
+}
+
+function observedRange(rows: Record<string, unknown>[]) {
+  const values = rows.flatMap((row) => [textField(row, "firstObservedAt"), textField(row, "lastObservedAt")]).filter(Boolean).sort()
+  if (values.length === 0) return ""
+  const first = values[0]
+  const last = values.at(-1)
+  return first === last ? first : `${first} to ${last}`
+}
+
+function maxNumericField(rows: Record<string, unknown>[], key: string) {
+  const values = rows.map((row) => Number(row[key])).filter((value) => Number.isFinite(value))
+  if (values.length === 0) return undefined
+  return Math.max(...values)
+}
+
+function containsText(values: string[], needle: string) {
+  const lower = needle.toLowerCase()
+  return values.some((value) => value.toLowerCase().includes(lower))
 }
 
 function truncate(value: string, max: number) {

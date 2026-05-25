@@ -151,9 +151,6 @@ func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) er
 }
 
 func (s *Server) StreamableHTTPHandler(sessionTimeout time.Duration) http.Handler {
-	if sessionTimeout <= 0 {
-		sessionTimeout = 30 * time.Minute
-	}
 	return sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
 		return s.sdkServer
 	}, &sdkmcp.StreamableHTTPOptions{
@@ -389,7 +386,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. For recent/today questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -436,7 +433,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_search",
-			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; call the target-specific typed tool directly. Start with includeBundles=false and narrow by kind, namespace, cluster, or time; set includeBundles=true only for top targets that need compact proof.",
+			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; call the target-specific typed tool directly. Start with includeBundles=false and narrow by kind, namespace, cluster, and from/to time when known; for relative-time prompts derive absolute bounds from client context. Set includeBundles=true only for top targets that need compact proof.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

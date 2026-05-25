@@ -92,7 +92,10 @@ func configuredMCPAgentTools(ctx context.Context, dbPath string, opts *api.Serve
 	if err != nil {
 		return nil, nil, err
 	}
-	httpServer := httptest.NewServer(mcpServer.StreamableHTTPHandler(30 * time.Minute))
+	// This MCP server is private to the in-process agent runner. Keep the
+	// session alive for the API server lifetime; otherwise an idle agent can
+	// retain a stale client session and fail later tool calls after timeout.
+	httpServer := httptest.NewServer(mcpServer.StreamableHTTPHandler(0))
 	cli, err := mcpclient.NewStreamableHttpClient(httpServer.URL)
 	if err != nil {
 		httpServer.Close()

@@ -280,6 +280,8 @@ func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
 			"Always call kube_insight_schema first",
 			"ClickHouse-compatible tables",
 			"Keep maxRows bounded",
+			"timestamp predicates",
+			"indexed fact/change/edge fields",
 		},
 		"kube_insight_health": {
 			"current-state claims",
@@ -290,6 +292,8 @@ func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
 			"broad discovery",
 			"includeBundles=false",
 			"includeBundles=true only for top targets",
+			"from/to time",
+			"client context",
 		},
 		"kube_insight_history": {
 			"one known object's",

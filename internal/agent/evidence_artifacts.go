@@ -99,8 +99,11 @@ func sqlEvidenceArtifacts(value any) []evidenceArtifactDraft {
 	if count, ok := record["rowCount"]; ok {
 		rowCount = intNumber(count, rowCount)
 	}
-	title := fmt.Sprintf("SQL evidence (%d rows)", rowCount)
-	markdown := evidenceMarkdown(title, value)
+	title := sqlEvidenceTitle(record, rowCount)
+	markdown := sqlEvidenceMarkdown(title, record)
+	if markdown == "" {
+		markdown = evidenceMarkdown(title, value)
+	}
 	return []evidenceArtifactDraft{{
 		Kind:         ArtifactKindMarkdown,
 		Title:        title,
@@ -108,6 +111,122 @@ func sqlEvidenceArtifacts(value any) []evidenceArtifactDraft {
 		CitationText: title,
 		Target:       jsonRaw(map[string]any{"type": CitationTargetSQLRow, "source": "kube_insight_sql", "rowCount": rowCount}),
 	}}
+}
+
+func sqlEvidenceTitle(record map[string]any, rowCount int) string {
+	rows, _ := record["rows"].([]any)
+	if rowCount <= 0 {
+		rowCount = len(rows)
+	}
+	var kind, factValue, factKey string
+	columnsText := strings.ToLower(fmt.Sprint(record["columns"]))
+	for _, value := range rows {
+		row := valueRecord(value)
+		if row == nil {
+			continue
+		}
+		if kind == "" {
+			kind = textField(row, "kind")
+		}
+		if factValue == "" {
+			factValue = textField(row, "fact_value")
+		}
+		if factKey == "" {
+			factKey = textField(row, "fact_key")
+		}
+	}
+	subject := "SQL evidence"
+	switch {
+	case strings.EqualFold(factValue, "OOMKilled") || strings.Contains(columnsText, "oom_count") || strings.Contains(columnsText, "oom"):
+		subject = "OOMKilled facts"
+	case strings.Contains(strings.ToLower(factKey), "restart") || strings.Contains(columnsText, "restart"):
+		subject = "Restart facts"
+	case factValue != "":
+		subject = factValue + " facts"
+	case factKey != "":
+		subject = factKey + " facts"
+	}
+	if kind != "" && strings.Contains(strings.ToLower(subject), "facts") {
+		subject = subject + " by " + kind
+	}
+	return fmt.Sprintf("%s (%d rows)", subject, rowCount)
+}
+
+func sqlEvidenceMarkdown(title string, record map[string]any) string {
+	rows, _ := record["rows"].([]any)
+	if len(rows) == 0 {
+		return "### " + title + "\n\nNo rows returned."
+	}
+	columns := stringList(record["columns"])
+	if len(columns) == 0 {
+		for key := range valueRecord(rows[0]) {
+			columns = append(columns, key)
+		}
+	}
+	if len(columns) == 0 {
+		return ""
+	}
+	if len(columns) > 8 {
+		columns = columns[:8]
+	}
+	var b strings.Builder
+	b.WriteString("### ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+	writeMarkdownTableRow(&b, columns)
+	separators := make([]string, len(columns))
+	for i := range separators {
+		separators[i] = "---"
+	}
+	writeMarkdownTableRow(&b, separators)
+	limit := len(rows)
+	if limit > 20 {
+		limit = 20
+	}
+	for _, value := range rows[:limit] {
+		row := valueRecord(value)
+		values := make([]string, 0, len(columns))
+		for _, column := range columns {
+			values = append(values, markdownCell(textField(row, column)))
+		}
+		writeMarkdownTableRow(&b, values)
+	}
+	if len(rows) > limit {
+		b.WriteString("\nShowing first ")
+		b.WriteString(fmt.Sprint(limit))
+		b.WriteString(" rows.")
+	}
+	return b.String()
+}
+
+func writeMarkdownTableRow(b *strings.Builder, values []string) {
+	b.WriteString("| ")
+	b.WriteString(strings.Join(values, " | "))
+	b.WriteString(" |\n")
+}
+
+func markdownCell(value string) string {
+	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "\n", " ")
+	value = strings.TrimSpace(value)
+	if len(value) > 96 {
+		value = value[:93] + "..."
+	}
+	return value
+}
+
+func stringList(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func searchEvidenceArtifacts(value any) []evidenceArtifactDraft {
@@ -206,6 +325,15 @@ func bundleItem(bundle map[string]any) map[string]any {
 		"identity": object,
 		"summary":  bundleSummaryLines(bundle),
 	}
+	if facts := factSummaryValues(bundle["facts"]); len(facts) > 0 {
+		item["facts"] = facts
+	}
+	if changes := changeSummaryValues(bundle["changes"]); len(changes) > 0 {
+		item["changes"] = changes
+	}
+	if reasons := stringValues(bundle["reasons"]); len(reasons) > 0 {
+		item["reasons"] = reasons
+	}
 	if summary := valueRecord(bundle["summary"]); summary != nil {
 		if score, ok := summary["evidenceScore"]; ok {
 			item["score"] = score
@@ -224,9 +352,13 @@ func matchItems(values []any) []map[string]any {
 		if match == nil {
 			continue
 		}
+		source := match
+		if object := valueRecord(match["object"]); object != nil {
+			source = object
+		}
 		identity := map[string]any{}
 		for _, key := range []string{"clusterId", "group", "version", "resource", "kind", "namespace", "name", "uid"} {
-			if value := textField(match, key); value != "" {
+			if value := textField(source, key); value != "" {
 				identity[key] = value
 			}
 		}
@@ -237,10 +369,75 @@ func matchItems(values []any) []map[string]any {
 		if reason, ok := match["reason"]; ok {
 			item["reason"] = reason
 		}
+		if reasons := stringValues(match["reasons"]); len(reasons) > 0 {
+			item["reasons"] = reasons
+		}
+		if facts := factSummaryValues(match["facts"]); len(facts) > 0 {
+			item["facts"] = facts
+		}
 		if score, ok := match["score"]; ok {
 			item["score"] = score
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+func stringValues(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func factSummaryValues(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		record := valueRecord(value)
+		if record == nil {
+			continue
+		}
+		key := firstNonEmptyString(textField(record, "factKey"), textField(record, "key"), textField(record, "name"))
+		factValue := firstNonEmptyString(textField(record, "factValue"), textField(record, "value"))
+		if key == "" {
+			continue
+		}
+		if factValue != "" {
+			out = append(out, key+"="+factValue)
+		} else {
+			out = append(out, key)
+		}
+	}
+	return out
+}
+
+func changeSummaryValues(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		record := valueRecord(value)
+		if record == nil {
+			continue
+		}
+		parts := nonEmptyStrings(textField(record, "changeType"), textField(record, "fieldPath"), textField(record, "lastObservedAt"))
+		if len(parts) > 0 {
+			out = append(out, strings.Join(parts, " "))
+		}
 	}
 	return out
 }
@@ -344,7 +541,53 @@ func topologyEdges(record map[string]any) []map[string]any {
 }
 
 func evidenceTitle(prefix string, items []map[string]any) string {
+	if prefix == "Search evidence" {
+		if symptom := resourceListSymptom(items); symptom != "" {
+			if kind := commonResourceKind(items); kind != "" {
+				return fmt.Sprintf("%s %s candidates (%d resources)", symptom, kind, len(items))
+			}
+			return fmt.Sprintf("%s candidates (%d resources)", symptom, len(items))
+		}
+	}
 	return fmt.Sprintf("%s (%d resources)", prefix, len(items))
+}
+
+func resourceListSymptom(items []map[string]any) string {
+	text := strings.ToLower(fmt.Sprint(items))
+	switch {
+	case strings.Contains(text, "oomkilled") || strings.Contains(text, "oom"):
+		return "OOMKilled"
+	case strings.Contains(text, "crashloopbackoff"):
+		return "CrashLoopBackOff"
+	case strings.Contains(text, "imagepullbackoff"):
+		return "ImagePullBackOff"
+	case strings.Contains(text, "failedscheduling"):
+		return "FailedScheduling"
+	case strings.Contains(text, "evicted"):
+		return "Evicted"
+	case strings.Contains(text, "restart"):
+		return "Restart"
+	}
+	return ""
+}
+
+func commonResourceKind(items []map[string]any) string {
+	var kind string
+	for _, item := range items {
+		identity := valueRecord(item["identity"])
+		current := textField(identity, "kind")
+		if current == "" {
+			continue
+		}
+		if kind == "" {
+			kind = current
+			continue
+		}
+		if kind != current {
+			return ""
+		}
+	}
+	return kind
 }
 
 func valueRecord(value any) map[string]any {

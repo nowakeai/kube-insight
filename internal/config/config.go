@@ -193,10 +193,11 @@ type GojaConfig struct {
 }
 
 type ServerConfig struct {
-	API     ListenerConfig `yaml:"api" json:"api"`
-	Metrics ListenerConfig `yaml:"metrics" json:"metrics"`
-	Web     ListenerConfig `yaml:"web" json:"web"`
-	Chat    ChatConfig     `yaml:"chat" json:"chat"`
+	API            ListenerConfig       `yaml:"api" json:"api"`
+	Metrics        ListenerConfig       `yaml:"metrics" json:"metrics"`
+	Web            ListenerConfig       `yaml:"web" json:"web"`
+	Chat           ChatConfig           `yaml:"chat" json:"chat"`
+	AgentRetention AgentRetentionConfig `yaml:"agentRetention" json:"agentRetention"`
 }
 
 type ListenerConfig struct {
@@ -211,6 +212,12 @@ type ChatConfig struct {
 	BaseURLEnv      string `yaml:"baseUrlEnv" json:"baseUrlEnv,omitempty"`
 	Model           string `yaml:"model" json:"model"`
 	OpenAIAPIKeyEnv string `yaml:"openaiApiKeyEnv" json:"openaiApiKeyEnv,omitempty"`
+}
+
+type AgentRetentionConfig struct {
+	Enabled         bool `yaml:"enabled" json:"enabled"`
+	IntervalSeconds int  `yaml:"intervalSeconds" json:"intervalSeconds"`
+	RunOnStart      bool `yaml:"runOnStart" json:"runOnStart"`
 }
 
 func (c ChatConfig) EffectiveAPIKeyEnv() string {

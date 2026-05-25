@@ -13,13 +13,16 @@ func TestFormatResourceHealthDSLCompactsProblemRowsAndErrors(t *testing.T) {
 		Summary:  storage.ResourceHealthSummary{Resources: 3, Healthy: 1, Unstable: 2},
 		ByStatus: map[string]int{"watching": 1, "retrying": 2},
 		Resources: []storage.ResourceHealthRecord{
-			{ClusterID: "c1", Resource: "pods", Version: "v1", Kind: "Pod", Status: "retrying", Error: longError},
-			{ClusterID: "c1", Resource: "jobs", Group: "batch", Version: "v1", Kind: "Job", Status: "retrying", Error: longError},
+			{ClusterID: "k8s-abc", ClusterUID: "abc", ClusterSource: "gke_project_region_cluster https://10.0.0.1", Resource: "pods", Version: "v1", Kind: "Pod", Status: "retrying", Error: longError},
+			{ClusterID: "k8s-abc", ClusterUID: "abc", ClusterSource: "gke_project_region_cluster https://10.0.0.1", Resource: "jobs", Group: "batch", Version: "v1", Kind: "Job", Status: "retrying", Error: longError},
 		},
 	}
 
 	text := formatResourceHealthDSL(report, 1)
-	if strings.Count(text, "\n- ") != 1 {
+	if !strings.Contains(text, "clusters:") || !strings.Contains(text, "display=gke_project_region_cluster") || !strings.Contains(text, "id=k8s-abc") {
+		t.Fatalf("missing cluster display map:\n%s", text)
+	}
+	if strings.Count(text, "resource=") != 1 {
 		t.Fatalf("expected one problem row, got:\n%s", text)
 	}
 	if !strings.Contains(text, "problem_resources_omitted: 1") {

@@ -117,7 +117,7 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 		if input.RunID != run.ID || len(input.Messages) != 2 || input.Messages[0].Role != agent.RoleSystem || input.Messages[1].Content != "is the api healthy?" {
 			t.Fatalf("runner input = %#v", input)
 		}
-		for _, want := range []string{"Client context for this run", "2026-05-24T23:30:00+08:00", "Asia/Shanghai", "zh-CN"} {
+		for _, want := range []string{"Client context for this run", "UTC for tool arguments", "render final-answer timestamps in the client time zone", "IANA time zone", "2026-05-24T23:30:00+08:00", "Asia/Shanghai", "zh-CN"} {
 			if !strings.Contains(input.Messages[0].Content, want) {
 				t.Fatalf("client context missing %q: %s", want, input.Messages[0].Content)
 			}

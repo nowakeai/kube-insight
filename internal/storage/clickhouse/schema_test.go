@@ -17,6 +17,8 @@ func TestCreateTableStatementsDefaultStringPayload(t *testing.T) {
 	joined := strings.Join(stmts, "\n")
 	for _, want := range []string{
 		"CREATE DATABASE IF NOT EXISTS `kube_insight`",
+		"CREATE TABLE IF NOT EXISTS `kube_insight`.clusters",
+		"ORDER BY (name)",
 		"CREATE TABLE IF NOT EXISTS `kube_insight`.api_resources",
 		"CREATE TABLE IF NOT EXISTS `kube_insight`.observations",
 		"doc String CODEC(ZSTD(3))",

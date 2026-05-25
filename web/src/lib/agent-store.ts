@@ -1,6 +1,7 @@
 import { create } from "zustand"
 
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+import { displayRunIdsForRetryBranches } from "@/lib/agent-retry-branches"
 
 export type AgentRunStatus = "queued" | "running" | "completed" | "failed" | "cancelled"
 
@@ -207,10 +208,25 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     const activate = options.activate ?? true
     set((current) => {
       const previous = current.sessions[session.id]
-      const runIds = uniqueValues([
+      const branchRunsById = { ...current.runs }
+      for (const run of session.runs ?? []) {
+        branchRunsById[run.id] = {
+          id: run.id,
+          sessionId: run.sessionId,
+          status: run.status,
+          input: run.input,
+          metadata: run.metadata,
+          createdAt: run.createdAt,
+          updatedAt: run.completedAt ?? run.startedAt ?? run.createdAt,
+          eventIds: [],
+          artifactIds: [],
+          citationIds: [],
+        }
+      }
+      const runIds = displayRunIdsForRetryBranches(uniqueValues([
         ...(previous?.runIds ?? []),
         ...(session.runs ?? []).map((run) => run.id),
-      ])
+      ]), branchRunsById)
       return {
         activeSessionId: activate ? session.id : current.activeSessionId,
         sessionOrder: uniquePrepend(current.sessionOrder, session.id),
@@ -241,6 +257,22 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
         updatedAt: run.createdAt,
         runIds: [],
       }
+      const nextRun: AgentRun = {
+        id: run.id,
+        sessionId: run.sessionId,
+        status: run.status,
+        input: run.input,
+        error: run.error,
+        metadata: run.metadata,
+        createdAt: run.createdAt,
+        updatedAt: run.completedAt ?? run.startedAt ?? now,
+        finalAnswer: previous?.finalAnswer,
+        eventIds: previous?.eventIds ?? [],
+        artifactIds: previous?.artifactIds ?? [],
+        citationIds: previous?.citationIds ?? [],
+      }
+      const runs = { ...current.runs, [run.id]: nextRun }
+      const runIds = displayRunIdsForRetryBranches(uniqueAppend(session.runIds, run.id), runs)
       return {
         activeSessionId: activate ? run.sessionId : current.activeSessionId,
         sessionOrder: uniquePrepend(current.sessionOrder, run.sessionId),
@@ -249,26 +281,10 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
           [run.sessionId]: {
             ...session,
             updatedAt: run.completedAt ?? run.startedAt ?? run.createdAt,
-            runIds: uniqueAppend(session.runIds, run.id),
+            runIds,
           },
         },
-        runs: {
-          ...current.runs,
-          [run.id]: {
-            id: run.id,
-            sessionId: run.sessionId,
-            status: run.status,
-            input: run.input,
-            error: run.error,
-            metadata: run.metadata,
-            createdAt: run.createdAt,
-            updatedAt: run.completedAt ?? run.startedAt ?? now,
-            finalAnswer: previous?.finalAnswer,
-            eventIds: previous?.eventIds ?? [],
-            artifactIds: previous?.artifactIds ?? [],
-            citationIds: previous?.citationIds ?? [],
-          },
-        },
+        runs,
       }
     })
   },

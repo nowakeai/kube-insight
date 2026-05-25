@@ -188,6 +188,7 @@ order by type, name`)
 		"Use object_facts and object_changes for fast investigation candidates; use versions/blob_ref/blobs.data for proof when exact retained JSON is needed.",
 		"For recent/today/last-N queries, include Unix-millisecond bounds on object_facts.ts, object_changes.ts, object_observations.observed_at, versions.observed_at, or object_edges.valid_from.",
 		"Prefer indexed fields before text/blob scans: cluster_id, fact_key, fact_value, object kind, namespace, name, time, edge_type, and change_family/path.",
+		"Use kube_insight_health cluster display map to render cluster_id as a human-readable cluster/context name in final answers.",
 		"object_edges.src_id and object_edges.dst_id reference objects.id.",
 		"Prefer object_facts/object_edges/object_changes before scanning blobs.data; blob scans are proof fallback and can be slower.",
 		"Use latest_raw_documents for the latest observed sanitized cluster snapshot; use latest_documents for the latest retained/normalized proof document.",

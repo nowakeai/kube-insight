@@ -119,6 +119,7 @@ ORDER BY table, position`, quoteString(database)))
 			"Active SQL backend: ClickHouse-compatible (ClickHouse or chDB).",
 			"ClickHouse timestamps use DateTime64 UTC columns unless noted otherwise.",
 			"Use observations and versions for proof; use facts, edges, and changes for investigation candidates.",
+			"Use kube_insight_health cluster display map to render cluster_id as a human-readable cluster/context name in final answers.",
 			"For recent/today/last-N queries, include UTC time bounds on facts.ts, changes.ts, observations.observed_at, versions.observed_at, edges.valid_from, or ingestion_offsets.updated_at.",
 			"Prefer sorted columns before text search: facts(cluster_id,fact_key,fact_value,ts), changes(cluster_id,change_family,path,ts), observations(cluster_id,kind,namespace,name,observed_at), edges(cluster_id,edge_type,src_id,valid_from_ms).",
 			"Avoid doc/detail text scans until candidates are narrowed by cluster, kind, namespace, name, exact fact/change/edge keys, and time.",

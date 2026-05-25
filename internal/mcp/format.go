@@ -178,6 +178,14 @@ func formatResourceHealthDSL(report storage.ResourceHealthReport, problemLimit i
 		b.WriteString(report.CheckedAt.UTC().Format(time.RFC3339Nano))
 		b.WriteByte('\n')
 	}
+	if clusters := compactHealthClusters(report.Resources); len(clusters) > 0 {
+		b.WriteString("clusters:\n")
+		for _, cluster := range clusters {
+			b.WriteString("- ")
+			b.WriteString(cluster)
+			b.WriteByte('\n')
+		}
+	}
 	b.WriteString("summary: ")
 	b.WriteString(compactHealthSummary(report.Summary))
 	b.WriteByte('\n')
@@ -216,6 +224,53 @@ func formatResourceHealthDSL(report storage.ResourceHealthReport, problemLimit i
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func compactHealthClusters(records []storage.ResourceHealthRecord) []string {
+	byID := map[string]storage.ResourceHealthRecord{}
+	order := []string{}
+	for _, record := range records {
+		id := strings.TrimSpace(record.ClusterID)
+		if id == "" {
+			continue
+		}
+		existing, ok := byID[id]
+		if !ok {
+			byID[id] = record
+			order = append(order, id)
+			continue
+		}
+		if existing.ClusterSource == "" && record.ClusterSource != "" {
+			existing.ClusterSource = record.ClusterSource
+		}
+		if existing.ClusterUID == "" && record.ClusterUID != "" {
+			existing.ClusterUID = record.ClusterUID
+		}
+		byID[id] = existing
+	}
+	out := make([]string, 0, len(order))
+	for _, id := range order {
+		record := byID[id]
+		parts := []string{"display=" + clusterDisplayName(record), "id=" + id}
+		if record.ClusterUID != "" {
+			parts = append(parts, "uid="+record.ClusterUID)
+		}
+		if record.ClusterSource != "" {
+			parts = append(parts, "source="+oneLineLimit(record.ClusterSource, 160))
+		}
+		out = append(out, strings.Join(parts, " "))
+	}
+	return out
+}
+
+func clusterDisplayName(record storage.ResourceHealthRecord) string {
+	if record.ClusterSource != "" {
+		fields := strings.Fields(record.ClusterSource)
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return record.ClusterID
 }
 
 func compactHealthSummary(summary storage.ResourceHealthSummary) string {

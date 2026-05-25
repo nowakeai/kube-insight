@@ -321,6 +321,20 @@ When using `evidence_condenser`, include source artifact IDs/titles and
 relevant row or snippet excerpts in the request. Do not ask the condenser to
 re-summarize only the main agent's prose.
 
+For multi-cluster answers, verify that the first health result exposes a
+`clusters:` display map and that final answers use the readable context/display
+name plus the stable `cluster_id` when needed. For runs started from the Web UI,
+verify that final-answer timestamps are shown in the client time zone; SQL and
+tool time bounds should still use UTC.
+
+For Web UI retry changes, run the retry projection tests. Retry should rewind to
+the retried run checkpoint, replace that branch, and never append a duplicate
+user/assistant turn after the old answer:
+
+```bash
+npm --prefix web run test -- src/lib/agent-retry-branches.spec.ts src/lib/agent-store.spec.ts
+```
+
 Run the opt-in real DB prompt-context comparison when evaluating whether a
 larger system prompt reduces discovery calls. This sends selected evidence DB
 content and user questions to the configured live model endpoint, so use only

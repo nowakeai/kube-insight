@@ -18,6 +18,7 @@ import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, getA
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
+import { displayRunIdsForRetryBranches } from "@/lib/agent-retry-branches"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
 const starterPrompts = [
@@ -77,7 +78,10 @@ export function AgentChat() {
   const sessionRuns = (visibleSession?.runIds ?? [])
     .map((runID) => runsById[runID])
     .filter((run): run is AgentRun => Boolean(run))
-  const visibleRuns = displayRunsForRetryBranches(sessionRuns, runsById)
+  const visibleRunIds = displayRunIdsForRetryBranches(sessionRuns.map((run) => run.id), runsById)
+  const visibleRuns = visibleRunIds
+    .map((runID) => runsById[runID])
+    .filter((run): run is AgentRun => Boolean(run))
   const visiblePanelArtifacts = (visiblePanelWorkspace?.pinnedArtifactIds ?? [])
     .map((artifactID) => artifactsById[artifactID])
     .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
@@ -238,7 +242,8 @@ export function AgentChat() {
     const sessionRuns = session.runIds
       .map((runID) => state.runs[runID])
       .filter((run): run is AgentRun => Boolean(run))
-    const run = displayRunsForRetryBranches(sessionRuns, state.runs).at(-1)
+    const runIds = displayRunIdsForRetryBranches(sessionRuns.map((candidate) => candidate.id), state.runs)
+    const run = runIds.map((runID) => state.runs[runID]).filter((candidate): candidate is AgentRun => Boolean(candidate)).at(-1)
     eventSubscriptionRef.current?.abort()
     activeServerRunRef.current = run?.status === "running" ? run.id : undefined
     setIsRunning(run?.status === "running")
@@ -414,11 +419,11 @@ async function runServerPrompt(prompt: string, options: RunServerPromptOptions) 
   let errorText = run.error ?? ""
   let terminal = isTerminalRunStatus(run.status)
   options.setIsRunning(!terminal)
-  options.setMessages((current) => [
-    ...current,
+  const pendingMessages = [
     userMessage(prompt),
     assistantMessage(assistantID, terminal ? queuedRunMessage(run.status) : "", terminal ? "complete" : "running"),
-  ])
+  ]
+  options.setMessages((current) => options.retryRunId ? pendingMessages : [...current, ...pendingMessages])
 
   const subscription = streamAgentRunEvents({
     runId: run.id,
@@ -683,46 +688,6 @@ function ChatComposer({
       )}
     </ComposerPrimitive.Root>
   )
-}
-
-function displayRunsForRetryBranches(runs: AgentRun[], runsById: Record<string, AgentRun>) {
-  const visible: AgentRun[] = []
-  for (const run of runs) {
-    const retryOf = retryOfRunId(run)
-    if (!retryOf) {
-      visible.push(run)
-      continue
-    }
-
-    const rootId = retryRootRunId(run, runsById)
-    const replaceIndex = visible.findIndex((candidate) => retryRootRunId(candidate, runsById) === rootId)
-    if (replaceIndex >= 0) {
-      visible.splice(replaceIndex, visible.length - replaceIndex, run)
-    } else {
-      visible.push(run)
-    }
-  }
-  return visible
-}
-
-function retryRootRunId(run: AgentRun, runsById: Record<string, AgentRun>) {
-  let root = run
-  const seen = new Set<string>()
-  while (!seen.has(root.id)) {
-    seen.add(root.id)
-    const retryOf = retryOfRunId(root)
-    const parent = retryOf ? runsById[retryOf] : undefined
-    if (!parent) break
-    root = parent
-  }
-  return root.id
-}
-
-function retryOfRunId(run: AgentRun) {
-  const metadata = run.metadata
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
-  const retryOf = (metadata as Record<string, unknown>).retryOfRunId
-  return typeof retryOf === "string" && retryOf ? retryOf : undefined
 }
 
 function appendMessageText(message: AppendMessage) {

@@ -164,6 +164,8 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 			}
 		}
 		watchLog(opts.Logf, "resolved cluster", "context", opts.Context, "clusterId", opts.ClusterID, "uid", emptyLabel(identity.UID))
+	} else if err := upsertConfiguredCluster(ctx, opts.Store, opts.ClusterID, opts.Context); err != nil {
+		watchLog(opts.Logf, "cluster metadata unavailable", "context", opts.Context, "clusterId", opts.ClusterID, "error", err)
 	}
 	if opts.Concurrency <= 0 {
 		opts.Concurrency = 4
@@ -749,4 +751,25 @@ func resourceLookupKeys(resource Resource) []string {
 		appendKey(resource.Name + "." + resource.Group)
 	}
 	return keys
+}
+
+func upsertConfiguredCluster(ctx context.Context, store storage.Store, clusterID, contextName string) error {
+	if clusterID == "" {
+		return nil
+	}
+	clusterStore, ok := store.(storage.ClusterStore)
+	if !ok {
+		return nil
+	}
+	record := storage.ClusterRecord{Name: clusterID, Source: contextName}
+	if contextName != "" {
+		identity, err := ResolveClusterIdentityClientGo(ctx, contextName)
+		if err == nil {
+			record.UID = identity.UID
+			record.Source = clusterSource(identity)
+		} else if record.Source == "" {
+			return err
+		}
+	}
+	return clusterStore.UpsertCluster(ctx, record)
 }

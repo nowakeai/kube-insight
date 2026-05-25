@@ -411,7 +411,7 @@ func agentRunClientContextMessage(metadata json.RawMessage) string {
 	}
 	var b strings.Builder
 	b.WriteString("Client context for this run:\n")
-	b.WriteString("- Use this to interpret relative user dates/times such as today, yesterday, last 10 minutes, or this week. It is not proof about Kubernetes state.\n")
+	b.WriteString("- Use this to interpret relative user dates/times such as today, yesterday, last 10 minutes, or this week. It is not proof about Kubernetes state. Use UTC for tool arguments and SQL predicates, but render final-answer timestamps in the client time zone when provided, preferably with the IANA time zone name or numeric offset instead of ambiguous abbreviations; include UTC only as a secondary reference when useful.\n")
 	writeClientContextLine(&b, "Client sent at", contextString(contextRecord, "sentAt"))
 	writeClientContextLine(&b, "Client local time", contextString(contextRecord, "localTime"))
 	writeClientContextLine(&b, "Client time zone", contextString(contextRecord, "timeZone"))

@@ -129,7 +129,7 @@ func TestRunDBClickHouseInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(requests) != 21 {
+	if len(requests) != 22 {
 		t.Fatalf("requests = %d %#v", len(requests), requests)
 	}
 	for _, want := range []string{
@@ -137,7 +137,7 @@ func TestRunDBClickHouseInit(t *testing.T) {
 		"ki",
 		"statements",
 		"applied",
-		"21",
+		"22",
 		"password=***",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -149,6 +149,9 @@ func TestRunDBClickHouseInit(t *testing.T) {
 	}
 	if !strings.Contains(requests[0], "CREATE DATABASE IF NOT EXISTS `ki`") {
 		t.Fatalf("first request = %s", requests[0])
+	}
+	if !strings.Contains(requests[1], "CREATE TABLE IF NOT EXISTS `ki`.clusters") {
+		t.Fatalf("second request = %s", requests[1])
 	}
 	if !strings.Contains(strings.Join(requests, "\n"), "CREATE TABLE IF NOT EXISTS `ki`.filter_decisions") {
 		t.Fatalf("requests missing filter_decisions table: %#v", requests)

@@ -58,6 +58,7 @@ func CreateTableStatements(opts SchemaOptions) ([]string, error) {
 	}
 	statements := []string{
 		fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s%s", q(opts.Database), clusterClause(opts.Cluster)),
+		createClusters(opts),
 		createAPIResources(opts),
 		createObservations(opts, docType),
 		createObjectAliases(opts),
@@ -80,6 +81,18 @@ func CreateAgentTableStatements(opts SchemaOptions) []string {
 		createAgentRuns(opts),
 		createAgentRunEvents(opts),
 	}
+}
+
+func createClusters(opts SchemaOptions) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.clusters%s (
+    name String,
+    uid String,
+    source String,
+    created_at DateTime64(3, 'UTC')
+)
+ENGINE = ReplacingMergeTree(created_at)
+ORDER BY (name)
+%s`, q(opts.Database), clusterClause(opts.Cluster), ttlClause(opts, "created_at"))
 }
 
 func createAPIResources(opts SchemaOptions) string {

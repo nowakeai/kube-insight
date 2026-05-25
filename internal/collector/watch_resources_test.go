@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"kube-insight/internal/core"
+	"kube-insight/internal/extractor"
 	"kube-insight/internal/ingest"
+	"kube-insight/internal/storage"
 )
 
 func TestAggregateWatchResourcesSummaryUsesInitialListWorkers(t *testing.T) {
@@ -113,6 +116,16 @@ func TestGracefulWatchStop(t *testing.T) {
 	}
 }
 
+func TestUpsertConfiguredClusterUsesExplicitClusterID(t *testing.T) {
+	store := &clusterMetadataStore{}
+	if err := upsertConfiguredCluster(context.Background(), store, "k8s-explicit", ""); err != nil {
+		t.Fatal(err)
+	}
+	if store.cluster.Name != "k8s-explicit" {
+		t.Fatalf("cluster metadata = %#v", store.cluster)
+	}
+}
+
 func TestTransientWatchStreamErrorClassification(t *testing.T) {
 	transient := []error{
 		errWatchClosed,
@@ -167,4 +180,25 @@ func TestEnrichWatchResourcesMatchesQualifiedNames(t *testing.T) {
 	if enriched[0].Resource != "apiservices" || enriched[0].Kind != "APIService" || enriched[0].Namespaced {
 		t.Fatalf("enriched resource = %#v", enriched[0])
 	}
+}
+
+type clusterMetadataStore struct {
+	cluster storage.ClusterRecord
+}
+
+func (s *clusterMetadataStore) PutObservation(context.Context, core.Observation, extractor.Evidence) error {
+	return nil
+}
+
+func (s *clusterMetadataStore) GetFacts(context.Context, string) ([]core.Fact, error) {
+	return nil, nil
+}
+
+func (s *clusterMetadataStore) GetEdges(context.Context, string) ([]core.Edge, error) {
+	return nil, nil
+}
+
+func (s *clusterMetadataStore) UpsertCluster(_ context.Context, cluster storage.ClusterRecord) error {
+	s.cluster = cluster
+	return nil
 }

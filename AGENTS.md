@@ -61,6 +61,14 @@ operational notes, and design details in `docs/`.
   before adding large precomputed context caches. If a subagent such as the
   evidence condenser is used, pass artifact IDs/titles and concrete row or
   snippet excerpts so the secondary model remains evidence-bound.
+- Agent answers should prefer human-readable cluster context/display names when
+  available, while still including stable cluster IDs for exact evidence binding.
+  Tool/SQL arguments remain UTC, but final user-facing timestamps should be
+  rendered in the browser/client time zone when the Web UI provides it.
+- Web UI retry is rewind semantics, not append semantics. A retry run must
+  replace the retried run and truncate later runs in that branch in the session
+  projection. Any change to session/run projection or retry UI must keep the
+  retry branch tests passing.
 - Keep compression, delta logic, and retention policy above storage backends so
   SQLite/chDB/ClickHouse and any SQL compatibility backends can share the same
   product semantics.

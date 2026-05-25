@@ -57,6 +57,10 @@ operational notes, and design details in `docs/`.
   changes, and edges before raw JSON/document scans; pass absolute time bounds
   from client context for relative-time prompts; avoid repeated broad searches
   without kind/namespace/cluster/time filters.
+- Optimize agent speed with prompt/tool contracts and real-case evaluation
+  before adding large precomputed context caches. If a subagent such as the
+  evidence condenser is used, pass artifact IDs/titles and concrete row or
+  snippet excerpts so the secondary model remains evidence-bound.
 - Keep compression, delta logic, and retention policy above storage backends so
   SQLite/chDB/ClickHouse and any SQL compatibility backends can share the same
   product semantics.

@@ -433,7 +433,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_search",
-			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; call the target-specific typed tool directly. Start with includeBundles=false and narrow by kind, namespace, cluster, and from/to time when known; for relative-time prompts derive absolute bounds from client context. Set includeBundles=true only for top targets that need compact proof.",
+			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; for exact recent-change questions use schema-guided SQL over changes, and for exact Service health use the Service investigation tool. Start with includeBundles=false and narrow by kind, namespace, cluster, and from/to time when known; for relative-time prompts derive absolute bounds from client context. Set includeBundles=true only for top targets that need compact proof.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -454,7 +454,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_history",
-			Description: "Return one known object's retained content versions, observation trail, and optional version diffs. Use after search or SQL identifies the exact object. Keep maxVersions and maxObservations bounded; leave includeDocs=false unless raw YAML/JSON proof is explicitly needed.",
+			Description: "Return one known object's retained content versions, observation trail, and optional version diffs. Use after search or SQL identifies the exact object. Do not call this for exact recent-change questions if a bounded changes SQL query already returned enough rows to answer. In multi-cluster data, include cluster or uid when known; if only namespace/name is known and the object may exist in multiple clusters, locate the exact object with search or SQL first. Keep maxVersions and maxObservations bounded; leave includeDocs=false unless raw YAML/JSON proof is explicitly needed.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

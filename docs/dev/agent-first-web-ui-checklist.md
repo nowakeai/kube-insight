@@ -164,8 +164,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   later without repeating the full payload in `tool.completed` and `tool.audit`.
   Eino tool results now create one `tool_call` artifact and tool events carry
   `outputSummary` plus `outputArtifactId`.
-- [ ] Add a specialist evidence-condenser subagent as `AgentAsTool` or
-  `NewAgentTool` only after compact MCP outputs still prove insufficient.
+- [x] Add a specialist evidence-condenser subagent as `AgentAsTool` or
+  `NewAgentTool` for noisy evidence summaries; the main agent must pass
+  source artifact IDs/titles and row/snippet excerpts, not only prose.
 - [ ] Pre-wire the run event model for subagent start/completion/error events,
   including parent tool call id, input artifact handles, compact findings, and
   citations.
@@ -236,7 +237,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - [x] Smoke the matrix against MIMO `mimo-v2.5-pro`; the four default cases
     pass with deterministic candidate artifacts, verified answer citations, and
     tightened tool-use guidance.
-  - [ ] Extend the case set with history diff and SQL evidence lookup.
+  - [x] Extend the case set with SQL evidence lookup for OOM aggregate and
+    exact recent-change rollups.
+  - [ ] Extend the case set with history diff.
   - [ ] Add an opt-in API live smoke that submits runs through the API and
     scores returned SSE transcripts with the same harness.
 - [x] Export agent tool-call duration as Prometheus histogram

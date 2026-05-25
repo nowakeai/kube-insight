@@ -44,6 +44,14 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 	if err != nil {
 		return nil, nil, err
 	}
+	condenser, err := agent.NewEvidenceCondenserTool(ctx, model)
+	if err != nil {
+		if closeTools != nil {
+			_ = closeTools()
+		}
+		return nil, nil, err
+	}
+	tools = append(tools, condenser)
 	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
 		Description:        "Kubernetes investigation assistant backed by kube-insight MCP evidence tools.",
 		Model:              model,

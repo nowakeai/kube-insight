@@ -297,6 +297,30 @@ KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-live" \
 go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
 ```
 
+Real cluster agent prompt convergence should use a small mixed case set before
+committing prompt changes. Prefer prompt/tool-contract fixes over precomputing
+large context caches or storing duplicate space-for-time summaries. Use the
+compose API service, not an extra host `serve`, so the Web UI and API see the
+same backend:
+
+| Case | Example user prompt | Expected path | Budget |
+| --- | --- | --- | --- |
+| OOM existence | `最近有没有 oom 现象？` | health + one Pod search with bundles | <=2 tools |
+| OOM ranking | `过去 24 小时哪些 Pod 有 OOMKilled，按次数排序。` | health + schema + one facts SQL | <=3 tools |
+| Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
+| Service health | exact Service health question | health + service investigation | <=2 tools |
+| Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
+
+For exact recent-change prompts, the SQL should be a rollup over `changes`
+grouped by `cluster_id`, `change_family`, `path`, and severity with
+`count()`, `min(ts)`, and `max(ts)`. If the rollup only shows status rows, the
+agent should answer that only status changes were observed in the retained
+window instead of launching Pod, topology, or root-cause follow-up queries.
+
+When using `evidence_condenser`, include source artifact IDs/titles and
+relevant row or snippet excerpts in the request. Do not ask the condenser to
+re-summarize only the main agent's prose.
+
 Run the opt-in real DB prompt-context comparison when evaluating whether a
 larger system prompt reduces discovery calls. This sends selected evidence DB
 content and user questions to the configured live model endpoint, so use only

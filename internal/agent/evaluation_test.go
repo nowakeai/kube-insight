@@ -7,14 +7,16 @@ import (
 
 func TestDefaultEvaluationCasesCoverRepresentativeAgentQuestions(t *testing.T) {
 	cases := DefaultEvaluationCases()
-	if len(cases) < 4 {
-		t.Fatalf("default evaluation cases = %d, want at least 4", len(cases))
+	if len(cases) < 5 {
+		t.Fatalf("default evaluation cases = %d, want at least 5", len(cases))
 	}
 	wantIDs := map[string]bool{
-		"service-health":   false,
-		"oom-restart":      false,
-		"recent-changes":   false,
-		"topology-mapping": false,
+		"service-health":       false,
+		"oom-restart":          false,
+		"oom-aggregate":        false,
+		"recent-changes":       false,
+		"exact-recent-changes": false,
+		"topology-mapping":     false,
 	}
 	for _, tc := range cases {
 		if tc.ID == "" || tc.Question == "" {

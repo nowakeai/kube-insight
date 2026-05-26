@@ -426,13 +426,36 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
   awk '/^data: /{sub(/^data: /,""); print}' "${retry_sse_path}" | jq -s '.' >"${retry_events_json}"
   retry_status="$(jq -r 'map(select(.type=="run.completed" or .type=="run.failed" or .type=="run.cancelled")) | last | .type // empty' "${retry_events_json}")"
   retry_completion_requests="$(jq '[.[] | select(.type=="completion.request")] | length' "${retry_events_json}")"
+  retry_tool_calls="$(jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed")]' "${retry_events_json}")"
+  retry_tool_call_count="$(jq 'length' <<<"${retry_tool_calls}")"
+  retry_tool_call_names="$(jq '[.[].data.name // ""] | map(select(. != ""))' <<<"${retry_tool_calls}")"
+  retry_failed_tool_call_count="$(jq '[.[] | select(.type=="tool.failed" or .data.status=="failed")] | length' <<<"${retry_tool_calls}")"
+  retry_artifacts="$(jq '[.[] | select(.type=="artifact.created")] | length' "${retry_events_json}")"
+  retry_citations="$(jq '[.[] | select(.type=="citation.created")] | length' "${retry_events_json}")"
+  retry_child_run_ids="$(jq '[.[] | select(.type=="artifact.created") | .data.artifact.data.output.branches[]? | select(.childRunId != null) | .childRunId] | unique | length' "${retry_events_json}")"
   if [[ "${retry_status}" != "run.completed" || "${retry_completion_requests}" -lt 1 ]]; then
     echo "Retry run ${retry_run_id} did not complete with completion.request events." >&2
     jq 'map({type, sequence, data})' "${retry_events_json}" >&2
     exit 1
   fi
+  if (( retry_failed_tool_call_count > MAX_FAILED_TOOL_CALLS )); then
+    echo "Retry run ${retry_run_id} exceeded failed tool-call budget: failed=${retry_failed_tool_call_count} max=${MAX_FAILED_TOOL_CALLS}" >&2
+    jq '[.[] | select(.type=="tool.failed" or .data.status=="failed") | {type, sequence, data}]' "${retry_events_json}" >&2
+    exit 1
+  fi
   retry_context_json="${WORK_DIR}/retry-first.context.json"
   "${BIN}" --db "${DB_PATH}" db agent-context "${retry_run_id}" --all --output json >"${retry_context_json}"
+  retry_initial_context_metrics="$(jq '
+    ((.requests[0] // {messages: []}).messages // []) as $messages
+    | ($messages | map(select(.role == "tool"))) as $toolMessages
+    | {
+      messages: ($messages | length),
+      totalChars: (($messages | map(.contentChars // 0) | add) // 0),
+      toolChars: (($toolMessages | map(.contentChars // 0) | add) // 0),
+      maxToolChars: (($toolMessages | map(.contentChars // 0) | max) // 0),
+      compactedToolResults: ($toolMessages | map(select((.content // "") | contains("kube-insight.agent.compacted_tool_result.v1"))) | length)
+    }
+  ' "${retry_context_json}")"
   validate_context_tool_order "${retry_context_json}"
   if ! jq -e --arg question "${original_question}" '.requests[0].messages[]? | select(.role=="user" and .content==$question)' "${retry_context_json}" >/dev/null; then
     echo "Retry run ${retry_run_id} first completion.request is missing original user message: ${original_question}" >&2
@@ -473,11 +496,18 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
     --arg status "${retry_status}" \
     --argjson completionRequests "${retry_completion_requests}" \
     --argjson contextMessages "$(jq '.requests[0].messageCount' "${retry_context_json}")" \
+    --argjson initialContext "${retry_initial_context_metrics}" \
+    --argjson toolCalls "${retry_tool_call_count}" \
+    --argjson failedToolCalls "${retry_failed_tool_call_count}" \
+    --argjson toolNames "${retry_tool_call_names}" \
+    --argjson artifacts "${retry_artifacts}" \
+    --argjson citations "${retry_citations}" \
+    --argjson childRunIds "${retry_child_run_ids}" \
     --arg eventsPath "${retry_events_json}" \
     --arg contextPath "${retry_context_json}" \
     --arg sessionPath "${session_after_retry_json}" \
     --argjson sessionRunCount "$(jq '.runs | length' "${session_after_retry_json}")" \
-    '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, sessionRunCount:$sessionRunCount, eventsPath:$eventsPath, contextPath:$contextPath, sessionPath:$sessionPath}' >>"${SUMMARY_PATH}"
+    '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, initialContext:$initialContext, toolCalls:$toolCalls, failedToolCalls:$failedToolCalls, toolNames:$toolNames, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, sessionRunCount:$sessionRunCount, eventsPath:$eventsPath, contextPath:$contextPath, sessionPath:$sessionPath}' >>"${SUMMARY_PATH}"
 fi
 printf ']\n' >>"${SUMMARY_PATH}"
 write_smoke_report

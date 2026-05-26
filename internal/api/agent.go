@@ -318,7 +318,11 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	flushServerSentEvents(w)
-	if !follow || agentRunStatusTerminal(run.Status) {
+	if !follow {
+		return
+	}
+	if agentRunStatusTerminal(run.Status) {
+		flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, lastSequence)
 		return
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -343,9 +347,49 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		flushServerSentEvents(w)
 		if agentRunStatusTerminal(run.Status) {
+			flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, lastSequence)
 			return
 		}
 	}
+}
+
+func flushFinalAgentRunEvents(ctx context.Context, w http.ResponseWriter, store agent.Store, runID string, lastSequence int64) {
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		events, err := store.ListRunEvents(ctx, runID)
+		if err != nil {
+			return
+		}
+		var ok bool
+		lastSequence, ok = writeServerSentEvents(w, events, lastSequence)
+		if !ok {
+			return
+		}
+		flushServerSentEvents(w)
+		if runEventsContainTerminalEvent(events) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runEventsContainTerminalEvent(events []agent.RunEvent) bool {
+	for _, event := range events {
+		switch event.Type {
+		case agent.EventRunCompleted, agent.EventRunFailed, agent.EventRunCancelled:
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) startAgentRun(run agent.Run, messages []agent.Message) {

@@ -251,6 +251,44 @@ func TestCreateAgentRunStreamsArtifactAndCitationEvents(t *testing.T) {
 	}
 }
 
+func TestAgentRunEventsFollowFlushesDelayedTerminalEvent(t *testing.T) {
+	runner := &delayedTerminalEventRunner{statusCompleted: make(chan struct{}), delay: 150 * time.Millisecond}
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var run struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"delayed terminal event"}`, http.StatusCreated, &run)
+	select {
+	case <-runner.statusCompleted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner did not reach terminal status")
+	}
+
+	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
+	for _, want := range []string{"event: answer.final", "event: run.completed", "delayed terminal answer"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("events missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 	runner := &retryingAgentRunner{inputs: make(chan agent.EinoRunInput, 3)}
 	handler, err := NewServer(ServerOptions{
@@ -651,4 +689,47 @@ func TestAgentEndpointsValidateInputAndMissingIDs(t *testing.T) {
 	getBody(t, server.URL+"/api/v1/agent/runs/missing/events", http.StatusNotFound)
 	assertPOSTStatus(t, server.URL+"/api/v1/agent/runs/missing/cancel", `{}`, http.StatusNotFound)
 	assertDELETEStatus(t, server.URL+"/api/v1/agent/sessions/missing", http.StatusNotFound)
+}
+
+type delayedTerminalEventRunner struct {
+	statusCompleted chan struct{}
+	delay           time.Duration
+}
+
+func (r *delayedTerminalEventRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	run, err := input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunRunning, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunStarted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: "delayed terminal answer"}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	run, err = input.Store.UpdateRunStatus(ctx, input.RunID, agent.RunCompleted, "")
+	if err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	close(r.statusCompleted)
+	timer := time.NewTimer(r.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return agent.EinoRunResult{}, ctx.Err()
+	case <-timer.C:
+	}
+	if _, err := input.Store.AppendRunEvent(ctx, input.RunID, agent.AppendEventInput{
+		Type: agent.EventRunCompleted,
+		Data: mustJSON(agent.RunStatusEventData{RunID: input.RunID, SessionID: run.SessionID, Status: run.Status}),
+	}); err != nil {
+		return agent.EinoRunResult{}, err
+	}
+	return agent.EinoRunResult{FinalAnswer: "delayed terminal answer", Events: 1}, nil
 }

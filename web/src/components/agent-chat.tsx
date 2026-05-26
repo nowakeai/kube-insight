@@ -163,7 +163,9 @@ export function AgentChat() {
       setMessages(threadMessagesFromHydratedRun(hydratedRun, routeRunDTO, routeEvents))
       setRouteHydrating(false)
 
-      void hydrateSiblingRunEvents(sessionRuns, routeRun!.runID, abortController.signal, applyServerEvents)
+      if (!parentRunId(routeRunDTO)) {
+        void hydrateSiblingRunEvents(sessionRuns, routeRun!.runID, abortController.signal, applyServerEvents)
+      }
     }
 
     void hydrateRouteRun().catch((error: unknown) => {

@@ -87,6 +87,31 @@ func TestTopologyEvidenceArtifactsAcceptSrcDstEdges(t *testing.T) {
 	}
 }
 
+func TestHistoryEvidenceArtifactsIncludeChangesAndDiffs(t *testing.T) {
+	artifacts := evidenceArtifactsFromToolOutput("kube_insight_history", jsonRaw(map[string]any{
+		"object": liveTestObject("Pod", "default", "api-0"),
+		"versions": []any{
+			map[string]any{"versionId": "v1", "changeSummary": "ready pod"},
+			map[string]any{"versionId": "v2", "changeSummary": "reason OOMKilled"},
+		},
+		"changes": []any{
+			map[string]any{"path": "status.containerStatuses.api.lastState.reason", "after": "OOMKilled"},
+		},
+		"diffs": []any{
+			map[string]any{"path": "status.containerStatuses.api.restartCount", "before": 0, "after": 1},
+		},
+	}))
+	if len(artifacts) != 1 || artifacts[0].Kind != ArtifactKindK8sHistory {
+		t.Fatalf("history artifacts = %#v", artifacts)
+	}
+	data := string(artifacts[0].Data)
+	for _, want := range []string{"api-0", "OOMKilled", "changes", "diffs", "restartCount"} {
+		if !strings.Contains(data, want) {
+			t.Fatalf("history artifact data missing %q: %s", want, data)
+		}
+	}
+}
+
 func TestSearchEvidenceArtifactsIncludeNestedMatchReasons(t *testing.T) {
 	artifacts := evidenceArtifactsFromToolOutput("kube_insight_search", jsonRaw(map[string]any{
 		"matches": []any{map[string]any{

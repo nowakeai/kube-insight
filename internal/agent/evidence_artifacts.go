@@ -269,6 +269,12 @@ func historyEvidenceArtifacts(value any) []evidenceArtifactDraft {
 	}
 	object := valueRecord(record["object"])
 	data := map[string]any{"versions": versions}
+	if changes, ok := record["changes"].([]any); ok && len(changes) > 0 {
+		data["changes"] = changes
+	}
+	if diffs, ok := record["diffs"].([]any); ok && len(diffs) > 0 {
+		data["diffs"] = diffs
+	}
 	if object != nil {
 		data["identity"] = object
 		data["title"] = objectLabel(object)

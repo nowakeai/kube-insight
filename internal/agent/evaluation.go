@@ -132,6 +132,16 @@ func DefaultEvaluationCases() []EvaluationCase {
 			MaxToolCallDurationMS:    2000,
 		},
 		{
+			ID:                    "history-diff",
+			Question:              "What changed between retained versions for Pod default/api-0? Use history diffs and cite the proof.",
+			RequiredTools:         []string{"kube_insight_history"},
+			RequiredArtifactKinds: []string{ArtifactKindK8sHistory},
+			RequiredAnswerTerms:   []string{"pod", "default/api-0", "oomkilled"},
+			MinCitations:          1,
+			MaxToolCalls:          3,
+			MaxToolCallDurationMS: 2000,
+		},
+		{
 			ID:                    "exact-recent-changes",
 			Question:              "What changed recently for Deployment default/api?",
 			RequiredTools:         []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
@@ -139,6 +149,16 @@ func DefaultEvaluationCases() []EvaluationCase {
 			RequiredAnswerTerms:   []string{"change", "deployment", "default/api"},
 			MinCitations:          1,
 			MaxToolCalls:          3,
+			MaxToolCallDurationMS: 2000,
+		},
+		{
+			ID:                    "schema-sql-evidence",
+			Question:              "Use schema then SQL to prove recent resource request or limit changes for Deployment default/api, and cite the SQL evidence.",
+			RequiredTools:         []string{"kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:   []string{"deployment", "default/api", "memory", "change"},
+			MinCitations:          1,
+			MaxToolCalls:          4,
 			MaxToolCallDurationMS: 2000,
 		},
 		{

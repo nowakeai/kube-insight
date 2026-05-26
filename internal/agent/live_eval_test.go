@@ -271,12 +271,17 @@ func liveEvalTools() []tool.BaseTool {
 				"kind":      {Type: schema.String, Required: true, Desc: "Target kind."},
 				"namespace": {Type: schema.String, Desc: "Target namespace."},
 				"name":      {Type: schema.String, Required: true, Desc: "Target object name."},
+				"diffs":     {Type: schema.Boolean, Desc: "Include retained version diffs when useful."},
 			},
 			output: map[string]any{
 				"object": liveEvalObject("Pod", "default", "api-0"),
 				"versions": []any{
 					map[string]any{"versionId": "ver-api-0-1", "observedAt": "2026-05-24T10:00:00Z", "changeSummary": "ready pod"},
 					map[string]any{"versionId": "ver-api-0-2", "observedAt": "2026-05-24T10:05:00Z", "changeSummary": "container api lastState reason OOMKilled; restartCount 1"},
+				},
+				"diffs": []any{
+					map[string]any{"fromVersionId": "ver-api-0-1", "toVersionId": "ver-api-0-2", "path": "status.containerStatuses.api.lastState.reason", "before": "", "after": "OOMKilled"},
+					map[string]any{"fromVersionId": "ver-api-0-1", "toVersionId": "ver-api-0-2", "path": "status.containerStatuses.api.restartCount", "before": 0, "after": 1},
 				},
 				"changes": []any{
 					map[string]any{"changeId": "chg-api-0-oom", "path": "status.containerStatuses.api.lastState.reason", "after": "OOMKilled", "observedAt": "2026-05-24T10:05:00Z"},

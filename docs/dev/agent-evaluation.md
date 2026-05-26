@@ -41,7 +41,9 @@ The default case set currently covers:
 | `node-capacity` | Node count and total capacity | health + schema + Node capacity facts SQL, citation |
 | `scripted-query-node-capacity` | Dependent/compact SQL plan | schema + `kube_insight_scripted_query`, tool artifact, citation |
 | `recent-changes` | recent object changes | search + history tools, history artifact, citation |
+| `history-diff` | retained object version diff | `kube_insight_history`, history artifact with change/diff proof, citation |
 | `exact-recent-changes` | exact object recent changes | health + schema + one rollup SQL, citation |
+| `schema-sql-evidence` | exact aggregate proof query | schema + bounded SQL rows, citation |
 | `topology-mapping` | namespace topology | search + topology tools, topology artifact, citation |
 | `js-transform-aggregation` | SQL rows need grouping/counting | schema + SQL + `artifact_transform_js`, cited answer |
 
@@ -233,14 +235,8 @@ run creation, server-owned Eino runner, MCP tool calls, SSE replay,
 
 ## Next Test Cases
 
-Add these after the first harness has settled:
+Add these after the current harness has settled:
 
-- `history-diff`: ask what changed between retained versions for one object and
-  require `kube_insight_history`, a `k8s.history` or `k8s.diff` artifact, and a
-  cited changed field.
-- `schema-sql-evidence`: ask for an aggregate proof query and require
-  `kube_insight_schema` before `kube_insight_sql`, bounded rows, and cited SQL
-  row identifiers.
 - `zero-result-pivot`: feed a transcript where one exact query returns zero rows
   and require the next action to profile available keys/types or report a
   coverage gap instead of repeating wildcard variants.

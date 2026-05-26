@@ -18,7 +18,9 @@ func TestDefaultEvaluationCasesCoverRepresentativeAgentQuestions(t *testing.T) {
 		"node-capacity":                false,
 		"scripted-query-node-capacity": false,
 		"recent-changes":               false,
+		"history-diff":                 false,
 		"exact-recent-changes":         false,
+		"schema-sql-evidence":          false,
 		"topology-mapping":             false,
 		"js-transform-aggregation":     false,
 	}
@@ -88,6 +90,41 @@ func TestEvaluateRunEventsPassesScriptedQueryTranscript(t *testing.T) {
 	}
 }
 
+func TestEvaluateRunEventsPassesHistoryDiffTranscript(t *testing.T) {
+	tc := evaluationCaseByIDForTest(t, "history-diff")
+	events := evaluationTranscript(
+		[]EvaluationToolCall{
+			{ID: "tool_history", Name: "kube_insight_history", Status: "completed", DurationMS: 180},
+		},
+		[]string{ArtifactKindK8sHistory},
+		1,
+		"Pod default/api-0 changed when the api container lastState reason became OOMKilled.",
+	)
+
+	report := EvaluateRunEvents(tc, events)
+	if !report.Passed {
+		t.Fatalf("report should pass: %#v", report)
+	}
+}
+
+func TestEvaluateRunEventsPassesSchemaSQLEvidenceTranscript(t *testing.T) {
+	tc := evaluationCaseByIDForTest(t, "schema-sql-evidence")
+	events := evaluationTranscript(
+		[]EvaluationToolCall{
+			{ID: "tool_schema", Name: "kube_insight_schema", Status: "completed", DurationMS: 80},
+			{ID: "tool_sql", Name: "kube_insight_sql", Status: "completed", DurationMS: 170},
+		},
+		[]string{ArtifactKindMarkdown},
+		1,
+		"Deployment default/api had memory request and limit changes according to the SQL change rows.",
+	)
+
+	report := EvaluateRunEvents(tc, events)
+	if !report.Passed {
+		t.Fatalf("report should pass: %#v", report)
+	}
+}
+
 func TestEvaluateRunEventsFlagsMissingEvidence(t *testing.T) {
 	tc := EvaluationCase{
 		ID:                    "missing-evidence",
@@ -133,6 +170,17 @@ func TestEvaluateRunEventsFlagsToolFailureAndLatency(t *testing.T) {
 	if got := failedCheckNames(report); got != "tool failures,per-tool latency" {
 		t.Fatalf("failed checks = %s", got)
 	}
+}
+
+func evaluationCaseByIDForTest(t *testing.T, id string) EvaluationCase {
+	t.Helper()
+	for _, tc := range DefaultEvaluationCases() {
+		if tc.ID == id {
+			return tc
+		}
+	}
+	t.Fatalf("evaluation case %q missing", id)
+	return EvaluationCase{}
 }
 
 func evaluationTranscript(toolCalls []EvaluationToolCall, artifactKinds []string, citations int, finalAnswer string) []RunEvent {

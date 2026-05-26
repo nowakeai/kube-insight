@@ -148,7 +148,9 @@ Use the path that matches the question:
   node.
 - Raw object history or diffs:
   discover the exact object first, then `kube_insight_history` with low limits
-  and `includeDocs=false` by default. Fetch raw docs only when needed.
+  and `includeDocs=false` by default. Ask for diffs when comparing retained
+  versions, and answer from the returned version/change/diff fields when they
+  already identify the changed path and value. Fetch raw docs only when needed.
 
 ## MCP Tools
 

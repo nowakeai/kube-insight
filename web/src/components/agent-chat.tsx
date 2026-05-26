@@ -1,17 +1,17 @@
 import {
   AssistantRuntimeProvider,
-  ComposerPrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { ArrowUp, CircleStop, LayoutDashboard, Search, Sparkles } from "lucide-react"
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { CircleStop, LayoutDashboard, Sparkles } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { SessionSidebar } from "@/components/agent-session-sidebar"
 import { LocalMessageConversation, RunComposerStats, SessionConversation, type AgentRunRoute } from "@/components/agent-chat-stream"
+import { ChatComposer } from "@/components/chat-composer"
 import { isPanelDockArtifact } from "@/components/agent-chat-stream-model"
 import { Button } from "@/components/ui/button"
 import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, deleteAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
@@ -19,6 +19,7 @@ import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agen
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
 import { displayRunIdsForRetryBranches, parentRunId } from "@/lib/agent-retry-branches"
+import { formatPromptWithContextBlocks, type ComposerContextBlock } from "@/lib/composer-context"
 import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
@@ -37,6 +38,7 @@ export function AgentChat() {
   const [routeHydrating, setRouteHydrating] = useState(false)
   const [routeRun, setRouteRun] = useState(readRouteRun)
   const [emptyDockExpandedBySession, setEmptyDockExpandedBySession] = useState<Record<string, boolean>>({})
+  const [composerContextBlocks, setComposerContextBlocks] = useState<ComposerContextBlock[]>([])
   const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
   const activeServerRunRef = useRef<string | undefined>(undefined)
   const hydratedRunRef = useRef<string | undefined>(undefined)
@@ -224,8 +226,10 @@ export function AgentChat() {
   }, [addCitation, appendRunEvent, applyServerEvent, completeRun, ensureSession, startRun, upsertArtifact, upsertServerRun, upsertServerSession])
 
   const onNew = useCallback(async (message: AppendMessage) => {
-    await runPrompt(appendMessageText(message))
-  }, [runPrompt])
+    const prompt = formatPromptWithContextBlocks(appendMessageText(message), composerContextBlocks)
+    setComposerContextBlocks([])
+    await runPrompt(prompt)
+  }, [composerContextBlocks, runPrompt])
 
   const onCancel = useCallback(async () => {
     setIsRunning(false)
@@ -246,12 +250,30 @@ export function AgentChat() {
   const handleNewSession = useCallback(() => {
     startNewSession()
     setMessages([])
+    setComposerContextBlocks([])
     eventSubscriptionRef.current?.abort()
     activeServerRunRef.current = undefined
     setIsRunning(false)
     setRouteRun(undefined)
     if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
   }, [startNewSession])
+
+  const handleContextPaste = useCallback((text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    setComposerContextBlocks((current) => [
+      ...current,
+      {
+        id: newMessageID("context"),
+        title: `Pasted context ${current.length + 1}`,
+        text: trimmed,
+      },
+    ])
+  }, [])
+
+  const handleRemoveContextBlock = useCallback((id: string) => {
+    setComposerContextBlocks((current) => current.filter((block) => block.id !== id))
+  }, [])
 
   const handleSelectSession = useCallback((sessionId: string) => {
     const state = useAgentProjectionStore.getState()
@@ -393,7 +415,15 @@ export function AgentChat() {
                         </ThreadPrimitive.Suggestion>
                       ))}
                     </div>
-                    <ChatComposer autoFocus isRunning={effectiveIsRunning} onCancel={onCancel} variant="home" />
+                    <ChatComposer
+                      autoFocus
+                      contextBlocks={composerContextBlocks}
+                      isRunning={effectiveIsRunning}
+                      onCancel={onCancel}
+                      onContextPaste={handleContextPaste}
+                      onRemoveContextBlock={handleRemoveContextBlock}
+                      variant="home"
+                    />
                   </div>
                 ) : (
                   <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
@@ -417,7 +447,10 @@ export function AgentChat() {
                     <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background/95 py-4 backdrop-blur">
                       <ChatComposer
                         isRunning={effectiveIsRunning}
+                        contextBlocks={composerContextBlocks}
                         onCancel={onCancel}
+                        onContextPaste={handleContextPaste}
+                        onRemoveContextBlock={handleRemoveContextBlock}
                         status={!routeHydrating ? (
                           <RunComposerStats
                             events={activeRunEvents}
@@ -715,62 +748,6 @@ function RouteRunLoading() {
           Loading conversation...
         </div>
       </div>
-    </div>
-  )
-}
-
-function ChatComposer({
-  autoFocus = false,
-  isRunning = false,
-  onCancel,
-  status,
-  variant = "thread",
-}: {
-  autoFocus?: boolean
-  isRunning?: boolean
-  onCancel?: () => void
-  status?: ReactNode
-  variant?: "home" | "thread"
-}) {
-  const isHome = variant === "home"
-  const inputRow = (
-    <ComposerPrimitive.Root
-      className={
-        isHome
-          ? "flex min-h-16 w-full items-end gap-2 rounded-lg border border-border bg-card p-2 shadow-md shadow-muted/40"
-          : "flex min-h-14 w-full items-end gap-2 bg-card p-2"
-      }
-    >
-      {isHome ? <Search className="mb-3 ml-2 size-5 shrink-0 text-muted-foreground" aria-hidden="true" /> : null}
-      <ComposerPrimitive.Input
-        autoFocus={autoFocus}
-        rows={1}
-        submitMode="enter"
-        placeholder="Ask about a Service, Pod, namespace, topology, or recent change"
-        className={
-          isHome
-            ? "max-h-44 min-h-12 flex-1 resize-none bg-transparent px-2 py-3 text-base leading-6 outline-none placeholder:text-muted-foreground"
-            : "max-h-44 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-sm leading-6 outline-none placeholder:text-muted-foreground"
-        }
-      />
-      {isRunning ? (
-        <Button type="button" size="icon" variant="secondary" aria-label="Stop run" className={isHome ? "size-11" : undefined} onClick={onCancel}>
-          <CircleStop className="size-4" aria-hidden="true" />
-        </Button>
-      ) : (
-        <ComposerPrimitive.Send asChild>
-          <Button type="submit" size="icon" aria-label="Send message" className={isHome ? "size-11" : undefined}>
-            <ArrowUp className="size-4" aria-hidden="true" />
-          </Button>
-        </ComposerPrimitive.Send>
-      )}
-    </ComposerPrimitive.Root>
-  )
-  if (isHome) return inputRow
-  return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm shadow-muted/30">
-      {status}
-      {inputRow}
     </div>
   )
 }

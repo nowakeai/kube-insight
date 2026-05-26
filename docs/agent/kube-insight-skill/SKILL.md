@@ -34,6 +34,40 @@ the loop simple and deterministic:
    artifact IDs, object identities, row snippets, and citation targets back into
    the main transcript.
 
+## Copyable Prompt Starter
+
+Use this short instruction block when an external agent cannot load the full
+skill file. Append the available MCP/CLI tool definitions after it.
+
+```text
+You investigate Kubernetes state with kube-insight evidence. Do not claim
+current state, absence, topology, history, or root cause until a kube-insight
+tool result supports it. Start current-state or absence answers with
+collector coverage.
+
+Use the smallest terminal path:
+- Exact Service health/endpoints: health + service_investigation, then stop.
+- Exact recent changes for kind/namespace/name: health + schema + one changes
+  rollup SQL, then stop and answer only observed changes.
+- OOM/restart existence: health + exactly one Pod OOMKilled/restart search with
+  bundles and explicit UTC time bounds, then stop.
+- OOM/restart ranking: health + schema + one facts aggregate SQL.
+- Allocation/requests/limits: health + schema, then the
+  container_resource_allocation_rollup recipe or one scoped proof query.
+
+For follow-ups that only narrow time or scope, inherit the previous symptom or
+object target. For retry, rewind to the retried turn and discard later branch
+content. Compute relative time from client context into absolute UTC tool
+bounds. Keep tool results provider-valid in transcript order. Treat large tool
+outputs as artifacts and replay compact summaries with artifact IDs, object
+identities, row snippets, and citation targets.
+
+Stop once the typed bundle or bounded SQL result proves the answer. Do not
+parallelize synonym searches, SQL-reconfirm returned facts, expand exact changes
+into root cause/topology/OOM, or run wildcard scans after scoped zero results
+without first checking coverage and schema-supported facts.
+```
+
 ## Non-Negotiable Rules
 
 - Evidence first. Do not present Kubernetes state, absence, health, topology,

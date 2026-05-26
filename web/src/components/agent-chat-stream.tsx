@@ -452,28 +452,69 @@ function InlineArtifactPreviews({
   return (
     <div className="mt-3 grid gap-2 sm:grid-cols-2">
       {artifacts.map((artifact) => (
-        <button
+        <InlineArtifactPreviewCard
           key={artifact.id}
-          type="button"
-          className="group min-w-0 rounded-md border border-border bg-card px-3 py-2 text-left transition hover:border-primary/40 hover:bg-muted/60"
-          onClick={() => onSelectArtifact?.(artifact.id)}
-        >
-          <div className="flex min-w-0 items-start gap-2">
-            <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-2">
-                <span className="truncate text-xs font-medium text-foreground">{artifact.title || "Artifact"}</span>
-                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground">{artifact.kind}</span>
-              </div>
-              <p className="mt-1 line-clamp-2 text-[0.72rem] leading-5 text-muted-foreground">{artifactPreviewSummary(artifact)}</p>
-            </div>
-            <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition group-hover:bg-background group-hover:text-foreground" title="Pin to side panel" aria-label="Pin to side panel">
-              <Pin className="size-3.5" aria-hidden="true" />
-            </span>
-          </div>
-        </button>
+          artifact={artifact}
+          onSelectArtifact={onSelectArtifact}
+        />
       ))}
     </div>
+  )
+}
+
+function InlineArtifactPreviewCard({
+  artifact,
+  onSelectArtifact,
+}: {
+  artifact: AgentArtifact
+  onSelectArtifact?: (artifactId?: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="group min-w-0 rounded-md border border-border bg-card transition hover:border-primary/40 hover:bg-muted/60">
+      <div className="flex min-w-0 items-start gap-2 px-3 py-2">
+        <button type="button" className="flex min-w-0 flex-1 items-start gap-2 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+          <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-xs font-medium text-foreground">{artifact.title || "Artifact"}</span>
+              <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground">{artifact.kind}</span>
+            </span>
+            <span className="mt-1 line-clamp-2 block text-[0.72rem] leading-5 text-muted-foreground">{artifactPreviewSummary(artifact)}</span>
+          </span>
+          <ChevronDown className={expanded ? "mt-0.5 size-3.5 shrink-0 rotate-180 text-muted-foreground transition" : "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition"} aria-hidden="true" />
+        </button>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          className="mt-0.5 size-7 shrink-0"
+          title="Pin to side panel"
+          aria-label={`Pin ${artifact.title || artifact.kind} to side panel`}
+          onClick={() => onSelectArtifact?.(artifact.id)}
+        >
+          <Pin className="size-3.5" aria-hidden="true" />
+        </Button>
+      </div>
+      {expanded ? (
+        <div className="border-t border-border px-3 py-2">
+          <ArtifactPreviewDetail artifact={artifact} />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ArtifactPreviewDetail({ artifact }: { artifact: AgentArtifact }) {
+  const data = recordValue(artifact.data)
+  if (artifact.kind === "markdown") {
+    const text = typeof data.markdown === "string" ? data.markdown : ""
+    return <p className="line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{text || "No markdown preview available."}</p>
+  }
+  return (
+    <pre className="max-h-48 overflow-auto rounded-md bg-muted p-2 text-[0.68rem] leading-5 text-muted-foreground">
+      {truncateJSON(artifact.data)}
+    </pre>
   )
 }
 
@@ -520,6 +561,11 @@ function recordValue(value: unknown): Record<string, unknown> {
 
 function textValue(value: unknown) {
   return typeof value === "string" ? value : ""
+}
+
+function truncateJSON(value: unknown) {
+  const text = JSON.stringify(value ?? {}, null, 2)
+  return text.length > 2000 ? `${text.slice(0, 2000)}\n...` : text
 }
 
 

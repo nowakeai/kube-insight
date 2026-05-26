@@ -50,6 +50,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add in-memory session/run store for the first spike.
 - [x] Add `POST /api/v1/agent/sessions`.
 - [x] Add `GET /api/v1/agent/sessions/{session_id}`.
+- [x] Add `DELETE /api/v1/agent/sessions/{session_id}`.
 - [x] Add `POST /api/v1/agent/sessions/{session_id}/runs`.
 - [x] Add `GET /api/v1/agent/runs/{run_id}/events` with SSE.
 - [x] Add `POST /api/v1/agent/runs/{run_id}/cancel`.
@@ -383,6 +384,11 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
     that visible branch instead of appending as a new conversational turn.
     Retry runs also carry server-owned retryRootRunId so the Web UI can still
     rewind correctly after retention prunes the direct parent run.
+- [x] Add session deletion.
+  - `DELETE /api/v1/agent/sessions/{session_id}` deletes the session and its
+    run/event rows; the API cancels queued/running runs before deletion. The
+    Web UI sidebar exposes a delete action and removes the session's local run,
+    event, artifact, citation, and pinned-panel projection.
 - [x] Add structured audit records for agent tool calls.
   - Eino tool completions now emit `tool.audit` events with run id, tool call
     id, name, input, output summary, output artifact id, status, and duration

@@ -121,6 +121,7 @@ type AgentProjectionState = {
   setPanelDockCollapsed: (sessionId: string, collapsed: boolean) => void
   unpinArtifactForSession: (sessionId: string, artifactId: string) => void
   selectSession: (sessionId?: string) => void
+  removeSession: (sessionId: string) => void
   startNewSession: () => void
   reset: () => void
 }
@@ -509,6 +510,44 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     activeSessionId: sessionId,
     selectedArtifactId: sessionId ? current.panelWorkspaces[sessionId]?.selectedArtifactId : undefined,
   })),
+  removeSession: (sessionId) => {
+    set((current) => {
+      const session = current.sessions[sessionId]
+      if (!session) return current
+      const runIds = new Set(session.runIds)
+      const eventIds = new Set<string>()
+      const artifactIds = new Set<string>()
+      const citationIds = new Set<string>()
+      for (const runId of runIds) {
+        const run = current.runs[runId]
+        for (const eventId of run?.eventIds ?? []) eventIds.add(eventId)
+        for (const artifactId of run?.artifactIds ?? []) artifactIds.add(artifactId)
+        for (const citationId of run?.citationIds ?? []) citationIds.add(citationId)
+      }
+      const sessions = omitKeys(current.sessions, new Set([sessionId]))
+      const runs = omitKeys(current.runs, runIds)
+      const events = omitKeys(current.events, eventIds)
+      const artifacts = omitKeys(current.artifacts, artifactIds)
+      const citations = omitKeys(current.citations, citationIds)
+      const panelWorkspaces = omitKeys(current.panelWorkspaces, new Set([sessionId]))
+      writePanelWorkspaces(panelWorkspaces)
+      const activeSessionId = current.activeSessionId === sessionId ? undefined : current.activeSessionId
+      const selectedArtifactId = current.selectedArtifactId && !artifactIds.has(current.selectedArtifactId)
+        ? current.selectedArtifactId
+        : undefined
+      return {
+        activeSessionId,
+        selectedArtifactId,
+        sessionOrder: current.sessionOrder.filter((id) => id !== sessionId),
+        sessions,
+        runs,
+        events,
+        artifacts,
+        citations,
+        panelWorkspaces,
+      }
+    })
+  },
   startNewSession: () => set({ activeSessionId: undefined, selectedArtifactId: undefined }),
   reset: () => set(initialProjection()),
 }))
@@ -597,6 +636,14 @@ function uniqueValues(values: string[]) {
 
 function uniquePrepend(values: string[], value: string) {
   return [value, ...values.filter((item) => item !== value)]
+}
+
+function omitKeys<T>(record: Record<string, T>, keys: Set<string>) {
+  const next: Record<string, T> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (!keys.has(key)) next[key] = value
+  }
+  return next
 }
 
 function runStatusFromEvent(event: AgentRunEventDTO): AgentRunStatus | undefined {

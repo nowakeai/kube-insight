@@ -76,6 +76,38 @@ func TestAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	}
 }
 
+func TestAgentStoreDeleteSessionCascadesRunsAndEvents(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{Title: "delete me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{Type: agent.EventRunCreated}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSession(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetSession(ctx, session.ID); err != agent.ErrSessionNotFound {
+		t.Fatalf("GetSession err = %v", err)
+	}
+	if _, err := store.GetRun(ctx, run.ID); err != agent.ErrRunNotFound {
+		t.Fatalf("GetRun err = %v", err)
+	}
+	if _, err := store.ListRunEvents(ctx, run.ID); err != agent.ErrRunNotFound {
+		t.Fatalf("ListRunEvents err = %v", err)
+	}
+}
+
 func TestAgentStoreMissingRecordsUseAgentErrors(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
 	if err != nil {
@@ -94,5 +126,8 @@ func TestAgentStoreMissingRecordsUseAgentErrors(t *testing.T) {
 	}
 	if _, err := store.ListRunEvents(ctx, "missing"); err != agent.ErrRunNotFound {
 		t.Fatalf("ListRunEvents err = %v", err)
+	}
+	if err := store.DeleteSession(ctx, "missing"); err != agent.ErrSessionNotFound {
+		t.Fatalf("DeleteSession err = %v", err)
 	}
 }

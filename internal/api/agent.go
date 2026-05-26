@@ -120,6 +120,24 @@ func (s *Server) handleGetAgentSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
+func (s *Server) handleDeleteAgentSession(w http.ResponseWriter, r *http.Request) {
+	session, err := s.agentStore.GetSession(r.Context(), r.PathValue("session_id"))
+	if err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	for _, run := range session.Runs {
+		if !agentRunStatusTerminal(run.Status) {
+			s.cancelAgentRunExecution(run.ID)
+		}
+	}
+	if err := s.agentStore.DeleteSession(r.Context(), session.ID); err != nil {
+		writeAgentStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 	var input createAgentRunRequest
 	if err := decodeOptionalJSON(r.Body, &input); err != nil {

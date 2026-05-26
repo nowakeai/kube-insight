@@ -79,6 +79,14 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
 	}
+
+	assertDELETEStatus(t, server.URL+"/api/v1/agent/sessions/"+session.ID, http.StatusNoContent)
+	getBody(t, server.URL+"/api/v1/agent/sessions/"+session.ID, http.StatusNotFound)
+	getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events", http.StatusNotFound)
+	body = getBody(t, server.URL+"/api/v1/agent/sessions?limit=5", http.StatusOK)
+	if strings.Contains(body, session.ID) {
+		t.Fatalf("deleted session still listed: %s", body)
+	}
 }
 
 func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
@@ -642,4 +650,5 @@ func TestAgentEndpointsValidateInputAndMissingIDs(t *testing.T) {
 	assertPOSTStatus(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{}`, http.StatusBadRequest)
 	getBody(t, server.URL+"/api/v1/agent/runs/missing/events", http.StatusNotFound)
 	assertPOSTStatus(t, server.URL+"/api/v1/agent/runs/missing/cancel", `{}`, http.StatusNotFound)
+	assertDELETEStatus(t, server.URL+"/api/v1/agent/sessions/missing", http.StatusNotFound)
 }

@@ -82,6 +82,22 @@ ORDER BY updated_at DESC, id DESC%s`, q(s.database()), limit))
 	return agent.SessionList{Sessions: sessions}, nil
 }
 
+func (s *Store) DeleteSession(ctx context.Context, id string) error {
+	if err := s.ensureAgentSchema(ctx); err != nil {
+		return err
+	}
+	if _, err := s.GetSession(ctx, id); err != nil {
+		return err
+	}
+	statements := []string{
+		fmt.Sprintf(`ALTER TABLE %s.agent_run_events DELETE WHERE run_id IN (SELECT id FROM %s.agent_runs FINAL WHERE session_id = %s)`, q(s.database()), q(s.database()), quoteString(id)),
+		fmt.Sprintf(`ALTER TABLE %s.agent_runs DELETE WHERE session_id = %s`, q(s.database()), quoteString(id)),
+		fmt.Sprintf(`ALTER TABLE %s.agent_sessions DELETE WHERE id = %s`, q(s.database()), quoteString(id)),
+	}
+	_, err := s.client().ApplySchema(ctx, statements)
+	return err
+}
+
 func (s *Store) CreateRun(ctx context.Context, sessionID string, input agent.CreateRunInput) (agent.Run, error) {
 	if err := s.ensureAgentSchema(ctx); err != nil {
 		return agent.Run{}, err

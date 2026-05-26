@@ -86,6 +86,16 @@ export function getAgentSession(sessionId: string, options?: AgentAPIOptions) {
   )
 }
 
+export function deleteAgentSession(sessionId: string, options?: AgentAPIOptions) {
+  return agentRequestJSON<void>(
+    `/api/v1/agent/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      ...options,
+      method: "DELETE",
+    },
+  )
+}
+
 export function createAgentRun(sessionId: string, input: CreateAgentRunRequest, options?: AgentAPIOptions) {
   return agentRequestJSON<AgentRunDTO>(
     `/api/v1/agent/sessions/${encodeURIComponent(sessionId)}/runs`,

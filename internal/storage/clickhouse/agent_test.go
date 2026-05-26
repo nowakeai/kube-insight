@@ -65,6 +65,32 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	}
 }
 
+func TestClickHouseAgentStoreDeleteSessionPlansMutations(t *testing.T) {
+	client := newFakeAgentClickHouseClient()
+	store := &Store{Client: client, Database: "ki"}
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{Title: "delete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSession(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(client.appliedStatements, "\n")
+	for _, want := range []string{
+		"ALTER TABLE `ki`.agent_run_events DELETE WHERE run_id IN",
+		"ALTER TABLE `ki`.agent_runs DELETE WHERE session_id = '" + session.ID + "'",
+		"ALTER TABLE `ki`.agent_sessions DELETE WHERE id = '" + session.ID + "'",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing mutation %q in:\n%s", want, joined)
+		}
+	}
+}
+
 func TestClickHouseAgentRetentionPlansDeleteMutations(t *testing.T) {
 	client := newFakeAgentClickHouseClient()
 	store := &Store{Client: client, Database: "ki"}

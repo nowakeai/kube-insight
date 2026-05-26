@@ -14,7 +14,7 @@ import { SessionSidebar } from "@/components/agent-session-sidebar"
 import { LocalMessageConversation, RunComposerStats, SessionConversation, type AgentRunRoute } from "@/components/agent-chat-stream"
 import { isPanelDockArtifact } from "@/components/agent-chat-stream-model"
 import { Button } from "@/components/ui/button"
-import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
+import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, deleteAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
@@ -56,6 +56,7 @@ export function AgentChat() {
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const selectSession = useAgentProjectionStore((state) => state.selectSession)
+  const removeSession = useAgentProjectionStore((state) => state.removeSession)
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
   const setPanelDockCollapsed = useAgentProjectionStore((state) => state.setPanelDockCollapsed)
   const unpinArtifactForSession = useAgentProjectionStore((state) => state.unpinArtifactForSession)
@@ -274,6 +275,35 @@ export function AgentChat() {
     setMessages(threadMessagesFromRun(run))
   }, [selectSession])
 
+  const handleDeleteSession = useCallback(async (sessionId: string) => {
+    const state = useAgentProjectionStore.getState()
+    const session = state.sessions[sessionId]
+    if (!session) return
+    const confirmed = window.confirm(`Delete "${session.title || "New investigation"}"?`)
+    if (!confirmed) return
+    eventSubscriptionRef.current?.abort()
+    for (const runId of session.runIds) {
+      if (state.runs[runId]?.status === "running" || state.runs[runId]?.status === "queued") void cancelAgentRun(runId).catch(() => undefined)
+    }
+    try {
+      if (sessionId.startsWith("sess_")) await deleteAgentSession(sessionId)
+    } catch (error) {
+      if (!(error instanceof AgentAPIError && error.status === 404)) {
+        const message = error instanceof Error ? error.message : "Delete failed."
+        window.alert(message)
+        return
+      }
+    }
+    removeSession(sessionId)
+    if (activeSessionId === sessionId || routeRun?.sessionID === sessionId) {
+      activeServerRunRef.current = undefined
+      setIsRunning(false)
+      setMessages([])
+      setRouteRun(undefined)
+      if (window.location.pathname !== "/") window.history.pushState({}, "", "/")
+    }
+  }, [activeSessionId, removeSession, routeRun?.sessionID])
+
   const handleRetryRun = useCallback(async (run: AgentRun) => {
     if (effectiveIsRunning) return
     try {
@@ -330,6 +360,7 @@ export function AgentChat() {
             <SessionSidebar
               activeSessionId={activeSessionId}
               disabled={effectiveIsRunning}
+              onDelete={handleDeleteSession}
               onNew={handleNewSession}
               onSelect={handleSelectSession}
               runs={runsById}

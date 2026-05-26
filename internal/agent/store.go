@@ -20,6 +20,7 @@ type Store interface {
 	CreateSession(context.Context, CreateSessionInput) (Session, error)
 	GetSession(context.Context, string) (Session, error)
 	ListSessions(context.Context, ListSessionsOptions) (SessionList, error)
+	DeleteSession(context.Context, string) error
 	CreateRun(context.Context, string, CreateRunInput) (Run, error)
 	GetRun(context.Context, string) (Run, error)
 	ListRuns(context.Context, ListRunsOptions) (RunList, error)
@@ -102,6 +103,26 @@ func (s *MemoryStore) ListSessions(ctx context.Context, opts ListSessionsOptions
 		sessions[i] = cloneSession(sessions[i])
 	}
 	return SessionList{Sessions: sessions}, nil
+}
+
+func (s *MemoryStore) DeleteSession(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.sessions[id]; !ok {
+		return ErrSessionNotFound
+	}
+	delete(s.sessions, id)
+	for runID, run := range s.runs {
+		if run.SessionID != id {
+			continue
+		}
+		delete(s.runs, runID)
+		delete(s.events, runID)
+	}
+	return nil
 }
 
 func (s *MemoryStore) sessionRunsLocked(sessionID string) []Run {

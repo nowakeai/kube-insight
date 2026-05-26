@@ -1,4 +1,4 @@
-import { MessageSquareText, Plus } from "lucide-react"
+import { MessageSquareText, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { AgentRun, AgentSession } from "@/lib/agent-store"
@@ -7,6 +7,7 @@ export function SessionSidebar({
   activeSessionId,
   disabled,
   onNew,
+  onDelete,
   onSelect,
   runs,
   sessionOrder,
@@ -15,6 +16,7 @@ export function SessionSidebar({
   activeSessionId?: string
   disabled: boolean
   onNew: () => void
+  onDelete: (sessionId: string) => void
   onSelect: (sessionId: string) => void
   runs: Record<string, AgentRun>
   sessionOrder: string[]
@@ -44,25 +46,36 @@ export function SessionSidebar({
               const latestRun = latestRunId ? runs[latestRunId] : undefined
               const selected = session.id === activeSessionId
               return (
-                <button
+                <div
                   key={session.id}
-                  type="button"
                   className={
                     selected
-                      ? "rounded-md border border-border bg-background px-3 py-2 text-left shadow-sm"
-                      : "rounded-md border border-transparent px-3 py-2 text-left text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                      ? "group grid grid-cols-[minmax(0,1fr)_2rem] gap-1 rounded-md border border-border bg-background px-3 py-2 shadow-sm"
+                      : "group grid grid-cols-[minmax(0,1fr)_2rem] gap-1 rounded-md border border-transparent px-3 py-2 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
                   }
-                  onClick={() => onSelect(session.id)}
                 >
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <MessageSquareText className="size-3.5 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{session.title || "New investigation"}</span>
-                  </div>
-                  <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
-                    <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
-                    <span>{session.runIds.length} run{session.runIds.length === 1 ? "" : "s"}</span>
-                  </div>
-                </button>
+                  <button type="button" className="min-w-0 text-left" onClick={() => onSelect(session.id)}>
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <MessageSquareText className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{session.title || "New investigation"}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
+                      <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
+                      <span>{session.runIds.length} run{session.runIds.length === 1 ? "" : "s"}</span>
+                    </div>
+                  </button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 opacity-70 transition group-hover:opacity-100"
+                    disabled={disabled}
+                    aria-label={`Delete ${session.title || "session"}`}
+                    onClick={() => onDelete(session.id)}
+                  >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
               )
             })}
           </div>

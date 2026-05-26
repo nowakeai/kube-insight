@@ -141,6 +141,34 @@ func TestMemoryStoreListRunsSummaryAndFilters(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreDeleteSessionCascadesRunsAndEvents(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, CreateSessionInput{Title: "delete me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run.ID, AppendEventInput{Type: EventRunCreated}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSession(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetSession(ctx, session.ID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("GetSession err = %v", err)
+	}
+	if _, err := store.GetRun(ctx, run.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("GetRun err = %v", err)
+	}
+	if _, err := store.ListRunEvents(ctx, run.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("ListRunEvents err = %v", err)
+	}
+}
+
 func TestMemoryStoreNotFound(t *testing.T) {
 	store := NewMemoryStore()
 	_, err := store.GetSession(context.Background(), "missing")
@@ -158,5 +186,9 @@ func TestMemoryStoreNotFound(t *testing.T) {
 	_, err = store.AppendRunEvent(context.Background(), "missing", AppendEventInput{Type: "test"})
 	if !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("append event err = %v", err)
+	}
+	err = store.DeleteSession(context.Background(), "missing")
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("delete session err = %v", err)
 	}
 }

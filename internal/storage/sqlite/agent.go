@@ -88,6 +88,29 @@ limit ?`
 	return agent.SessionList{Sessions: sessions}, nil
 }
 
+func (s *Store) DeleteSession(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer rollback(tx)
+	if ok, err := agentSessionExists(ctx, tx, id); err != nil {
+		return err
+	} else if !ok {
+		return agent.ErrSessionNotFound
+	}
+	res, err := tx.ExecContext(ctx, `delete from agent_sessions where id = ?`, id)
+	if err != nil {
+		return err
+	}
+	if affected, err := res.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return agent.ErrSessionNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateRun(ctx context.Context, sessionID string, input agent.CreateRunInput) (agent.Run, error) {
 	now := time.Now().UTC()
 	run := agent.Run{

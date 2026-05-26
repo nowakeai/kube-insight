@@ -36,6 +36,26 @@ func assertPOSTStatus(t *testing.T, url, body string, wantStatus int) {
 	postJSON(t, url, body, wantStatus, nil)
 }
 
+func assertDELETEStatus(t *testing.T, url string, wantStatus int) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != wantStatus {
+		t.Fatalf("DELETE %s status = %d, want %d: %s", url, resp.StatusCode, wantStatus, string(body))
+	}
+}
+
 func getBody(t *testing.T, url string, wantStatus int) string {
 	t.Helper()
 	resp, err := http.Get(url)

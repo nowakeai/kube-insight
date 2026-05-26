@@ -12,6 +12,7 @@ BASE_URL_ENV="${KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV:-OPENAI_BASE_URL}"
 PROVIDER="${KUBE_INSIGHT_AGENT_API_SMOKE_PROVIDER:-openai-compatible}"
 RUN_TIMEOUT_SECONDS="${KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS:-360}"
 QUESTIONS="${KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS:-Is the default/api Service healthy right now? Summarize endpoint pod evidence and cite the proof.;;Map topology for namespace default and cite the proof.}"
+RETRY_FIRST="${KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST:-0}"
 
 if [[ ! -x "${BIN}" ]]; then
   echo "kube-insight binary not found or not executable: ${BIN}" >&2
@@ -139,6 +140,7 @@ session_id="$(jq -r '.id' <<<"${session_json}")"
 printf '[' >"${SUMMARY_PATH}"
 first_summary=1
 completed_questions=()
+completed_run_ids=()
 IFS=';;' read -r -a question_list <<<"${QUESTIONS}"
 for question in "${question_list[@]}"; do
   question="$(sed 's/^ *//;s/ *$//' <<<"${question}")"
@@ -217,7 +219,71 @@ for question in "${question_list[@]}"; do
     --arg contextPath "${context_json}" \
     '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
   completed_questions+=("${question}")
+  completed_run_ids+=("${run_id}")
 done
+if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
+  if [[ "${#completed_run_ids[@]}" -lt 1 ]]; then
+    echo "KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST requires at least one completed question." >&2
+    exit 1
+  fi
+  original_run_id="${completed_run_ids[0]}"
+  original_question="${completed_questions[0]}"
+  retry_json="$(curl -fsS -X POST "http://${API_LISTEN}/api/v1/agent/runs/${original_run_id}/retry" \
+    -H 'content-type: application/json' \
+    -d "$(jq -n '{metadata:{clientContext:{sentAt:"2026-05-26T00:00:00.000Z", timeZone:"UTC", locale:"en-US"}}}')")"
+  retry_run_id="$(jq -r '.id' <<<"${retry_json}")"
+  if ! jq -e --arg retryOf "${original_run_id}" '.metadata.retryOfRunId == $retryOf and .metadata.retryRootRunId == $retryOf' <<<"${retry_json}" >/dev/null; then
+    echo "Retry run ${retry_run_id} metadata does not point at original run ${original_run_id}." >&2
+    jq '.metadata' <<<"${retry_json}" >&2
+    exit 1
+  fi
+  retry_sse_path="${WORK_DIR}/retry-first.sse"
+  retry_events_json="${WORK_DIR}/retry-first.events.json"
+  curl -fsS --max-time "${RUN_TIMEOUT_SECONDS}" "http://${API_LISTEN}/api/v1/agent/runs/${retry_run_id}/events?follow=true" >"${retry_sse_path}"
+  awk '/^data: /{sub(/^data: /,""); print}' "${retry_sse_path}" | jq -s '.' >"${retry_events_json}"
+  retry_status="$(jq -r 'map(select(.type=="run.completed" or .type=="run.failed" or .type=="run.cancelled")) | last | .type // empty' "${retry_events_json}")"
+  retry_completion_requests="$(jq '[.[] | select(.type=="completion.request")] | length' "${retry_events_json}")"
+  if [[ "${retry_status}" != "run.completed" || "${retry_completion_requests}" -lt 1 ]]; then
+    echo "Retry run ${retry_run_id} did not complete with completion.request events." >&2
+    jq 'map({type, sequence, data})' "${retry_events_json}" >&2
+    exit 1
+  fi
+  retry_context_json="${WORK_DIR}/retry-first.context.json"
+  "${BIN}" --db "${DB_PATH}" db agent-context "${retry_run_id}" --all --output json >"${retry_context_json}"
+  if ! jq -e --arg question "${original_question}" '.requests[0].messages[]? | select(.role=="user" and .content==$question)' "${retry_context_json}" >/dev/null; then
+    echo "Retry run ${retry_run_id} first completion.request is missing original user message: ${original_question}" >&2
+    jq '.requests[0].messages | map({index, role, contentPreview})' "${retry_context_json}" >&2
+    exit 1
+  fi
+  if ! jq -e 'all(.requests[0].messages[]?; .role != "assistant" and .role != "tool")' "${retry_context_json}" >/dev/null; then
+    echo "Retry run ${retry_run_id} first completion.request includes pre-retry assistant/tool context." >&2
+    jq '.requests[0].messages | map({index, role, contentPreview, toolCalls})' "${retry_context_json}" >&2
+    exit 1
+  fi
+  if [[ "${#completed_questions[@]}" -gt 1 ]]; then
+    for later_question in "${completed_questions[@]:1}"; do
+      if jq -e --arg question "${later_question}" '.requests[0].messages[]? | select(.role=="user" and .content==$question)' "${retry_context_json}" >/dev/null; then
+        echo "Retry run ${retry_run_id} first completion.request includes later user message: ${later_question}" >&2
+        jq '.requests[0].messages | map({index, role, contentPreview})' "${retry_context_json}" >&2
+        exit 1
+      fi
+    done
+  fi
+  if [[ "${first_summary}" -eq 0 ]]; then
+    printf ',' >>"${SUMMARY_PATH}"
+  fi
+  first_summary=0
+  jq -n \
+    --arg question "retry:${original_question}" \
+    --arg runId "${retry_run_id}" \
+    --arg retryOfRunId "${original_run_id}" \
+    --arg status "${retry_status}" \
+    --argjson completionRequests "${retry_completion_requests}" \
+    --argjson contextMessages "$(jq '.requests[0].messageCount' "${retry_context_json}")" \
+    --arg eventsPath "${retry_events_json}" \
+    --arg contextPath "${retry_context_json}" \
+    '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
+fi
 printf ']\n' >>"${SUMMARY_PATH}"
 
 echo "API live smoke passed. Summary: ${SUMMARY_PATH}"

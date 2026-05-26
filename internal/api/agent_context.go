@@ -81,7 +81,65 @@ func (b agentContextReplayBuilder) priorRuns(run agent.Run) []agent.Run {
 		}
 		prior = append(prior, candidate)
 	}
-	return prior
+	return activeRetryBranchRuns(prior)
+}
+
+func activeRetryBranchRuns(runs []agent.Run) []agent.Run {
+	runsByID := map[string]agent.Run{}
+	for _, run := range runs {
+		runsByID[run.ID] = run
+	}
+	visible := []agent.Run{}
+	for _, run := range runs {
+		if agentRunParentID(run.Metadata) != "" {
+			continue
+		}
+		retryOf := retryOfRunIDFromMetadata(run.Metadata)
+		if retryOf == "" {
+			visible = append(visible, run)
+			continue
+		}
+		rootID := retryRootRunIDForContextReplay(run, runsByID)
+		replaceIndex := -1
+		for i, candidate := range visible {
+			if retryRootRunIDForContextReplay(candidate, runsByID) == rootID {
+				replaceIndex = i
+				break
+			}
+		}
+		if _, ok := runsByID[retryOf]; !ok && replaceIndex < 0 && len(visible) > 0 {
+			replaceIndex = 0
+		}
+		if replaceIndex >= 0 {
+			visible = append(visible[:replaceIndex], run)
+			continue
+		}
+		visible = append(visible, run)
+	}
+	return visible
+}
+
+func retryRootRunIDForContextReplay(run agent.Run, runsByID map[string]agent.Run) string {
+	if rootID := retryRootRunIDFromMetadata(run); rootID != "" {
+		return rootID
+	}
+	root := run
+	seen := map[string]struct{}{}
+	for {
+		retryOf := retryOfRunIDFromMetadata(root.Metadata)
+		if retryOf == "" {
+			return root.ID
+		}
+		if _, ok := seen[root.ID]; ok {
+			return root.ID
+		}
+		seen[root.ID] = struct{}{}
+		parent, ok := runsByID[retryOf]
+		if !ok {
+			return retryOf
+		}
+		root = parent
+	}
 }
 
 func agentRunParentID(metadata json.RawMessage) string {
@@ -118,27 +176,40 @@ func (s *Server) recordCompletionInput(ctx context.Context, run agent.Run) error
 }
 
 func conversationFromLatestCompletionRequests(ctx context.Context, store agent.Store, runs []agent.Run) []agent.Message {
-	messages := []agent.Message{}
+	perRun := make([][]agent.Message, 0, len(runs))
 	sawRequest := false
 	for _, run := range runs {
 		transcript := visibleConversationFromLatestCompletionRequest(ctx, store, run.ID)
 		if len(transcript) > 0 {
 			sawRequest = true
-			messages = appendFinalAnswerIfMissing(ctx, store, run.ID, transcript)
+			perRun = append(perRun, appendFinalAnswerIfMissing(ctx, store, run.ID, transcript))
 			continue
 		}
-		if !sawRequest {
-			continue
-		}
-		if run.Input != "" {
-			messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt})
-		}
-		if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
-			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
-		}
+		perRun = append(perRun, bestAvailableConversationForPriorRun(ctx, store, run))
 	}
 	if !sawRequest {
 		return nil
+	}
+	messages := []agent.Message{}
+	for _, transcript := range perRun {
+		messages = append(messages, transcript...)
+	}
+	return messages
+}
+
+func bestAvailableConversationForPriorRun(ctx context.Context, store agent.Store, run agent.Run) []agent.Message {
+	if transcript := conversationFromCompletionEvents(ctx, store, []agent.Run{run}); len(transcript) > 0 {
+		return transcript
+	}
+	if transcript := visibleConversationFromRunCreatedTranscript(ctx, store, run.ID); len(transcript) > 0 {
+		return appendFinalAnswerIfMissing(ctx, store, run.ID, transcript)
+	}
+	messages := []agent.Message{}
+	if run.Input != "" {
+		messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt})
+	}
+	if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
+		messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
 	}
 	return messages
 }

@@ -196,9 +196,15 @@ visible user/assistant turns from `agent_runs.input`, `message.completed`, and
 
 Replay must treat each prior run independently. A session can contain a mix of
 new model-context events and legacy/final-answer-only runs after upgrades,
-failures, or imported data. Do not let the presence of `completion.message` in
-one prior run suppress the `agent_runs.input` fallback for another prior run;
-otherwise short follow-up prompts can lose their topic anchor.
+failures, or imported data. Do not let the presence of `completion.request` or
+`completion.message` in one prior run suppress the `agent_runs.input` fallback
+for another prior run; otherwise short follow-up prompts can lose their topic
+anchor.
+
+Retry branch selection must be explicit before context replay. Do not rely on
+`completion.request` preference or missing legacy events to hide superseded
+branches. Build the active visible run list from retry metadata first, then
+choose the best available context source for each visible run.
 
 The replay path must not reconstruct context from UI-only events when
 model-context events are available. UI deltas, rendered final answers, and

@@ -44,9 +44,13 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 	if err != nil {
 		return nil, nil, err
 	}
-	jsTools := agent.WrapRecoverableToolErrors([]tool.BaseTool{agent.NewJSTransformTool()})
+	localTools := []tool.BaseTool{agent.NewJSTransformTool()}
+	if sqlTool := findInvokableToolByName(ctx, tools, "kube_insight_sql"); sqlTool != nil {
+		localTools = append(localTools, agent.NewScriptedQueryTool(sqlTool))
+	}
+	localTools = agent.WrapRecoverableToolErrors(localTools)
 	parallelTools := append([]tool.BaseTool(nil), tools...)
-	parallelTools = append(parallelTools, jsTools...)
+	parallelTools = append(parallelTools, localTools...)
 	tools = append(tools, agent.NewParallelInvestigationTool(model, parallelTools))
 	condenser, err := agent.NewEvidenceCondenserTool(ctx, model)
 	if err != nil {
@@ -56,7 +60,7 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 		return nil, nil, err
 	}
 	tools = append(tools, condenser)
-	tools = append(tools, jsTools...)
+	tools = append(tools, localTools...)
 	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
 		Description:        "Kubernetes investigation assistant backed by kube-insight MCP evidence tools.",
 		Model:              model,
@@ -142,6 +146,18 @@ func configuredMCPAgentTools(ctx context.Context, dbPath string, opts *api.Serve
 		return nil, nil, errors.New("agent MCP server returned no tools")
 	}
 	return agent.WrapRecoverableToolErrors(tools), closeTools, nil
+}
+
+func findInvokableToolByName(ctx context.Context, tools []tool.BaseTool, name string) tool.InvokableTool {
+	for _, candidate := range tools {
+		info, err := candidate.Info(ctx)
+		if err != nil || info == nil || info.Name != name {
+			continue
+		}
+		invokable, _ := candidate.(tool.InvokableTool)
+		return invokable
+	}
+	return nil
 }
 
 func configuredMCPServerOptions(dbPath string, opts *api.ServerOptions) insightmcp.ServerOptions {

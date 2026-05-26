@@ -231,6 +231,7 @@ func writeLiveEvalReports(t *testing.T, reports []liveEvalReport) {
 }
 
 func liveEvalTools() []tool.BaseTool {
+	sqlTool := liveEvalSQLTool{}
 	tools := []tool.BaseTool{
 		liveEvalTool{
 			name: "kube_insight_health",
@@ -318,9 +319,9 @@ func liveEvalTools() []tool.BaseTool {
 				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows."},
 			},
 		},
-		liveEvalSQLTool{},
+		sqlTool,
 	}
-	tools = append(tools, WrapRecoverableToolErrors([]tool.BaseTool{NewJSTransformTool()})...)
+	tools = append(tools, WrapRecoverableToolErrors([]tool.BaseTool{NewScriptedQueryTool(sqlTool), NewJSTransformTool()})...)
 	return tools
 }
 

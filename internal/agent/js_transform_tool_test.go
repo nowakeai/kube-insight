@@ -49,6 +49,32 @@ func TestJSTransformToolGroupsRows(t *testing.T) {
 	}
 }
 
+func TestJSTransformToolExposesDataHelpers(t *testing.T) {
+	ctx := context.Background()
+	transform := NewJSTransformTool().(tool.InvokableTool)
+	out, err := transform.InvokableRun(ctx, `{
+		"input": {"rows": [{"namespace":"default","cpu":1},{"namespace":"default","cpu":2},{"namespace":"ops","cpu":4}]},
+		"script": "const grouped = ki.groupBy(rows, 'namespace'); return {counts: _.countBy(rows, 'namespace'), defaultCPU: ki.sumBy(grouped.default, 'cpu')};"
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result jsTransformResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Counts     map[string]float64 `json:"counts"`
+		DefaultCPU float64            `json:"defaultCPU"`
+	}
+	if err := json.Unmarshal(result.Result, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Counts["default"] != 2 || payload.DefaultCPU != 3 {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func TestJSTransformToolDoesNotExposeHostCapabilities(t *testing.T) {
 	ctx := context.Background()
 	transform := NewJSTransformTool().(tool.InvokableTool)

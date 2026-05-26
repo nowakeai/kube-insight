@@ -219,8 +219,23 @@ func realPromptEvalTools(t *testing.T, ctx context.Context, source realPromptEva
 	if err != nil {
 		t.Fatal(err)
 	}
+	if sqlTool := findRealEvalInvokableTool(ctx, tools, "kube_insight_sql"); sqlTool != nil {
+		tools = append(tools, kiagent.NewScriptedQueryTool(sqlTool))
+	}
 	tools = append(tools, kiagent.NewJSTransformTool())
 	return kiagent.WrapRecoverableToolErrors(tools)
+}
+
+func findRealEvalInvokableTool(ctx context.Context, tools []tool.BaseTool, name string) tool.InvokableTool {
+	for _, candidate := range tools {
+		info, err := candidate.Info(ctx)
+		if err != nil || info == nil || info.Name != name {
+			continue
+		}
+		invokable, _ := candidate.(tool.InvokableTool)
+		return invokable
+	}
+	return nil
 }
 
 func realPromptEvalMCPServerOptions(source realPromptEvalDataSource) insightmcp.ServerOptions {

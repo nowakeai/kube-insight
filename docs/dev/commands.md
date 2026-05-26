@@ -324,6 +324,7 @@ same backend:
 | Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
 | Service health | exact Service health question | health + service investigation | <=2 tools |
 | Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-4 independent branches | avoid for exact Service or exact object-change prompts |
+| Scripted SQL | dependent profile -> proof SQL, several independent aggregates, or SQL rows plus grouping | schema + one `kube_insight_scripted_query` | bounded read-only SQL only; prefer over repeated SQL + transform |
 | JS transform | aggregate or reshape returned JSON rows | SQL/search result + `artifact_transform_js` | only bounded current-run JSON, no data fetch |
 | Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
 

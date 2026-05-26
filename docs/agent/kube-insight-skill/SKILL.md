@@ -130,6 +130,11 @@ Use the path that matches the question:
   `kube_insight_health` + `kube_insight_schema`, then the
   `container_resource_allocation_rollup` recipe or one scoped proof query. Stop
   when SQL returns request/limit rows or snippets.
+- Dependent or parallel SQL plans:
+  after `kube_insight_schema`, use `kube_insight_scripted_query` when one small
+  plan needs profile -> proof SQL, several independent aggregates, or SQL rows
+  plus JavaScript grouping. Prefer this over serial repeated SQL plus a separate
+  transform when the tool is available; keep query count and `maxRows` bounded.
 - Node capacity/allocatable totals:
   `kube_insight_health` + `kube_insight_schema`, then one facts aggregate over
   `node_capacity.cpu`, `node_capacity.memory`, `node_allocatable.cpu`, and
@@ -270,8 +275,9 @@ Common over-investigation patterns to avoid:
 ## Data Transform And Condensing
 
 Some agent environments have helper tools equivalent to the built-in
-`parallel_investigation`, `artifact_transform_js`, or `evidence_condenser`. Use
-them only as bounded helpers, not as permission to run broad blind searches.
+`parallel_investigation`, `kube_insight_scripted_query`,
+`artifact_transform_js`, or `evidence_condenser`. Use them only as bounded
+helpers, not as permission to run broad blind searches.
 
 - Use `parallel_investigation` proactively for broad, multi-branch prompts such
   as incident triage, cluster health overview, namespace triage, or mixed
@@ -281,6 +287,11 @@ them only as bounded helpers, not as permission to run broad blind searches.
   exact Service health or exact kind/namespace/name recent-change prompts where
   the narrow terminal path is sufficient.
 
+- Use a scripted query helper after schema when dependent SQL would otherwise
+  take several turns. Good examples: profile real keys, query proof rows from
+  the discovered keys, and return a grouped summary; or run several independent
+  facts/changes aggregates in parallel. Keep scripts small and query limits
+  explicit.
 - Use a transform helper for grouping, filtering, sorting, field extraction, or
   numeric aggregation over literal JSON rows/snippets already returned by
   search, SQL, or artifacts.

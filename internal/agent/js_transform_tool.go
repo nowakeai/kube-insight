@@ -43,7 +43,7 @@ func NewJSTransformTool() tool.BaseTool {
 func (JSTransformTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: jsTransformToolName,
-		Desc: "Run bounded JavaScript over JSON data already returned in this investigation. Use it for grouping, sorting, filtering, counting, summarizing rows, and extracting fields from tool outputs. It has no filesystem, network, process, or environment access; pass the data as input and return the final value from the script. One successful transform over the relevant rows is terminal: answer from its JSON result instead of running repeated SQL or a second transform.",
+		Desc: "Run bounded JavaScript over JSON data already returned in this investigation. Use it for grouping, sorting, filtering, counting, summarizing rows, and extracting fields from tool outputs. Helpers ki/_ provide groupBy, countBy, sumBy, sortBy, uniqBy, and pick. It has no filesystem, network, process, or environment access; pass the data as input and return the final value from the script. One successful transform over the relevant rows is terminal: answer from its JSON result instead of running repeated SQL or a second transform.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"script": {
 				Type:     schema.String,
@@ -114,6 +114,9 @@ func (JSTransformTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		}
 		return vm.ToValue(string(data))
 	})
+	if err := installJSDataHelpers(vm); err != nil {
+		return "", fmt.Errorf("%s failed to install helpers: %w", jsTransformToolName, err)
+	}
 	timer := time.AfterFunc(timeout, func() {
 		vm.Interrupt("timeout")
 	})

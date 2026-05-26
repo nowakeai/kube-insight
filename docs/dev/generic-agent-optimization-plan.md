@@ -116,9 +116,16 @@ answering.
 
 First implementation slice: `artifact_transform_js` is a native Eino tool backed
 by goja. It accepts literal `input` JSON and a JavaScript function body, injects
-`input`, a `rows` alias when available, and safe logging/JSON helpers, and
-returns bounded JSON. It has no filesystem, network, process, or environment
-access.
+`input`, a `rows` alias when available, small `ki`/`_` data helpers, and safe
+logging/JSON helpers, and returns bounded JSON. It has no filesystem, network,
+process, or environment access.
+
+Second implementation slice: `kube_insight_scripted_query` wraps the existing
+read-only `kube_insight_sql` tool and exposes bounded `sql()` plus `sqlAll()`
+inside goja. Use it after schema when one tool call should perform dependent
+profile -> proof SQL, several independent aggregates, or SQL rows plus compact
+grouping. It is still not a shell replacement; SQL read-only validation, query
+count, row count, timeout, and output limits remain mandatory.
 
 Add a safe transform capability after prompt and condenser improvements settle.
 This is not a shell replacement.

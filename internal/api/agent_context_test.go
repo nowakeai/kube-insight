@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -398,6 +399,56 @@ func TestAgentConversationReplaySkipsSubagentChildRuns(t *testing.T) {
 	}
 }
 
+func TestAgentConversationReplayUsesActiveRetryBranchForLaterFollowUp(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendCompletionRequestAndFinalAnswer(t, ctx, store, original, "旧分支回答：发现 OOM。")
+	time.Sleep(time.Millisecond)
+	later, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendCompletionRequestAndFinalAnswer(t, ctx, store, later, "旧分支后续回答：1 小时内有 OOM。")
+	time.Sleep(time.Millisecond)
+	retry, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{
+		Input: original.Input,
+		Metadata: mustJSON(map[string]any{
+			"retryOfRunId":     original.ID,
+			"retryRootRunId":   original.ID,
+			"retryReplacement": true,
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendCompletionRequestAndFinalAnswer(t, ctx, store, retry, "重试分支回答：没有发现 OOM。")
+	time.Sleep(time.Millisecond)
+	next, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "那最近10分钟呢？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := agentConversationMessagesForRun(ctx, store, next)
+	joined := completionRequestMessageText(messagesForCompletionRequestTest(messages))
+	for _, want := range []string{"最近有没有 OOM 现象？", "重试分支回答：没有发现 OOM。"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("active retry branch replay missing %q: %#v", want, messages)
+		}
+	}
+	for _, unwanted := range []string{"旧分支回答", "最近1小时内呢", "旧分支后续回答"} {
+		if strings.Contains(joined, unwanted) {
+			t.Fatalf("superseded retry branch leaked %q into replay: %#v", unwanted, messages)
+		}
+	}
+}
+
 func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing.T) {
 	ctx := context.Background()
 	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
@@ -453,6 +504,31 @@ func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing
 	}
 	if indexOfMessageContaining(request.Messages, "Client context for this run") < indexOfMessageContaining(request.Messages, "发现 OOMKilled Pod") {
 		t.Fatalf("volatile client context should stay after stable history: %#v", request.Messages)
+	}
+}
+
+func appendCompletionRequestAndFinalAnswer(t *testing.T, ctx context.Context, store agent.Store, run agent.Run, answer string) {
+	t.Helper()
+	if _, err := store.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventCompletionRequest,
+		Data: mustJSON(map[string]any{
+			"format": "kube-insight.agent.completion.v1",
+			"messages": []map[string]any{
+				{"role": "user", "content": run.Input},
+				{"role": "assistant", "content": answer},
+			},
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: answer}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, run.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
 	}
 }
 

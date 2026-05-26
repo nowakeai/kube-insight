@@ -71,13 +71,20 @@ ORDER BY updated_at DESC, id DESC%s`, q(s.database()), limit))
 	}
 	sessions := make([]agent.Session, 0, len(result.Data))
 	for _, row := range result.Data {
-		session := agentSessionFromRow(row)
-		runs, err := s.sessionRuns(ctx, session.ID)
-		if err != nil {
-			return agent.SessionList{}, err
-		}
-		session.Runs = runs
-		sessions = append(sessions, session)
+		sessions = append(sessions, agentSessionFromRow(row))
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	runSummaries, err := s.sessionRunSummaries(ctx, sessionIDs)
+	if err != nil {
+		return agent.SessionList{}, err
+	}
+	for i := range sessions {
+		summary := runSummaries[sessions[i].ID]
+		sessions[i].RunCount = summary.Count
+		sessions[i].LatestRun = summary.LatestRun
 	}
 	return agent.SessionList{Sessions: sessions}, nil
 }
@@ -281,6 +288,47 @@ ORDER BY created_at ASC, id ASC`, q(s.database()), quoteString(sessionID)))
 		runs = append(runs, agentRunFromRow(row))
 	}
 	return runs, nil
+}
+
+type sessionRunSummary struct {
+	Count     int
+	LatestRun *agent.Run
+}
+
+func (s *Store) sessionRunSummaries(ctx context.Context, sessionIDs []string) (map[string]sessionRunSummary, error) {
+	summaries := make(map[string]sessionRunSummary, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return summaries, nil
+	}
+	result, err := s.client().QueryJSON(ctx, fmt.Sprintf(`
+SELECT session_id, count() AS count
+FROM %s.agent_runs FINAL
+WHERE session_id IN (%s)
+GROUP BY session_id`, q(s.database()), sqlStringList(sessionIDs)))
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range result.Data {
+		sessionID := stringValue(row["session_id"])
+		summaries[sessionID] = sessionRunSummary{Count: int(int64Value(row["count"]))}
+	}
+
+	result, err = s.client().QueryJSON(ctx, fmt.Sprintf(`
+SELECT id, session_id, status, input, provider, model, created_at, started_at, completed_at, error, metadata
+FROM %s.agent_runs FINAL
+WHERE session_id IN (%s)
+ORDER BY session_id ASC, created_at DESC, id DESC
+LIMIT 1 BY session_id`, q(s.database()), sqlStringList(sessionIDs)))
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range result.Data {
+		run := agentRunFromRow(row)
+		summary := summaries[run.SessionID]
+		summary.LatestRun = &run
+		summaries[run.SessionID] = summary
+	}
+	return summaries, nil
 }
 
 func (s *Store) runSummary(ctx context.Context) (agent.RunSummary, error) {

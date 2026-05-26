@@ -57,6 +57,39 @@ test("server session hydration keeps child runs available but out of top-level p
 	expect(state.runs.run_child?.metadata).toEqual({ parentRunId: "run_parent", parentToolCallId: "call_1" })
 })
 
+test("batch server session hydration preserves list order and run projections", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerSessions([
+    {
+      id: "sess_old",
+      title: "Old",
+      createdAt,
+      updatedAt: createdAt,
+      runCount: 3,
+      latestRun: runDTO("run_old", "old", undefined, "sess_old"),
+    },
+    {
+      id: "sess_new",
+      title: "New",
+      createdAt,
+      updatedAt: createdAt,
+      runCount: 1,
+      latestRun: runDTO("run_new", "new", undefined, "sess_new"),
+    },
+  ], { activate: false })
+
+  const state = useAgentProjectionStore.getState()
+  expect(state.sessionOrder).toEqual(["sess_new", "sess_old"])
+  expect(state.activeSessionId).toBeUndefined()
+  expect(state.sessions.sess_old.runIds).toEqual(["run_old"])
+  expect(state.sessions.sess_new.runIds).toEqual(["run_new"])
+  expect(state.sessions.sess_old.runCount).toBe(3)
+  expect(state.sessions.sess_new.runCount).toBe(1)
+  expect(state.runs.run_old.input).toBe("old")
+  expect(state.runs.run_new.input).toBe("new")
+})
+
 test("removeSession clears runs, events, artifacts, citations, and active selection", () => {
   const store = useAgentProjectionStore.getState()
 
@@ -90,6 +123,50 @@ test("removeSession clears runs, events, artifacts, citations, and active select
   expect(state.artifacts.artifact_1).toBeUndefined()
   expect(state.citations.citation_1).toBeUndefined()
   expect(state.panelWorkspaces.sess_1).toBeUndefined()
+})
+
+test("batch server event replay hydrates run evidence without duplicating events", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerRun(runDTO("run_1", "question"))
+  const events = [
+    {
+      id: "evt_artifact",
+      runId: "run_1",
+      sequence: 1,
+      type: "artifact.created",
+      createdAt,
+      data: { artifact: { id: "artifact_1", kind: "markdown", title: "Proof", data: { ok: true } } },
+    },
+    {
+      id: "evt_citation",
+      runId: "run_1",
+      sequence: 2,
+      type: "citation.created",
+      createdAt,
+      data: { citation: { id: "citation_1", artifactId: "artifact_1", text: "source" } },
+    },
+    {
+      id: "evt_answer",
+      runId: "run_1",
+      sequence: 3,
+      type: "answer.final",
+      createdAt,
+      data: { content: "done" },
+    },
+  ] as const
+
+  store.applyServerEvents([...events])
+  store.applyServerEvents([...events])
+
+  const state = useAgentProjectionStore.getState()
+  expect(state.runs.run_1.eventIds).toEqual(["evt_artifact", "evt_citation", "evt_answer"])
+  expect(state.runs.run_1.artifactIds).toEqual(["artifact_1"])
+  expect(state.runs.run_1.citationIds).toEqual(["citation_1"])
+  expect(state.runs.run_1.status).toBe("completed")
+  expect(state.runs.run_1.finalAnswer).toBe("done")
+  expect(state.artifacts.artifact_1.data).toEqual({ ok: true })
+  expect(state.citations.citation_1.text).toBe("source")
 })
 
 test("retry fallback replacement still rewinds later turns", () => {
@@ -136,10 +213,10 @@ test("updateArtifact refreshes panel data without appending another artifact eve
   expect(state.runs.run_1.eventIds.length).toBe(beforeEvents)
 })
 
-function runDTO(id: string, input: string, metadata?: unknown): AgentRunDTO {
+function runDTO(id: string, input: string, metadata?: unknown, sessionId = "sess_1"): AgentRunDTO {
   return {
     id,
-    sessionId: "sess_1",
+    sessionId,
     status: "completed",
     input,
     createdAt,

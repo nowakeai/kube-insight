@@ -71,6 +71,8 @@ export const agentSessionSchema = z.object({
   updatedAt: z.string(),
   messages: z.array(agentMessageSchema).optional(),
   runs: z.array(agentRunSchema).optional(),
+  runCount: z.number().optional(),
+  latestRun: agentRunSchema.optional(),
 })
 
 export const agentSessionListSchema = z.object({

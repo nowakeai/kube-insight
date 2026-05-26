@@ -78,12 +78,18 @@ limit ?`
 	if err := rows.Close(); err != nil {
 		return agent.SessionList{}, err
 	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		sessionIDs = append(sessionIDs, session.ID)
+	}
+	runSummaries, err := s.sessionRunSummaries(ctx, sessionIDs)
+	if err != nil {
+		return agent.SessionList{}, err
+	}
 	for i := range sessions {
-		runs, err := s.sessionRuns(ctx, sessions[i].ID)
-		if err != nil {
-			return agent.SessionList{}, err
-		}
-		sessions[i].Runs = runs
+		summary := runSummaries[sessions[i].ID]
+		sessions[i].RunCount = summary.Count
+		sessions[i].LatestRun = summary.LatestRun
 	}
 	return agent.SessionList{Sessions: sessions}, nil
 }
@@ -353,6 +359,68 @@ order by created_at`, sessionID)
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
+}
+
+type sessionRunSummary struct {
+	Count     int
+	LatestRun *agent.Run
+}
+
+func (s *Store) sessionRunSummaries(ctx context.Context, sessionIDs []string) (map[string]sessionRunSummary, error) {
+	summaries := make(map[string]sessionRunSummary, len(sessionIDs))
+	if len(sessionIDs) == 0 {
+		return summaries, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `
+select session_id, count(*)
+from agent_runs
+where session_id in (`+placeholders(len(sessionIDs))+`)
+group by session_id`, stringArgs(sessionIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var sessionID string
+		var count int
+		if err := rows.Scan(&sessionID, &count); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		summaries[sessionID] = sessionRunSummary{Count: count}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	rows, err = s.db.QueryContext(ctx, `
+select id, session_id, status, input, provider, model, created_at, started_at, completed_at, error, metadata
+from agent_runs
+where session_id in (`+placeholders(len(sessionIDs))+`)
+  and not exists (
+    select 1
+    from agent_runs newer
+    where newer.session_id = agent_runs.session_id
+      and (newer.created_at > agent_runs.created_at or (newer.created_at = agent_runs.created_at and newer.id > agent_runs.id))
+  )
+order by session_id`, stringArgs(sessionIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		run, err := scanAgentRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		summary := summaries[run.SessionID]
+		summary.LatestRun = &run
+		summaries[run.SessionID] = summary
+	}
+	return summaries, rows.Err()
 }
 
 func (s *Store) scanRun(ctx context.Context, query string, args ...any) (agent.Run, error) {

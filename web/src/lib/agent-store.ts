@@ -21,6 +21,7 @@ export type AgentSession = {
   createdAt: string
   updatedAt: string
   runIds: string[]
+  runCount?: number
 }
 
 export type AgentRun = {
@@ -114,8 +115,10 @@ type AgentProjectionState = {
   ensureSession: (title: string) => string
   startRun: (sessionId: string, input: string) => string
   upsertServerSession: (session: AgentSessionDTO, options?: UpsertServerOptions) => void
+  upsertServerSessions: (sessions: AgentSessionDTO[], options?: UpsertServerOptions) => void
   upsertServerRun: (run: AgentRunDTO, options?: UpsertServerOptions) => void
   applyServerEvent: (event: AgentRunEventDTO) => void
+  applyServerEvents: (events: AgentRunEventDTO[]) => void
   appendRunEvent: (runId: string, input: AddRunEventInput) => string
   completeRun: (runId: string, finalAnswer: string) => void
   failRun: (runId: string, error: string) => void
@@ -212,45 +215,59 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     return id
   },
 
-  upsertServerSession: (session, options = {}) => {
+  upsertServerSession: (session, options = {}) => get().upsertServerSessions([session], options),
+
+  upsertServerSessions: (sessions, options = {}) => {
+    if (sessions.length === 0) return
     const activate = options.activate ?? true
     set((current) => {
-      const previous = current.sessions[session.id]
-      const branchRunsById = { ...current.runs }
-      for (const run of session.runs ?? []) {
-        branchRunsById[run.id] = {
-          id: run.id,
-          sessionId: run.sessionId,
-          status: run.status,
-          input: run.input,
-          metadata: run.metadata,
-          createdAt: run.createdAt,
-          updatedAt: run.completedAt ?? run.startedAt ?? run.createdAt,
-          eventIds: [],
-          artifactIds: [],
-          citationIds: [],
+      let runs = current.runs
+      for (const session of sessions) {
+        for (const run of serverSessionRuns(session)) {
+          if (runs === current.runs) runs = { ...current.runs }
+          const previousRun = current.runs[run.id]
+          runs[run.id] = {
+            id: run.id,
+            sessionId: run.sessionId,
+            status: run.status,
+            input: run.input,
+            error: run.error,
+            metadata: run.metadata,
+            createdAt: run.createdAt,
+            updatedAt: run.completedAt ?? run.startedAt ?? run.createdAt,
+            finalAnswer: previousRun?.finalAnswer,
+            eventIds: previousRun?.eventIds ?? [],
+            artifactIds: previousRun?.artifactIds ?? [],
+            citationIds: previousRun?.citationIds ?? [],
+          }
         }
       }
-      const runIds = displayRunIdsForRetryBranches(uniqueValues([
-        ...(previous?.runIds ?? []),
-        ...(session.runs ?? []).map((run) => run.id),
-      ]), branchRunsById)
+      const nextSessions = { ...current.sessions }
+      let sessionOrder = current.sessionOrder
+      for (const session of sessions) {
+        const previous = current.sessions[session.id]
+        const serverRuns = serverSessionRuns(session)
+        const runIds = displayRunIdsForRetryBranches(uniqueValues([
+          ...(previous?.runIds ?? []),
+          ...serverRuns.map((run) => run.id),
+        ]), runs)
+        nextSessions[session.id] = {
+          id: session.id,
+          title: session.title || previous?.title || "New investigation",
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          runIds,
+          runCount: session.runCount ?? previous?.runCount ?? runIds.length,
+        }
+        sessionOrder = uniquePrepend(sessionOrder, session.id)
+      }
       return {
-        activeSessionId: activate ? session.id : current.activeSessionId,
-        sessionOrder: uniquePrepend(current.sessionOrder, session.id),
-        sessions: {
-          ...current.sessions,
-          [session.id]: {
-            id: session.id,
-            title: session.title || previous?.title || "New investigation",
-            createdAt: session.createdAt,
-            updatedAt: session.updatedAt,
-            runIds,
-          },
-        },
+        activeSessionId: activate ? sessions[sessions.length - 1]?.id : current.activeSessionId,
+        sessionOrder,
+        sessions: nextSessions,
+        runs,
       }
     })
-    for (const run of session.runs ?? []) get().upsertServerRun(run, { activate })
   },
 
   upsertServerRun: (run, options = {}) => {
@@ -297,51 +314,86 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     })
   },
 
-  applyServerEvent: (event) => {
+  applyServerEvent: (event) => get().applyServerEvents([event]),
+
+  applyServerEvents: (events) => {
+    if (events.length === 0) return
     set((current) => {
-      if (current.events[event.id]) return current
-      const previousRun = current.runs[event.runId]
-      const status = runStatusFromEvent(event) ?? previousRun?.status ?? "running"
-      const finalAnswer = finalAnswerFromEvent(event) ?? previousRun?.finalAnswer
-      const run: AgentRun = previousRun ?? {
-        id: event.runId,
-        sessionId: runSessionFromEvent(event) ?? "server",
-        status,
-        input: "",
-        createdAt: event.createdAt,
-        updatedAt: event.createdAt,
-        eventIds: [],
-        artifactIds: [],
-        citationIds: [],
+      let changed = false
+      let nextEvents = current.events
+      let nextRuns = current.runs
+      let nextArtifacts = current.artifacts
+      let nextCitations = current.citations
+
+      const ensureEvents = () => {
+        if (nextEvents === current.events) nextEvents = { ...current.events }
       }
-      const artifact = artifactFromEvent(event)
-      const citation = citationFromEvent(event)
-      return {
-        events: {
-          ...current.events,
-          [event.id]: {
+      const ensureRuns = () => {
+        if (nextRuns === current.runs) nextRuns = { ...current.runs }
+      }
+      const ensureArtifacts = () => {
+        if (nextArtifacts === current.artifacts) nextArtifacts = { ...current.artifacts }
+      }
+      const ensureCitations = () => {
+        if (nextCitations === current.citations) nextCitations = { ...current.citations }
+      }
+
+      for (const event of events) {
+        if (nextEvents[event.id]) continue
+        const previousRun = nextRuns[event.runId]
+        const status = runStatusFromEvent(event) ?? previousRun?.status ?? "running"
+        const finalAnswer = finalAnswerFromEvent(event) ?? previousRun?.finalAnswer
+        const run: AgentRun = previousRun ?? {
+          id: event.runId,
+          sessionId: runSessionFromEvent(event) ?? "server",
+          status,
+          input: "",
+          createdAt: event.createdAt,
+          updatedAt: event.createdAt,
+          eventIds: [],
+          artifactIds: [],
+          citationIds: [],
+        }
+        const artifact = artifactFromEvent(event, nextArtifacts)
+        const citation = citationFromEvent(event)
+
+        ensureEvents()
+        nextEvents[event.id] = {
             id: event.id,
             runId: event.runId,
             type: event.type,
             createdAt: event.createdAt,
             data: event.data,
-          },
-        },
-        runs: {
-          ...current.runs,
-          [event.runId]: {
-            ...run,
-            status,
-            error: errorFromEvent(event) ?? run.error,
-            finalAnswer,
-            updatedAt: event.createdAt,
-            eventIds: uniqueAppend(run.eventIds, event.id),
-            artifactIds: artifact ? uniqueAppend(run.artifactIds, artifact.id) : run.artifactIds,
-            citationIds: citation ? uniqueAppend(run.citationIds, citation.id) : run.citationIds,
-          },
-        },
-        artifacts: artifact ? { ...current.artifacts, [artifact.id]: artifact } : current.artifacts,
-        citations: citation ? { ...current.citations, [citation.id]: citation } : current.citations,
+        }
+
+        ensureRuns()
+        nextRuns[event.runId] = {
+          ...run,
+          status,
+          error: errorFromEvent(event) ?? run.error,
+          finalAnswer,
+          updatedAt: event.createdAt,
+          eventIds: uniqueAppend(run.eventIds, event.id),
+          artifactIds: artifact ? uniqueAppend(run.artifactIds, artifact.id) : run.artifactIds,
+          citationIds: citation ? uniqueAppend(run.citationIds, citation.id) : run.citationIds,
+        }
+        if (artifact) {
+          ensureArtifacts()
+          nextArtifacts[artifact.id] = artifact
+        }
+        if (citation) {
+          ensureCitations()
+          nextCitations[citation.id] = citation
+        }
+        changed = true
+      }
+
+      if (!changed) return current
+      return {
+        events: nextEvents,
+        runs: nextRuns,
+        artifacts: nextArtifacts,
+        citations: nextCitations,
       }
     })
   },
@@ -603,6 +655,14 @@ function emptyPanelWorkspace(): AgentPanelWorkspace {
   return { pinnedArtifactIds: [], dockCollapsed: false }
 }
 
+function serverSessionRuns(session: AgentSessionDTO): AgentRunDTO[] {
+  const runs = [...(session.runs ?? [])]
+  if (session.latestRun && !runs.some((run) => run.id === session.latestRun?.id)) {
+    runs.push(session.latestRun)
+  }
+  return runs
+}
+
 function sessionIdForArtifact(state: AgentProjectionState, artifactId: string) {
   const artifact = state.artifacts[artifactId]
   if (!artifact) return undefined
@@ -719,18 +779,19 @@ function finalAnswerFromEvent(event: AgentRunEventDTO) {
   return undefined
 }
 
-function artifactFromEvent(event: AgentRunEventDTO): AgentArtifact | undefined {
+function artifactFromEvent(event: AgentRunEventDTO, artifacts: Record<string, AgentArtifact> = {}): AgentArtifact | undefined {
   if (event.type !== "artifact.created" && event.type !== "artifact.updated") return undefined
   const data = eventDataRecord(event.data)
   const value = eventDataRecord(data.artifact ?? data)
   if (typeof value.id !== "string" || typeof value.kind !== "string") return undefined
+  const previous = artifacts[value.id]
   return {
     id: value.id,
     runId: event.runId,
     kind: value.kind as AgentArtifactKind,
     title: typeof value.title === "string" ? value.title : undefined,
     data: value.data,
-    createdAt: event.createdAt,
+    createdAt: previous?.createdAt ?? event.createdAt,
     updatedAt: event.createdAt,
   }
 }

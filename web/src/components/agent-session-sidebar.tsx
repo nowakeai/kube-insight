@@ -44,6 +44,7 @@ export function SessionSidebar({
             {visibleSessions.map((session) => {
               const latestRunId = session.runIds.at(-1)
               const latestRun = latestRunId ? runs[latestRunId] : undefined
+              const runCount = session.runCount ?? session.runIds.length
               const selected = session.id === activeSessionId
               return (
                 <div
@@ -61,7 +62,7 @@ export function SessionSidebar({
                     </div>
                     <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
                       <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
-                      <span>{session.runIds.length} run{session.runIds.length === 1 ? "" : "s"}</span>
+                      <span>{runCount} run{runCount === 1 ? "" : "s"}</span>
                     </div>
                   </button>
                   <Button

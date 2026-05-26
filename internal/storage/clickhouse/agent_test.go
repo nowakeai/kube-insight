@@ -57,7 +57,7 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 1 {
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 0 || sessions.Sessions[0].RunCount != 1 || sessions.Sessions[0].LatestRun == nil || sessions.Sessions[0].LatestRun.ID != run.ID {
 		t.Fatalf("sessions = %#v", sessions)
 	}
 	if client.applyCalls != 2 {
@@ -209,6 +209,16 @@ func (c *fakeAgentClickHouseClient) QueryJSON(_ context.Context, query string) (
 			}
 		}
 		return QueryResult{Data: rows, Rows: len(rows)}, nil
+	case strings.Contains(query, "FROM `ki`.agent_runs FINAL") && strings.Contains(query, "GROUP BY session_id"):
+		counts := map[string]int{}
+		for _, row := range c.runs {
+			counts[stringValue(row["session_id"])]++
+		}
+		rows := []map[string]any{}
+		for sessionID, count := range counts {
+			rows = append(rows, map[string]any{"session_id": sessionID, "count": count})
+		}
+		return QueryResult{Data: rows, Rows: len(rows)}, nil
 	case strings.Contains(query, "FROM `ki`.agent_runs FINAL") && strings.Contains(query, "GROUP BY status"):
 		counts := map[string]int{}
 		for _, row := range c.runs {
@@ -217,6 +227,20 @@ func (c *fakeAgentClickHouseClient) QueryJSON(_ context.Context, query string) (
 		rows := []map[string]any{}
 		for status, count := range counts {
 			rows = append(rows, map[string]any{"status": status, "count": count})
+		}
+		return QueryResult{Data: rows, Rows: len(rows)}, nil
+	case strings.Contains(query, "FROM `ki`.agent_runs FINAL") && strings.Contains(query, "LIMIT 1 BY session_id"):
+		latestBySessionID := map[string]map[string]any{}
+		for _, row := range c.runs {
+			sessionID := stringValue(row["session_id"])
+			latest := latestBySessionID[sessionID]
+			if latest == nil || runRowNewer(row, latest) {
+				latestBySessionID[sessionID] = row
+			}
+		}
+		rows := []map[string]any{}
+		for _, row := range latestBySessionID {
+			rows = append(rows, cloneMap(row))
 		}
 		return QueryResult{Data: rows, Rows: len(rows)}, nil
 	case strings.Contains(query, "FROM `ki`.agent_runs FINAL"):
@@ -242,6 +266,15 @@ func (c *fakeAgentClickHouseClient) QueryJSON(_ context.Context, query string) (
 
 func (c *fakeAgentClickHouseClient) QueryTSV(context.Context, string) (TSVResult, error) {
 	return TSVResult{}, nil
+}
+
+func runRowNewer(a, b map[string]any) bool {
+	aCreatedAt := stringValue(a["created_at"])
+	bCreatedAt := stringValue(b["created_at"])
+	if aCreatedAt == bCreatedAt {
+		return stringValue(a["id"]) > stringValue(b["id"])
+	}
+	return aCreatedAt > bCreatedAt
 }
 
 func (c *fakeAgentClickHouseClient) InsertEvidenceBatch(context.Context, EvidenceBatch) (InsertResult, error) {

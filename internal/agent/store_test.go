@@ -88,7 +88,7 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID || len(listed.Sessions[0].Runs) != 1 {
+	if len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID || len(listed.Sessions[0].Runs) != 0 || listed.Sessions[0].RunCount != 1 || listed.Sessions[0].LatestRun == nil || listed.Sessions[0].LatestRun.ID != run.ID {
 		t.Fatalf("listed sessions = %#v", listed)
 	}
 }

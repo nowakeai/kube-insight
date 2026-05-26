@@ -87,7 +87,11 @@ func (s *MemoryStore) ListSessions(ctx context.Context, opts ListSessionsOptions
 	defer s.mu.Unlock()
 	sessions := make([]Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
-		session.Runs = s.sessionRunsLocked(session.ID)
+		runs := s.sessionRunsLocked(session.ID)
+		session.RunCount = len(runs)
+		if len(runs) > 0 {
+			session.LatestRun = cloneRunPtr(runs[len(runs)-1])
+		}
 		sessions = append(sessions, session)
 	}
 	sort.Slice(sessions, func(i, j int) bool {
@@ -312,12 +316,20 @@ func NewCitationID() string {
 func cloneSession(in Session) Session {
 	in.Messages = append([]Message(nil), in.Messages...)
 	in.Runs = cloneRuns(in.Runs)
+	if in.LatestRun != nil {
+		in.LatestRun = cloneRunPtr(*in.LatestRun)
+	}
 	return in
 }
 
 func cloneRun(in Run) Run {
 	in.Metadata = cloneRaw(in.Metadata)
 	return in
+}
+
+func cloneRunPtr(in Run) *Run {
+	out := cloneRun(in)
+	return &out
 }
 
 func cloneRuns(in []Run) []Run {

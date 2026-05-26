@@ -44,8 +44,10 @@ export function AgentChat() {
   const ensureSession = useAgentProjectionStore((state) => state.ensureSession)
   const startRun = useAgentProjectionStore((state) => state.startRun)
   const upsertServerSession = useAgentProjectionStore((state) => state.upsertServerSession)
+  const upsertServerSessions = useAgentProjectionStore((state) => state.upsertServerSessions)
   const upsertServerRun = useAgentProjectionStore((state) => state.upsertServerRun)
   const applyServerEvent = useAgentProjectionStore((state) => state.applyServerEvent)
+  const applyServerEvents = useAgentProjectionStore((state) => state.applyServerEvents)
   const appendRunEvent = useAgentProjectionStore((state) => state.appendRunEvent)
   const completeRun = useAgentProjectionStore((state) => state.completeRun)
   const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
@@ -125,11 +127,11 @@ export function AgentChat() {
     async function hydrateRecentSessions() {
       const list = await listAgentSessions({ signal: abortController.signal })
       if (abortController.signal.aborted) return
-      for (const session of [...list.sessions].reverse()) upsertServerSession(session, { activate: false })
+      upsertServerSessions([...list.sessions].reverse(), { activate: false })
     }
     void hydrateRecentSessions().catch(() => undefined)
     return () => abortController.abort()
-  }, [upsertServerSession])
+  }, [upsertServerSessions])
 
   useEffect(() => {
     if (!routeRun) {
@@ -146,12 +148,11 @@ export function AgentChat() {
       const session = await getAgentSession(routeRun!.sessionID, { signal: abortController.signal })
       upsertServerSession(session)
       const sessionRuns = session.runs ?? []
-      for (const candidate of sessionRuns) upsertServerRun(candidate)
       const routeRunDTO = sessionRuns.find((candidate) => candidate.id === routeRun!.runID)
       if (!routeRunDTO) throw new AgentAPIError(404, "run not found in session")
 
       const routeEvents = await getAgentRunEvents(routeRun!.runID, { signal: abortController.signal })
-      for (const event of routeEvents) applyServerEvent(event)
+      applyServerEvents(routeEvents)
       if (abortController.signal.aborted) return
 
       const hydratedRun = useAgentProjectionStore.getState().runs[routeRun!.runID]
@@ -162,7 +163,7 @@ export function AgentChat() {
       setMessages(threadMessagesFromHydratedRun(hydratedRun, routeRunDTO, routeEvents))
       setRouteHydrating(false)
 
-      void hydrateSiblingRunEvents(sessionRuns, routeRun!.runID, abortController.signal, applyServerEvent)
+      void hydrateSiblingRunEvents(sessionRuns, routeRun!.runID, abortController.signal, applyServerEvents)
     }
 
     void hydrateRouteRun().catch((error: unknown) => {
@@ -188,7 +189,7 @@ export function AgentChat() {
       abortController.abort()
       if (hydratedRunRef.current === routeRun.runID) hydratedRunRef.current = undefined
     }
-  }, [applyServerEvent, routeRun, upsertServerRun, upsertServerSession])
+  }, [applyServerEvents, routeRun, upsertServerSession])
 
   const runPrompt = useCallback(async (text: string) => {
     const prompt = text.trim()
@@ -694,17 +695,25 @@ async function hydrateSiblingRunEvents(
   runs: AgentRunDTO[],
   activeRunID: string,
   signal: AbortSignal,
-  applyServerEvent: (event: AgentRunEventDTO) => void,
+  applyServerEvents: (events: AgentRunEventDTO[]) => void,
 ) {
-  for (const run of runs) {
-    if (run.id === activeRunID || signal.aborted) continue
-    try {
-      const events = await getAgentRunEvents(run.id, { signal })
-      for (const event of events) applyServerEvent(event)
-    } catch {
-      return
+  const pendingRuns = runs.filter((run) => run.id !== activeRunID && !runHydrationLooksComplete(run.id))
+  const concurrency = 4
+  for (let index = 0; index < pendingRuns.length && !signal.aborted; index += concurrency) {
+    const batch = pendingRuns.slice(index, index + concurrency)
+    const results = await Promise.allSettled(batch.map((run) => getAgentRunEvents(run.id, { signal })))
+    for (const result of results) {
+      if (signal.aborted) return
+      if (result.status === "rejected") continue
+      applyServerEvents(result.value)
     }
   }
+}
+
+function runHydrationLooksComplete(runID: string) {
+  const run = useAgentProjectionStore.getState().runs[runID]
+  if (!run || !isTerminalRunStatus(run.status)) return false
+  return Boolean(run.finalAnswer || run.eventIds.length > 0)
 }
 
 function messageUpdateFromEvent(event: AgentRunEventDTO) {

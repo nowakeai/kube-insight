@@ -33,6 +33,8 @@ type Session struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	Messages  []Message `json:"messages,omitempty"`
 	Runs      []Run     `json:"runs,omitempty"`
+	RunCount  int       `json:"runCount,omitempty"`
+	LatestRun *Run      `json:"latestRun,omitempty"`
 }
 
 type Message struct {

@@ -107,16 +107,36 @@ without first checking coverage and schema-supported facts.
 
 Use the path that matches the question:
 
-| User intent | Preferred path | Stop when |
-| --- | --- | --- |
-| Exact Service health, endpoints, readiness, or impact | `kube_insight_health` + `kube_insight_service_investigation` | The bundle contains the Service plus related EndpointSlice/Pod/Event evidence. Do not add search/schema/SQL unless evidence is missing. |
-| Exact recent changes for known kind/namespace/name | `kube_insight_health` + `kube_insight_schema` + one bounded `kube_insight_sql` rollup over `changes` | The changes query returns rows for the requested window. Answer only observed changes and coverage unless the user asks for impact/root cause. |
-| Broad symptom/status discovery | `kube_insight_health` + targeted `kube_insight_search`, or `kube_insight_schema` + one aggregate facts/changes SQL when ranking/counting is needed | Search returns enough candidate proof, or aggregate SQL returns counts/timestamps. |
-| OOM/restart existence | `kube_insight_health` + exactly one `kube_insight_search` for Pod `OOMKilled`/restart evidence, bounded filters, and `includeBundles=true` | Bundles show enough facts/history proof. Do not parallelize OOM synonyms such as Evicted, memory, CrashLoopBackOff, or restart searches unless the user explicitly asks about those separate symptoms. |
-| OOM/restart ranking or top-N | `kube_insight_health` + `kube_insight_schema` + one facts aggregate SQL | Aggregate confirms counts and first/last seen. Do not call history for every row. |
-| Allocation/configuration such as requests/limits | `kube_insight_health` + `kube_insight_schema`, then schema recipe `container_resource_allocation_rollup` or one scoped proof query | SQL returns request/limit rows or snippets. Do not pivot to live usage, node capacity, OOM, or root cause unless asked. |
-| Namespace or object topology | `kube_insight_health` + candidate discovery through search or schema-guided SQL, then one `kube_insight_topology` around the best root | One graph explains the relevant relationship set. Do not call topology for every node. |
-| Raw object history or diffs | Discover the exact object first, then `kube_insight_history` with low limits and `includeDocs=false` by default | Returned versions/changes prove the claim. Fetch raw docs only when needed. |
+- Exact Service health/endpoints/readiness/impact:
+  `kube_insight_health` + `kube_insight_service_investigation`. Stop when the
+  bundle contains Service plus related EndpointSlice/Pod/Event evidence.
+- Exact recent changes for known kind/namespace/name:
+  `kube_insight_health` + `kube_insight_schema` + one bounded
+  `kube_insight_sql` rollup over `changes`. Stop when the query returns rows;
+  answer only observed changes and coverage unless the user asks for impact or
+  root cause.
+- Broad symptom/status discovery:
+  `kube_insight_health` + targeted `kube_insight_search`, or
+  `kube_insight_schema` + one aggregate facts/changes SQL when ranking/counting
+  is needed.
+- OOM/restart existence:
+  `kube_insight_health` + exactly one `kube_insight_search` for Pod
+  `OOMKilled`/restart evidence with bounded filters and `includeBundles=true`.
+  Stop after that search; do not parallelize OOM synonyms unless the user asks.
+- OOM/restart ranking or top-N:
+  `kube_insight_health` + `kube_insight_schema` + one facts aggregate SQL.
+  Stop when the aggregate confirms counts and first/last seen.
+- Allocation/configuration such as requests/limits:
+  `kube_insight_health` + `kube_insight_schema`, then the
+  `container_resource_allocation_rollup` recipe or one scoped proof query. Stop
+  when SQL returns request/limit rows or snippets.
+- Namespace or object topology:
+  `kube_insight_health` + candidate discovery, then one
+  `kube_insight_topology` around the best root. Do not call topology for every
+  node.
+- Raw object history or diffs:
+  discover the exact object first, then `kube_insight_history` with low limits
+  and `includeDocs=false` by default. Fetch raw docs only when needed.
 
 ## MCP Tools
 
@@ -276,244 +296,15 @@ When MCP is not available, use the CLI:
 ./bin/kube-insight query history --db kubeinsight.db --kind Pod --namespace default --name example --max-versions 10 --max-observations 50
 ```
 
-## Minimal External Agent Recipes
+## Detailed References
 
-These recipes are the intended minimum plans. Replace placeholder timestamps,
-namespace/name, and database paths with values from the user request and client
-context. If an MCP tool is available, call the named MCP tool with equivalent
-arguments; if not, use the CLI fallback.
+Load these only when needed:
 
-### OOM Existence
-
-User intent: "Was there an OOM recently?" or a follow-up such as "what about the
-last hour?"
-
-MCP plan:
-
-```json
-[
-  {"tool": "kube_insight_health", "arguments": {}},
-  {
-    "tool": "kube_insight_search",
-    "arguments": {
-      "query": "OOMKilled",
-      "kind": "Pod",
-      "from": "2026-05-26T14:00:00Z",
-      "to": "2026-05-26T15:00:00Z",
-      "includeBundles": true,
-      "limit": 5
-    }
-  }
-]
-```
-
-CLI equivalent:
-
-```bash
-./bin/kube-insight db resources health --db kubeinsight.db --errors-only
-./bin/kube-insight query search OOMKilled --db kubeinsight.db \
-  --kind Pod \
-  --from 2026-05-26T14:00:00Z \
-  --to 2026-05-26T15:00:00Z \
-  --include-bundles \
-  --limit 5
-```
-
-Stop after the search. If it returns matches, answer with Pod identity,
-timestamps, fact/change evidence, and coverage caveats. If it returns zero and
-coverage is incomplete, answer that kube-insight cannot prove absence for the
-uncovered streams.
-
-### Exact Recent Change
-
-User intent: "What changed for this Deployment in the last 24 hours?"
-
-MCP plan:
-
-```json
-[
-  {"tool": "kube_insight_health", "arguments": {}},
-  {"tool": "kube_insight_schema", "arguments": {}},
-  {
-    "tool": "kube_insight_sql",
-    "arguments": {
-      "maxRows": 50,
-      "sql": "<one recent-change rollup SQL query shaped like the CLI example below>"
-    }
-  }
-]
-```
-
-If the active schema is SQLite, adapt this shape to the SQLite tables and
-timestamp functions shown by `kube_insight_schema`. After this rollup returns
-rows, answer only the observed changes and coverage. Do not add Pods, Events,
-topology, OOM, or root-cause checks unless the user asks.
-
-CLI equivalent for a ClickHouse-compatible backend:
-
-```bash
-./bin/kube-insight query schema --db kubeinsight.db
-./bin/kube-insight query sql --db kubeinsight.db --max-rows 50 --sql "
-select cluster_id, kind, namespace, name, change_family, path, severity,
-       count() as changes,
-       min(ts) as first_seen,
-       max(ts) as last_seen,
-       any(old_scalar) as sample_old,
-       any(new_scalar) as sample_new
-from changes
-where ts >= toDateTime64('2026-05-25 15:00:00', 3, 'UTC')
-  and ts < toDateTime64('2026-05-26 15:00:00', 3, 'UTC')
-  and kind = 'Deployment'
-  and namespace = 'default'
-  and name = 'api'
-group by cluster_id, kind, namespace, name, change_family, path, severity
-order by last_seen desc, changes desc
-limit 50"
-```
-
-### Allocation Or Requests/Limits
-
-User intent: "Show resource allocation, not actual usage."
-
-MCP plan:
-
-```json
-[
-  {"tool": "kube_insight_health", "arguments": {}},
-  {"tool": "kube_insight_schema", "arguments": {}}
-]
-```
-
-Then call `kube_insight_sql` with the SQL copied from the schema recipe named
-`container_resource_allocation_rollup`, after replacing placeholder cluster,
-namespace, and time filters. The final SQL call should look like this shape:
-
-```json
-[
-  {
-    "tool": "kube_insight_sql",
-    "arguments": {
-      "maxRows": 100,
-      "sql": "<schema-provided container_resource_allocation_rollup SQL>"
-    }
-  }
-]
-```
-
-If the schema does not expose a ready allocation recipe or facts do not carry
-request/limit keys, run one scoped raw-document field profile first, then one
-proof query. Stop once request/limit rows or snippets are available. Do not pivot
-to live usage, Node capacity, OOM root cause, or topology unless asked.
-
-CLI equivalent:
-
-```bash
-./bin/kube-insight query schema --db kubeinsight.db
-./bin/kube-insight query sql --db kubeinsight.db --max-rows 100 --sql \
-  '<schema-provided container_resource_allocation_rollup SQL>'
-```
-
-### Exact Service Health
-
-User intent: "Is namespace/name Service healthy? Are endpoints ready?"
-
-MCP plan:
-
-```json
-[
-  {"tool": "kube_insight_health", "arguments": {}},
-  {
-    "tool": "kube_insight_service_investigation",
-    "arguments": {"namespace": "default", "name": "api"}
-  }
-]
-```
-
-This is terminal when the bundle includes Service, EndpointSlice, Pod, and Event
-evidence relevant to the question. Do not add search, schema, SQL, or topology
-unless that bundle is missing the requested proof.
-
-CLI equivalent:
-
-```bash
-./bin/kube-insight db resources health --db kubeinsight.db --errors-only
-./bin/kube-insight query service api --db kubeinsight.db \
-  --namespace default \
-  --from 2026-05-26T14:00:00Z \
-  --to 2026-05-26T15:00:00Z \
-  --max-evidence-objects 20 \
-  --max-versions-per-object 2
-```
-
-## Query Patterns
-
-For ClickHouse-compatible backends, prefer the schema recipes returned by
-`kube_insight_schema`. These patterns show the intended shape; adapt table and
-column names only after reading the active schema.
-
-### Coverage
-
-```sql
-with latest as (
-  select cluster_id, api_group, api_version, resource, kind,
-         argMax(status, updated_at) as status,
-         argMax(error, updated_at) as error,
-         max(updated_at) as latest_update
-  from ingestion_offsets
-  group by cluster_id, api_group, api_version, resource, kind
-)
-select cluster_id, api_group, api_version, resource, kind, status, error, latest_update
-from latest
-where status in ('not_started','queued','retrying','list_error','watch_error')
-order by latest_update desc
-limit 50;
-```
-
-### Recent Fact Rollup
-
-```sql
-select cluster_id, kind, namespace, name, fact_key, fact_value,
-       count() as rows,
-       min(ts) as first_seen,
-       max(ts) as last_seen
-from facts
-where ts >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
-  and kind = 'Pod'
-  and fact_key = 'pod_status.last_reason'
-  and fact_value = 'OOMKilled'
-group by cluster_id, kind, namespace, name, fact_key, fact_value
-order by rows desc, last_seen desc
-limit 50;
-```
-
-### Exact Recent Changes
-
-```sql
-select cluster_id, kind, namespace, name, change_family, path, severity,
-       count() as changes,
-       min(ts) as first_seen,
-       max(ts) as last_seen,
-       any(old_scalar) as sample_old,
-       any(new_scalar) as sample_new
-from changes
-where ts >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
-  and kind = 'Deployment'
-  and namespace = 'default'
-  and name = 'api'
-group by cluster_id, kind, namespace, name, change_family, path, severity
-order by last_seen desc, changes desc
-limit 50;
-```
-
-If this answers an exact recent-change question, stop. Do not expand to Pods,
-Events, topology, OOM, root cause, or spec-only follow-up unless the user asks.
-
-### Allocation Or Requests/Limits
-
-Use the schema recipe named `container_resource_allocation_rollup` when present.
-If facts do not carry resource configuration, use one scoped `observations.doc`
-profile or recipe such as `raw_doc_field_profile` before fetching proof rows.
-Avoid repeated JSON syntax probing.
+- `references/external-agent-recipes.md`: copyable MCP and CLI plans for OOM
+  existence, exact recent changes, allocation/requests/limits, and exact Service
+  health.
+- `references/query-patterns.md`: ClickHouse-compatible SQL shapes for coverage,
+  fact rollups, exact changes, and allocation/profile fallbacks.
 
 ## Output Style
 

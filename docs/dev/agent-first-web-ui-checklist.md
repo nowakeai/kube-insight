@@ -307,6 +307,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   shows readable per-evidence summaries, inline detail expansion, Summary/Table/
   Markdown/JSON views when data is available, and a separate pin action for
   evidence that should stay watched in the right-side dock.
+- [x] Render dockable run artifacts as lightweight inline preview cards under
+  the final answer. The cards summarize markdown/resource/list/topology/history/
+  diff artifacts and pin/open them in the right-side dock without requiring the
+  artifact to appear as a verified citation.
 - [x] Add visible in-run liveness feedback with spinner/pulse states, current
   run stage, and approximate sent/received token counters while provider usage
   events are not available yet. Run stats are anchored above the sticky composer

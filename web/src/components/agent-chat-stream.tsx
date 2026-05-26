@@ -1,4 +1,4 @@
-import { Activity, ChevronDown, Copy, LoaderCircle, RotateCcw, UserRound } from "lucide-react"
+import { Activity, ChevronDown, Copy, FileText, LoaderCircle, Pin, RotateCcw, UserRound } from "lucide-react"
 import { useEffect, useState } from "react"
 import type { ThreadMessage } from "@assistant-ui/react"
 
@@ -16,6 +16,7 @@ import {
   runActivitySummary,
   runCitations,
   runElapsedLabel,
+  runInlineArtifacts,
   runStatusLabel,
   shortID,
   splitRunResponse,
@@ -128,6 +129,7 @@ function RunConversation({
   const activity = runActivitySummary(run, events, segments, status)
   const response = splitRunResponse(segments, isRunning, status)
   const citations = runCitations(events)
+  const inlineArtifacts = runInlineArtifacts(run, artifactsById)
   const citationAnchorIndex = lastIndexOf(response.finalSegments, (segment) => segment.type === "assistant" && Boolean(segment.content.trim()))
   return (
     <div className={isActive ? "space-y-4" : "space-y-4 opacity-95"}>
@@ -147,6 +149,7 @@ function RunConversation({
         activity,
         artifactsById,
         citations: index === citationAnchorIndex ? citations : [],
+        inlineArtifacts: index === citationAnchorIndex ? inlineArtifacts : [],
         isRunning,
         onRetryRun,
         onSelectArtifact,
@@ -196,6 +199,7 @@ function renderResponseSegment({
   activity,
   artifactsById,
   citations = [],
+  inlineArtifacts = [],
   isRunning,
   onRetryRun,
   onSelectArtifact,
@@ -205,6 +209,7 @@ function renderResponseSegment({
   activity: RunActivitySummary
   artifactsById?: Record<string, AgentArtifact>
   citations?: EvidenceSegment[]
+  inlineArtifacts?: AgentArtifact[]
   isRunning: boolean
   onRetryRun: (run: AgentRun) => void
   onSelectArtifact: (artifactId?: string) => void
@@ -217,6 +222,7 @@ function renderResponseSegment({
         key={segment.id}
         artifactsById={artifactsById}
         citations={citations}
+        inlineArtifacts={inlineArtifacts}
         onRetry={!isRunning ? () => onRetryRun(run) : undefined}
         onSelectArtifact={onSelectArtifact}
         receivedTokens={activity.receivedTokens}
@@ -378,6 +384,7 @@ function UserStreamMessage({ text }: { text: string }) {
 function AssistantStreamMessage({
   artifactsById = {},
   citations = [],
+  inlineArtifacts = [],
   onRetry,
   onSelectArtifact,
   receivedTokens,
@@ -387,6 +394,7 @@ function AssistantStreamMessage({
 }: {
   artifactsById?: Record<string, AgentArtifact>
   citations?: EvidenceSegment[]
+  inlineArtifacts?: AgentArtifact[]
   onRetry?: () => void
   onSelectArtifact?: (artifactId?: string) => void
   receivedTokens: number
@@ -416,6 +424,7 @@ function AssistantStreamMessage({
         ) : null}
         {text ? <MarkdownContent text={text} /> : <ThinkingPlaceholder active={Boolean(running)} />}
         <EvidenceList artifactsById={artifactsById} citations={citations} onSelectArtifact={onSelectArtifact} />
+        <InlineArtifactPreviews artifacts={inlineArtifacts} onSelectArtifact={onSelectArtifact} />
         {canShowActions ? (
           <div className="mt-3 flex items-center gap-1 text-muted-foreground">
             <Button type="button" size="icon-sm" variant="ghost" className="size-8" title="Copy" aria-label="Copy response" onClick={copyText}>
@@ -430,6 +439,87 @@ function AssistantStreamMessage({
       </div>
     </div>
   )
+}
+
+function InlineArtifactPreviews({
+  artifacts,
+  onSelectArtifact,
+}: {
+  artifacts: AgentArtifact[]
+  onSelectArtifact?: (artifactId?: string) => void
+}) {
+  if (artifacts.length === 0) return null
+  return (
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {artifacts.map((artifact) => (
+        <button
+          key={artifact.id}
+          type="button"
+          className="group min-w-0 rounded-md border border-border bg-card px-3 py-2 text-left transition hover:border-primary/40 hover:bg-muted/60"
+          onClick={() => onSelectArtifact?.(artifact.id)}
+        >
+          <div className="flex min-w-0 items-start gap-2">
+            <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-xs font-medium text-foreground">{artifact.title || "Artifact"}</span>
+                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground">{artifact.kind}</span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-[0.72rem] leading-5 text-muted-foreground">{artifactPreviewSummary(artifact)}</p>
+            </div>
+            <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition group-hover:bg-background group-hover:text-foreground" title="Pin to side panel" aria-label="Pin to side panel">
+              <Pin className="size-3.5" aria-hidden="true" />
+            </span>
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function artifactPreviewSummary(artifact: AgentArtifact) {
+  const data = recordValue(artifact.data)
+  if (artifact.kind === "markdown") return firstMarkdownLine(data.markdown) || "Markdown proof from the agent run."
+  if (artifact.kind === "k8s.resource") return resourceIdentity(data) || "Kubernetes resource proof."
+  if (artifact.kind === "k8s.resource_list") return countSummary(data.items, "resource candidate")
+  if (artifact.kind === "k8s.topology") return topologySummary(data)
+  if (artifact.kind === "k8s.history") return countSummary(data.versions, "observed version")
+  if (artifact.kind === "k8s.diff") return "Kubernetes object diff proof."
+  return "Structured artifact proof."
+}
+
+function firstMarkdownLine(value: unknown) {
+  if (typeof value !== "string") return ""
+  return value.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean) ?? ""
+}
+
+function resourceIdentity(data: Record<string, unknown>) {
+  const identity = recordValue(data.identity)
+  const kind = textValue(identity.kind ?? data.kind)
+  const namespace = textValue(identity.namespace ?? data.namespace)
+  const name = textValue(identity.name ?? data.name)
+  if (!kind && !name) return ""
+  return [kind, namespace, name].filter(Boolean).join("/")
+}
+
+function topologySummary(data: Record<string, unknown>) {
+  const nodes = Array.isArray(data.nodes) ? data.nodes.length : 0
+  const edges = Array.isArray(data.edges) ? data.edges.length : 0
+  if (nodes || edges) return `${nodes} topology node${nodes === 1 ? "" : "s"}, ${edges} edge${edges === 1 ? "" : "s"}.`
+  return "Topology graph proof."
+}
+
+function countSummary(value: unknown, label: string) {
+  const count = Array.isArray(value) ? value.length : 0
+  return count ? `${count} ${label}${count === 1 ? "" : "s"}.` : `No ${label}s included.`
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" ? value : ""
 }
 
 

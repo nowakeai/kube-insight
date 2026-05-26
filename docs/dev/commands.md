@@ -180,6 +180,17 @@ Inspect storage and collector health:
 ./bin/kube-insight db compact --db kubeinsight.db
 ```
 
+Inspect the exact provider-facing model context recorded for an agent run:
+
+```bash
+./bin/kube-insight db agent-context run_abc123 --db kubeinsight.db
+./bin/kube-insight db agent-context run_abc123 --db kubeinsight.db --all --output json
+```
+
+Use this when debugging follow-up drift, retry rewind behavior, or provider
+prompt-cache friendliness. The command reads `completion.request` events and
+shows the ordered messages actually sent to the model.
+
 Run a long-lived local ClickHouse container for development:
 
 ```bash

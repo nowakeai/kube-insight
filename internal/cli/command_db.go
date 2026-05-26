@@ -24,6 +24,7 @@ func dbCommand(ctx context.Context, stdout io.Writer, state *cliState) *cobra.Co
 		Use:   "db",
 		Short: "Manage kube-insight storage.",
 	}
+	cmd.AddCommand(dbAgentContextCommand(ctx, stdout, state))
 	cmd.AddCommand(dbBackfillCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClickHouseCommand(ctx, stdout, state))
 	cmd.AddCommand(dbClustersCommand(ctx, stdout, state))

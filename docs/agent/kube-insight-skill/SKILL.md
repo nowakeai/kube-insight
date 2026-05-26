@@ -130,6 +130,13 @@ Use the path that matches the question:
   `kube_insight_health` + `kube_insight_schema`, then the
   `container_resource_allocation_rollup` recipe or one scoped proof query. Stop
   when SQL returns request/limit rows or snippets.
+- Node capacity/allocatable totals:
+  `kube_insight_health` + `kube_insight_schema`, then one facts aggregate over
+  `node_capacity.cpu`, `node_capacity.memory`, `node_allocatable.cpu`, and
+  `node_allocatable.memory`. These values come from Node
+  `status.capacity/status.allocatable`, not `spec`. If older data lacks these
+  facts, run one scoped raw-doc proof query against Node `observations` or
+  `versions`; do not infer CPU or memory from node names or pool labels.
 - Namespace or object topology:
   `kube_insight_health` + candidate discovery, then one
   `kube_insight_topology` around the best root. Do not call topology for every

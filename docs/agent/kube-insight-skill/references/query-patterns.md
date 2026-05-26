@@ -67,3 +67,56 @@ Use the schema recipe named `container_resource_allocation_rollup` when present.
 If facts do not carry resource configuration, use one scoped `observations.doc`
 profile or recipe such as `raw_doc_field_profile` before fetching proof rows.
 Avoid repeated JSON syntax probing.
+
+## Node Capacity And Allocatable
+
+For node capacity questions, Kubernetes stores the useful values under Node
+`status.capacity` and `status.allocatable`, not `spec`. Prefer facts first:
+
+```sql
+with latest as (
+  select
+    cluster_id,
+    name,
+    fact_key,
+    argMax(numeric_value, ts) as value
+  from facts
+  where kind = 'Node'
+    and ts >= toDateTime64('2026-05-26 04:00:00', 3, 'UTC')
+    and fact_key in (
+      'node_capacity.cpu',
+      'node_capacity.memory',
+      'node_allocatable.cpu',
+      'node_allocatable.memory'
+    )
+  group by cluster_id, name, fact_key
+),
+per_node as (
+  select
+    cluster_id,
+    name,
+    maxIf(value, fact_key = 'node_capacity.cpu') as capacity_cpu_cores,
+    maxIf(value, fact_key = 'node_capacity.memory') as capacity_memory_bytes,
+    maxIf(value, fact_key = 'node_allocatable.cpu') as allocatable_cpu_cores,
+    maxIf(value, fact_key = 'node_allocatable.memory') as allocatable_memory_bytes
+  from latest
+  group by cluster_id, name
+)
+select
+  cluster_id,
+  count() as node_count,
+  sum(capacity_cpu_cores) as total_capacity_cpu_cores,
+  sum(capacity_memory_bytes) as total_capacity_memory_bytes,
+  sum(allocatable_cpu_cores) as total_allocatable_cpu_cores,
+  sum(allocatable_memory_bytes) as total_allocatable_memory_bytes
+from per_node
+group by cluster_id
+order by cluster_id
+limit 20;
+```
+
+If older retained data does not have these facts, use one scoped raw-doc proof
+query over Node `observations` or `versions` and extract
+`status.capacity/status.allocatable` snippets. Do not infer CPU or memory from
+node names, machine pool labels, or instance type strings unless the raw Node
+document proves the capacity.

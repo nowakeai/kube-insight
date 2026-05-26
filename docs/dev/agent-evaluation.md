@@ -120,7 +120,8 @@ Pod, EndpointSlice, and Event fixture, starts `kube-insight serve --api --mcp`
 with `server.chat.enabled`, submits agent runs through
 `POST /api/v1/agent/sessions/{session_id}/runs`, follows
 `GET /api/v1/agent/runs/{run_id}/events?follow=true`, and fails if terminal
-runs do not emit a final answer, candidate artifact, and verified citation.
+runs do not emit a replayable `completion.request`, final answer, candidate
+artifact, and verified citation.
 
 ```bash
 make build
@@ -147,6 +148,8 @@ SQLite database. The script built the current binary, ingested Service, Pod,
 EndpointSlice, and Event fixtures, started `kube-insight serve --api --mcp`,
 created one agent session, submitted three runs, followed SSE events, and
 verified terminal `run.completed`, final answer, artifacts, and citations.
+Current script summaries also include `completionRequests` and `childRunIds` so
+subagent fan-out can be inspected without opening the full SSE log.
 
 | Question shape | Status | Artifacts | Citations | Notable tool path |
 | --- | --- | ---: | ---: | --- |
@@ -220,4 +223,3 @@ lookups. The default instruction and MCP tool descriptions now tell models to
 stop once typed tools provide enough evidence, avoid SQL reconfirmation, and
 write stable evidence IDs/object identities in final answers so the server can
 verify citations without accepting hallucinated references.
-

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -58,5 +60,66 @@ func TestAnnotateAnswerPlacesCitationOnMatchingEvidenceLabelBlock(t *testing.T) 
 	annotated := annotateAnswerWithEvidenceReferences(answer, citations)
 	if !strings.Contains(annotated, "SQL 聚合显示 7 个 Pod 有记录。 [OOM facts](#citation:citation_1)") {
 		t.Fatalf("annotated = %q", annotated)
+	}
+}
+
+func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "investigate reliability"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := newEinoRunRecorder(store, run.ID)
+	if err := recorder.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{
+		ID:    "artifact_parallel",
+		Kind:  ArtifactKindToolCall,
+		Title: "Tool output: parallel_investigation",
+		Data: jsonRaw(map[string]any{
+			"toolCallId": "call_parallel",
+			"name":       parallelInvestigationToolName,
+			"output": map[string]any{
+				"tool":    parallelInvestigationToolName,
+				"summary": "parallel investigation completed 3 branch(es), failed 0 branch(es)",
+				"branches": []map[string]any{{
+					"name":       "oom_restarts",
+					"childRunId": "run_child",
+					"answer":     "OOMKilled facts show Pod default/api-0 restart_count=1. Recent changes and topology edges identify EndpointSlice api-abc.",
+				}},
+			},
+		}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.Complete(ctx, "Pod `api-0` was OOMKilled. {{evidence: OOM facts}}"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var citation CitationEventData
+	var final MessageEventData
+	for _, event := range events {
+		switch event.Type {
+		case EventCitation:
+			if err := json.Unmarshal(event.Data, &citation); err != nil {
+				t.Fatal(err)
+			}
+		case EventFinalAnswer:
+			if err := json.Unmarshal(event.Data, &final); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if citation.Citation.ArtifactID != "artifact_parallel" || citation.Citation.Text != "OOM facts" {
+		t.Fatalf("citation = %#v", citation)
+	}
+	if !strings.Contains(final.Content, "[OOM facts](#citation:"+citation.Citation.ID+")") {
+		t.Fatalf("final = %q citation=%#v", final.Content, citation)
 	}
 }

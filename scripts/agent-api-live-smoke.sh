@@ -153,17 +153,24 @@ for question in "${question_list[@]}"; do
   curl -fsS --max-time "${RUN_TIMEOUT_SECONDS}" "http://${API_LISTEN}/api/v1/agent/runs/${run_id}/events?follow=true" >"${sse_path}"
   awk '/^data: /{sub(/^data: /,""); print}' "${sse_path}" | jq -s '.' >"${events_json}"
   status="$(jq -r 'map(select(.type=="run.completed" or .type=="run.failed" or .type=="run.cancelled")) | last | .type // empty' "${events_json}")"
+  completion_requests="$(jq '[.[] | select(.type=="completion.request")] | length' "${events_json}")"
   artifacts="$(jq '[.[] | select(.type=="artifact.created")] | length' "${events_json}")"
   citations="$(jq '[.[] | select(.type=="citation.created")] | length' "${events_json}")"
+  child_run_ids="$(jq '[.[] | select(.type=="artifact.created") | .data.artifact.data.output.branches[]? | select(.childRunId != null) | .childRunId] | unique | length' "${events_json}")"
   final_answer="$(jq -r '[.[] | select(.type=="answer.final" or .type=="message.completed") | .data.content // empty] | last // ""' "${events_json}")"
   if [[ "${status}" != "run.completed" ]]; then
     echo "Run ${run_id} did not complete successfully: ${status}" >&2
     cat "${sse_path}" >&2
     exit 1
   fi
+  if [[ "${completion_requests}" -lt 1 ]]; then
+    echo "Run ${run_id} did not emit completion.request." >&2
+    jq 'map({type, sequence, data})' "${events_json}" >&2
+    exit 1
+  fi
   if [[ "${artifacts}" -lt 1 || "${citations}" -lt 1 || -z "${final_answer}" ]]; then
     echo "Run ${run_id} missing expected final answer/artifact/citation." >&2
-    jq '{events:length, artifacts:[.[]|select(.type=="artifact.created")], citations:[.[]|select(.type=="citation.created")], finals:[.[]|select(.type=="answer.final" or .type=="message.completed")]}' "${events_json}" >&2
+    jq '{events:length, completionRequests:[.[]|select(.type=="completion.request")], artifacts:[.[]|select(.type=="artifact.created")], citations:[.[]|select(.type=="citation.created")], finals:[.[]|select(.type=="answer.final" or .type=="message.completed")]}' "${events_json}" >&2
     exit 1
   fi
   if [[ "${first_summary}" -eq 0 ]]; then
@@ -174,10 +181,12 @@ for question in "${question_list[@]}"; do
     --arg question "${question}" \
     --arg runId "${run_id}" \
     --arg status "${status}" \
+    --argjson completionRequests "${completion_requests}" \
     --argjson artifacts "${artifacts}" \
     --argjson citations "${citations}" \
+    --argjson childRunIds "${child_run_ids}" \
     --arg eventsPath "${events_json}" \
-    '{question:$question, runId:$runId, status:$status, artifacts:$artifacts, citations:$citations, eventsPath:$eventsPath}' >>"${SUMMARY_PATH}"
+    '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath}' >>"${SUMMARY_PATH}"
 done
 printf ']\n' >>"${SUMMARY_PATH}"
 

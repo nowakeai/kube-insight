@@ -91,7 +91,10 @@ func answerCitationCandidates(events []RunEvent) []answerCitationCandidate {
 			continue
 		}
 		artifact := data.Artifact
-		if artifact.ID == "" || artifact.Kind == ArtifactKindToolCall || seenArtifacts[artifact.ID] {
+		if artifact.ID == "" || seenArtifacts[artifact.ID] {
+			continue
+		}
+		if artifact.Kind == ArtifactKindToolCall && !toolCallArtifactCanSupportCitation(artifact) {
 			continue
 		}
 		seenArtifacts[artifact.ID] = true
@@ -174,6 +177,22 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 			score += 70
 		}
 	}
+	if strings.Contains(label, "change") || strings.Contains(label, "changes") || strings.Contains(label, "recent") || strings.Contains(label, "变更") {
+		if candidate.Source == "kube_insight_sql" {
+			score += 45
+		}
+		if strings.Contains(text, "change") || strings.Contains(text, "changes") || strings.Contains(text, "change_family") {
+			score += 35
+		}
+	}
+	if strings.Contains(label, "topology") || strings.Contains(label, "edge") || strings.Contains(label, "impact") || strings.Contains(label, "拓扑") {
+		if candidate.Source == "kube_insight_topology" || candidate.Source == "kube_insight_service_investigation" {
+			score += 60
+		}
+		if strings.Contains(text, "topology") || strings.Contains(text, "edge") || strings.Contains(text, "endpointslice") {
+			score += 35
+		}
+	}
 	if strings.Contains(label, "search") || strings.Contains(label, "candidate") || strings.Contains(label, "resource") || strings.Contains(label, "候选") || strings.Contains(label, "资源") {
 		if candidate.Source == "kube_insight_search" {
 			score += 60
@@ -186,6 +205,19 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	return score
+}
+
+func toolCallArtifactCanSupportCitation(artifact Artifact) bool {
+	var record map[string]any
+	if len(artifact.Data) == 0 || json.Unmarshal(artifact.Data, &record) != nil {
+		return false
+	}
+	name := textField(record, "name")
+	if name == parallelInvestigationToolName || name == evidenceCondenserToolName {
+		return true
+	}
+	output := valueRecord(record["output"])
+	return output != nil && textField(output, "tool") == parallelInvestigationToolName
 }
 
 func citationTargetSource(target json.RawMessage) string {

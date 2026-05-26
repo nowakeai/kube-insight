@@ -62,7 +62,7 @@ func (m *toolBudgetMiddleware) WrapInvokableToolCall(ctx context.Context, endpoi
 			return endpoint(ctx, argumentsInJSON, opts...)
 		}
 		total, repeated, ok := m.recordToolBudgetCall(ctx, name)
-		if ok && m.shouldReturnBudgetGuard(total, repeated) {
+		if ok && m.shouldReturnBudgetGuard(name, total, repeated) {
 			return toolBudgetGuardOutput(name, total, repeated), nil
 		}
 		return endpoint(ctx, argumentsInJSON, opts...)
@@ -83,8 +83,8 @@ func (m *toolBudgetMiddleware) recordToolBudgetCall(ctx context.Context, name st
 	return m.counts[toolBudgetTotalKey], m.counts[name], true
 }
 
-func (m *toolBudgetMiddleware) shouldReturnBudgetGuard(total int, repeated int) bool {
-	return repeated > 3 || total > m.warnAtToolCalls()+6
+func (m *toolBudgetMiddleware) shouldReturnBudgetGuard(name string, total int, repeated int) bool {
+	return repeated > repeatedToolGuardThreshold(name) || total > m.warnAtToolCalls()+6
 }
 
 func (m *toolBudgetMiddleware) warnAtToolCalls() int {
@@ -110,11 +110,31 @@ func toolBudgetSignal(messages []adk.Message) (int, string) {
 			continue
 		}
 		byName[name]++
-		if byName[name] >= 3 {
+		if byName[name] >= repeatedToolWarningThreshold(name) {
 			return total, name
 		}
 	}
 	return total, ""
+}
+
+func repeatedToolWarningThreshold(name string) int {
+	switch name {
+	case "kube_insight_sql", scriptedQueryToolName:
+		return 4
+	default:
+		return 3
+	}
+}
+
+func repeatedToolGuardThreshold(name string) int {
+	switch name {
+	case "kube_insight_sql":
+		return 5
+	case scriptedQueryToolName:
+		return 3
+	default:
+		return 3
+	}
 }
 
 func toolNameFromToolMessage(msg adk.Message) string {

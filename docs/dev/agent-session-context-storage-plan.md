@@ -190,6 +190,12 @@ visible user/assistant turns from `agent_runs.input`, `message.completed`, and
 `answer.final`, then immediately records the next run's real
 `completion.request`.
 
+Replay must treat each prior run independently. A session can contain a mix of
+new model-context events and legacy/final-answer-only runs after upgrades,
+failures, or imported data. Do not let the presence of `completion.message` in
+one prior run suppress the `agent_runs.input` fallback for another prior run;
+otherwise short follow-up prompts can lose their topic anchor.
+
 The replay path must not reconstruct context from UI-only events when
 model-context events are available. UI deltas, rendered final answers, and
 display summaries can differ from model-visible messages and should not become
@@ -309,6 +315,7 @@ Disallowed compaction:
   - [x] intent correction follow-up,
   - [x] cache-friendly stable prefix ordering,
   - [x] retry rewind,
+  - [x] mixed completion-event and legacy prior runs,
   - [x] mixed streamed and non-streamed assistant output,
   - [x] tool-call continuation.
 

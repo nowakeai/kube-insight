@@ -127,6 +127,58 @@ func TestAgentMessagesPlaceVolatileClientContextAfterStableHistory(t *testing.T)
 	}
 }
 
+func TestAgentConversationReplayKeepsMixedFormatPriorUserTurns(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: first.Input, RunID: first.ID}))},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "发现 vmagent 有 OOMKilled。", RunID: first.ID}))},
+	} {
+		if _, err := store.AppendRunEvent(ctx, first.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, first.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, second.ID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: "最近1小时内 vmagent 仍有 OOM 重启。"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(ctx, second.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	third, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "那资源限制配置是什么？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages := agentConversationMessagesForRun(ctx, store, third)
+	joined := completionRequestMessageText(messagesForCompletionRequestTest(messages))
+	for _, want := range []string{"最近有没有 OOM 现象？", "发现 vmagent 有 OOMKilled。", "最近1小时内呢", "最近1小时内 vmagent 仍有 OOM 重启。"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("mixed-format replay missing %q: %#v", want, messages)
+		}
+	}
+	if indexOfMessageContaining(messagesForCompletionRequestTest(messages), "最近1小时内呢") > indexOfMessageContaining(messagesForCompletionRequestTest(messages), "最近1小时内 vmagent") {
+		t.Fatalf("legacy user turn must precede its answer: %#v", messages)
+	}
+}
+
 func TestAgentConversationReplaySkipsSubagentChildRuns(t *testing.T) {
 	ctx := context.Background()
 	store := agent.NewMemoryStore()
@@ -306,6 +358,14 @@ func completionRequestMessageText(messages []completionRequestMessageForTest) st
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+func messagesForCompletionRequestTest(messages []agent.Message) []completionRequestMessageForTest {
+	values := make([]completionRequestMessageForTest, 0, len(messages))
+	for _, message := range messages {
+		values = append(values, completionRequestMessageForTest{Role: string(message.Role), Content: message.Content})
+	}
+	return values
 }
 
 func indexOfMessageContaining(messages []completionRequestMessageForTest, needle string) int {

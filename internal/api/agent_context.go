@@ -119,6 +119,7 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 		if err != nil {
 			continue
 		}
+		runSawCompletionEvents := false
 		runHadAssistant := false
 		for _, event := range events {
 			switch event.Type {
@@ -128,6 +129,7 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 					continue
 				}
 				sawCompletionEvents = true
+				runSawCompletionEvents = true
 				if message.Role != agent.RoleUser && message.Role != agent.RoleAssistant && message.Role != agent.RoleTool {
 					continue
 				}
@@ -143,6 +145,7 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 				}
 			case agent.EventCompletionToolResult:
 				sawCompletionEvents = true
+				runSawCompletionEvents = true
 				message, ok := completionToolResultFromEventData(event.Data)
 				if !ok {
 					continue
@@ -153,13 +156,27 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 				messages = append(messages, message)
 			}
 		}
-		if sawCompletionEvents && !runHadAssistant {
+		if runSawCompletionEvents && !runHadAssistant {
 			if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
 				messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
 			}
+			continue
+		}
+		if runSawCompletionEvents {
+			continue
+		}
+		if transcript := visibleConversationFromRunCreatedTranscript(ctx, store, run.ID); len(transcript) > 0 {
+			messages = append(messages, appendFinalAnswerIfMissing(ctx, store, run.ID, transcript)...)
+			continue
+		}
+		if run.Input != "" {
+			messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt})
+		}
+		if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
+			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
 		}
 	}
-	if !sawCompletionEvents {
+	if !sawCompletionEvents && len(messages) == 0 {
 		return nil
 	}
 	return messages

@@ -122,6 +122,9 @@ with `server.chat.enabled`, submits agent runs through
 `GET /api/v1/agent/runs/{run_id}/events?follow=true`, and fails if terminal
 runs do not emit a replayable `completion.request`, final answer, candidate
 artifact, and verified citation.
+For multi-question smoke runs, each completed run is also audited with
+`db agent-context`; follow-up runs must keep prior user turns and assistant
+context in the latest provider-facing `completion.request`.
 
 ```bash
 make build
@@ -139,6 +142,18 @@ Useful overrides:
 - `KUBE_INSIGHT_AGENT_API_SMOKE_API_LISTEN` and
   `KUBE_INSIGHT_AGENT_API_SMOKE_MCP_LISTEN`: local service addresses.
 - `KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS`: max wait per run.
+
+Use an OOM follow-up pair when validating session-context replay:
+
+```bash
+make build
+KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
+KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
+KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='最近有没有 OOM 现象？;;最近1小时内呢' \
+KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-context" \
+scripts/agent-api-live-smoke.sh
+```
 
 
 ## 2026-05-25 Server Flow Smoke

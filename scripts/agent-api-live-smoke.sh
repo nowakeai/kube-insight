@@ -138,6 +138,7 @@ session_id="$(jq -r '.id' <<<"${session_json}")"
 
 printf '[' >"${SUMMARY_PATH}"
 first_summary=1
+completed_questions=()
 IFS=';;' read -r -a question_list <<<"${QUESTIONS}"
 for question in "${question_list[@]}"; do
   question="$(sed 's/^ *//;s/ *$//' <<<"${question}")"
@@ -168,6 +169,32 @@ for question in "${question_list[@]}"; do
     jq 'map({type, sequence, data})' "${events_json}" >&2
     exit 1
   fi
+  context_json="${WORK_DIR}/${slug}.context.json"
+  "${BIN}" --db "${DB_PATH}" db agent-context "${run_id}" --all --output json >"${context_json}"
+  if ! jq -e --arg question "${question}" '.requests[-1].messages[]? | select(.role=="user" and .content==$question)' "${context_json}" >/dev/null; then
+    echo "Run ${run_id} latest completion.request is missing current user message: ${question}" >&2
+    jq '.requests[-1].messages | map({index, role, contentPreview})' "${context_json}" >&2
+    exit 1
+  fi
+  for prior_question in "${completed_questions[@]}"; do
+    if ! jq -e --arg question "${prior_question}" '.requests[-1].messages[]? | select(.role=="user" and .content==$question)' "${context_json}" >/dev/null; then
+      echo "Run ${run_id} latest completion.request is missing prior user message: ${prior_question}" >&2
+      jq '.requests[-1].messages | map({index, role, contentPreview})' "${context_json}" >&2
+      exit 1
+    fi
+  done
+  if [[ "${#completed_questions[@]}" -gt 0 ]]; then
+    if ! jq -e --arg question "${question}" '
+      .requests[-1].messages as $messages
+      | ($messages | map(.content) | index($question)) as $currentIndex
+      | $currentIndex != null
+      and any($messages[0:$currentIndex][]; .role=="assistant" and (((.content // "") | length) > 0 or ((.toolCalls // []) | length) > 0))
+    ' "${context_json}" >/dev/null; then
+      echo "Run ${run_id} latest completion.request has no assistant context before current user message." >&2
+      jq '.requests[-1].messages | map({index, role, contentPreview, toolCalls})' "${context_json}" >&2
+      exit 1
+    fi
+  fi
   if [[ "${artifacts}" -lt 1 || "${citations}" -lt 1 || -z "${final_answer}" ]]; then
     echo "Run ${run_id} missing expected final answer/artifact/citation." >&2
     jq '{events:length, completionRequests:[.[]|select(.type=="completion.request")], artifacts:[.[]|select(.type=="artifact.created")], citations:[.[]|select(.type=="citation.created")], finals:[.[]|select(.type=="answer.final" or .type=="message.completed")]}' "${events_json}" >&2
@@ -182,11 +209,14 @@ for question in "${question_list[@]}"; do
     --arg runId "${run_id}" \
     --arg status "${status}" \
     --argjson completionRequests "${completion_requests}" \
+    --argjson contextMessages "$(jq '.requests[-1].messageCount' "${context_json}")" \
     --argjson artifacts "${artifacts}" \
     --argjson citations "${citations}" \
     --argjson childRunIds "${child_run_ids}" \
     --arg eventsPath "${events_json}" \
-    '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath}' >>"${SUMMARY_PATH}"
+    --arg contextPath "${context_json}" \
+    '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
+  completed_questions+=("${question}")
 done
 printf ']\n' >>"${SUMMARY_PATH}"
 

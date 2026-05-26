@@ -71,6 +71,7 @@ type Run struct {
 	StartedAt   *time.Time      `json:"startedAt,omitempty"`
 	CompletedAt *time.Time      `json:"completedAt,omitempty"`
 	Error       string          `json:"error,omitempty"`
+	FinalAnswer string          `json:"finalAnswer,omitempty"`
 	Metadata    json.RawMessage `json:"metadata,omitempty"`
 }
 

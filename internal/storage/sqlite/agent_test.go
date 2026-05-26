@@ -71,7 +71,7 @@ func TestAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 0 || sessions.Sessions[0].RunCount != 1 || sessions.Sessions[0].LatestRun == nil || sessions.Sessions[0].LatestRun.ID != run.ID {
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 0 || sessions.Sessions[0].RunCount != 1 || sessions.Sessions[0].LatestRun == nil || sessions.Sessions[0].LatestRun.ID != run.ID || sessions.Sessions[0].LatestRun.FinalAnswer != "" {
 		t.Fatalf("listed sessions = %#v", sessions)
 	}
 }

@@ -79,6 +79,23 @@ type ToolAuditEventData struct {
 	Error            string          `json:"error,omitempty"`
 }
 
+func FinalAnswerFromRunEvent(event RunEvent) string {
+	if event.Type != EventFinalAnswer && event.Type != EventRunCompleted {
+		return ""
+	}
+	var data struct {
+		Content     string `json:"content"`
+		FinalAnswer string `json:"finalAnswer"`
+	}
+	if err := json.Unmarshal(event.Data, &data); err != nil {
+		return ""
+	}
+	if data.Content != "" {
+		return data.Content
+	}
+	return data.FinalAnswer
+}
+
 type Artifact struct {
 	ID    string          `json:"id"`
 	Kind  string          `json:"kind"`

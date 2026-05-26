@@ -67,7 +67,7 @@ test("batch server session hydration preserves list order and run projections", 
       createdAt,
       updatedAt: createdAt,
       runCount: 3,
-      latestRun: runDTO("run_old", "old", undefined, "sess_old"),
+      latestRun: { ...runDTO("run_old", "old", undefined, "sess_old"), finalAnswer: "old answer" },
     },
     {
       id: "sess_new",
@@ -87,6 +87,7 @@ test("batch server session hydration preserves list order and run projections", 
   expect(state.sessions.sess_old.runCount).toBe(3)
   expect(state.sessions.sess_new.runCount).toBe(1)
   expect(state.runs.run_old.input).toBe("old")
+  expect(state.runs.run_old.finalAnswer).toBe("old answer")
   expect(state.runs.run_new.input).toBe("new")
 })
 

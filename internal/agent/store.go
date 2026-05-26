@@ -90,7 +90,9 @@ func (s *MemoryStore) ListSessions(ctx context.Context, opts ListSessionsOptions
 		runs := s.sessionRunsLocked(session.ID)
 		session.RunCount = len(runs)
 		if len(runs) > 0 {
-			session.LatestRun = cloneRunPtr(runs[len(runs)-1])
+			latestRun := runs[len(runs)-1]
+			latestRun.FinalAnswer = ""
+			session.LatestRun = cloneRunPtr(latestRun)
 		}
 		sessions = append(sessions, session)
 	}
@@ -133,11 +135,22 @@ func (s *MemoryStore) sessionRunsLocked(sessionID string) []Run {
 	runs := make([]Run, 0)
 	for _, run := range s.runs {
 		if run.SessionID == sessionID {
+			run.FinalAnswer = s.finalAnswerForRunLocked(run.ID)
 			runs = append(runs, run)
 		}
 	}
 	sortRunsOldestFirst(runs)
 	return runs
+}
+
+func (s *MemoryStore) finalAnswerForRunLocked(runID string) string {
+	finalAnswer := ""
+	for _, event := range s.events[runID] {
+		if answer := FinalAnswerFromRunEvent(event); answer != "" {
+			finalAnswer = answer
+		}
+	}
+	return finalAnswer
 }
 
 func (s *MemoryStore) CreateRun(ctx context.Context, sessionID string, input CreateRunInput) (Run, error) {

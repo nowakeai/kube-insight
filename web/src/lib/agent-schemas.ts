@@ -59,6 +59,7 @@ export const agentRunSchema = z.object({
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   error: z.string().optional(),
+  finalAnswer: z.string().optional(),
   metadata: z.unknown().optional(),
 })
 

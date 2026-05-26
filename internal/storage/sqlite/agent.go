@@ -43,6 +43,10 @@ where id = ?`, id))
 	if err != nil {
 		return agent.Session{}, err
 	}
+	runs, err = s.hydrateRunFinalAnswers(ctx, runs)
+	if err != nil {
+		return agent.Session{}, err
+	}
 	session.Runs = runs
 	return session, nil
 }
@@ -420,7 +424,46 @@ order by session_id`, stringArgs(sessionIDs)...)
 		summary.LatestRun = &run
 		summaries[run.SessionID] = summary
 	}
-	return summaries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return summaries, nil
+}
+
+func (s *Store) hydrateRunFinalAnswers(ctx context.Context, runs []agent.Run) ([]agent.Run, error) {
+	if len(runs) == 0 {
+		return runs, nil
+	}
+	runIndexes := make(map[string]int, len(runs))
+	runIDs := make([]string, 0, len(runs))
+	for i, run := range runs {
+		runIndexes[run.ID] = i
+		runIDs = append(runIDs, run.ID)
+	}
+	args := stringArgs(runIDs)
+	args = append(args, string(agent.EventFinalAnswer), string(agent.EventRunCompleted))
+	rows, err := s.db.QueryContext(ctx, `
+select run_id, type, data
+from agent_run_events
+where run_id in (`+placeholders(len(runIDs))+`)
+  and type in (?, ?)
+order by run_id, sequence`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var event agent.RunEvent
+		var eventType string
+		if err := rows.Scan(&event.RunID, &eventType, &event.Data); err != nil {
+			return nil, err
+		}
+		event.Type = agent.RunEventType(eventType)
+		if answer := agent.FinalAnswerFromRunEvent(event); answer != "" {
+			runs[runIndexes[event.RunID]].FinalAnswer = answer
+		}
+	}
+	return runs, rows.Err()
 }
 
 func (s *Store) scanRun(ctx context.Context, query string, args ...any) (agent.Run, error) {

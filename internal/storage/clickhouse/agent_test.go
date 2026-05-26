@@ -36,7 +36,7 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loadedSession.ID != session.ID || len(loadedSession.Runs) != 1 || loadedSession.Runs[0].Status != agent.RunCompleted {
+	if loadedSession.ID != session.ID || len(loadedSession.Runs) != 1 || loadedSession.Runs[0].Status != agent.RunCompleted || loadedSession.Runs[0].FinalAnswer != "ok" {
 		t.Fatalf("loaded session = %#v", loadedSession)
 	}
 	events, err := reopened.ListRunEvents(context.Background(), run.ID)
@@ -57,7 +57,7 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 0 || sessions.Sessions[0].RunCount != 1 || sessions.Sessions[0].LatestRun == nil || sessions.Sessions[0].LatestRun.ID != run.ID {
+	if len(sessions.Sessions) != 1 || sessions.Sessions[0].ID != session.ID || len(sessions.Sessions[0].Runs) != 0 || sessions.Sessions[0].RunCount != 1 || sessions.Sessions[0].LatestRun == nil || sessions.Sessions[0].LatestRun.ID != run.ID || sessions.Sessions[0].LatestRun.FinalAnswer != "" {
 		t.Fatalf("sessions = %#v", sessions)
 	}
 	if client.applyCalls != 2 {
@@ -252,6 +252,17 @@ func (c *fakeAgentClickHouseClient) QueryJSON(_ context.Context, query string) (
 	case strings.Contains(query, "max(sequence)"):
 		runID := quotedValueAfter(query, "WHERE run_id = ")
 		return QueryResult{Data: []map[string]any{{"sequence": len(c.eventsByRunID[runID]) + 1}}, Rows: 1}, nil
+	case strings.Contains(query, "FROM `ki`.agent_run_events") && strings.Contains(query, "run_id IN"):
+		rows := []map[string]any{}
+		for _, runEvents := range c.eventsByRunID {
+			for _, row := range runEvents {
+				eventType := stringValue(row["type"])
+				if eventType == string(agent.EventFinalAnswer) || eventType == string(agent.EventRunCompleted) {
+					rows = append(rows, cloneMap(row))
+				}
+			}
+		}
+		return QueryResult{Data: rows, Rows: len(rows)}, nil
 	case strings.Contains(query, "FROM `ki`.agent_run_events"):
 		runID := quotedValueAfter(query, "WHERE run_id = ")
 		rows := []map[string]any{}

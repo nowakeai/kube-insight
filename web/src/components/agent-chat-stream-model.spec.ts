@@ -62,6 +62,34 @@ test("tool artifact child run ids are projected onto the tool segment", () => {
   expect(tool?.childRunIds).toEqual(["run_child_a", "run_child_b"])
 })
 
+test("conversationSegments uses run finalAnswer when events are not hydrated", () => {
+  const segments = conversationSegments(
+    {
+      id: "run_1",
+      sessionId: "sess_1",
+      status: "completed",
+      input: "question",
+      finalAnswer: "answer from summary",
+      createdAt,
+      updatedAt: createdAt,
+      eventIds: [],
+      artifactIds: [],
+      citationIds: [],
+    },
+    [],
+    "completed",
+    Date.parse(createdAt),
+  )
+
+  expect(segments).toContainEqual({
+    type: "assistant",
+    id: "assistant_final_run_1",
+    messageId: "final_run_1",
+    content: "answer from summary",
+    final: true,
+  })
+})
+
 test("tool segment detail keeps child run payloads concise", () => {
   const detail = toolSegmentDetail({
     type: "tool",

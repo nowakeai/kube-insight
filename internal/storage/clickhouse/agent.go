@@ -50,6 +50,10 @@ LIMIT 1`, q(s.database()), quoteString(id)))
 	if err != nil {
 		return agent.Session{}, err
 	}
+	runs, err = s.hydrateRunFinalAnswers(ctx, runs)
+	if err != nil {
+		return agent.Session{}, err
+	}
 	session.Runs = runs
 	return session, nil
 }
@@ -329,6 +333,38 @@ LIMIT 1 BY session_id`, q(s.database()), sqlStringList(sessionIDs)))
 		summaries[run.SessionID] = summary
 	}
 	return summaries, nil
+}
+
+func (s *Store) hydrateRunFinalAnswers(ctx context.Context, runs []agent.Run) ([]agent.Run, error) {
+	if len(runs) == 0 {
+		return runs, nil
+	}
+	runIndexes := make(map[string]int, len(runs))
+	runIDs := make([]string, 0, len(runs))
+	for i, run := range runs {
+		runIndexes[run.ID] = i
+		runIDs = append(runIDs, run.ID)
+	}
+	result, err := s.client().QueryJSON(ctx, fmt.Sprintf(`
+SELECT run_id, type, data
+FROM %s.agent_run_events
+WHERE run_id IN (%s)
+  AND type IN (%s)
+ORDER BY run_id ASC, sequence ASC`, q(s.database()), sqlStringList(runIDs), sqlStringList([]string{string(agent.EventFinalAnswer), string(agent.EventRunCompleted)})))
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range result.Data {
+		event := agent.RunEvent{
+			RunID: stringValue(row["run_id"]),
+			Type:  agent.RunEventType(stringValue(row["type"])),
+			Data:  rawMessageFromString(row["data"]),
+		}
+		if answer := agent.FinalAnswerFromRunEvent(event); answer != "" {
+			runs[runIndexes[event.RunID]].FinalAnswer = answer
+		}
+	}
+	return runs, nil
 }
 
 func (s *Store) runSummary(ctx context.Context) (agent.RunSummary, error) {

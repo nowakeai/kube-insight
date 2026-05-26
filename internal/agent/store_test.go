@@ -72,6 +72,9 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.AppendRunEvent(context.Background(), run.ID, AppendEventInput{Type: EventFinalAnswer, Data: []byte(`{"content":"done"}`)}); err != nil {
+		t.Fatal(err)
+	}
 	if run.CompletedAt == nil || run.Status != RunCompleted {
 		t.Fatalf("completed run = %#v", run)
 	}
@@ -80,7 +83,7 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded.Runs) != 1 || loaded.Runs[0].ID != run.ID {
+	if len(loaded.Runs) != 1 || loaded.Runs[0].ID != run.ID || loaded.Runs[0].FinalAnswer != "done" {
 		t.Fatalf("loaded session = %#v", loaded)
 	}
 
@@ -88,7 +91,7 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID || len(listed.Sessions[0].Runs) != 0 || listed.Sessions[0].RunCount != 1 || listed.Sessions[0].LatestRun == nil || listed.Sessions[0].LatestRun.ID != run.ID {
+	if len(listed.Sessions) != 1 || listed.Sessions[0].ID != session.ID || len(listed.Sessions[0].Runs) != 0 || listed.Sessions[0].RunCount != 1 || listed.Sessions[0].LatestRun == nil || listed.Sessions[0].LatestRun.ID != run.ID || listed.Sessions[0].LatestRun.FinalAnswer != "" {
 		t.Fatalf("listed sessions = %#v", listed)
 	}
 }

@@ -259,6 +259,11 @@ export function conversationSegments(
     }
   }
 
+  if (!hasAssistantText && run?.finalAnswer) {
+    segments.push({ type: "assistant", id: `assistant_final_${run.id}`, messageId: `final_${run.id}`, content: run.finalAnswer, final: true })
+    hasAssistantText = true
+  }
+
   if (!hasAssistantText && (status === "queued" || status === "running")) {
     segments.push({ type: "assistant", id: "assistant_running", messageId: "running", content: "", running: true })
   }

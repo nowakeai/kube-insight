@@ -13,6 +13,27 @@ facts/changes/topology prove a cluster state claim.
 The goal is not to use every tool. The goal is to make the smallest evidence plan
 that can prove the answer, then stop.
 
+## Operating Loop For External Agents
+
+When using kube-insight from a generic agent instead of the built-in agent, keep
+the loop simple and deterministic:
+
+1. Keep the kube-insight instruction, tool definitions, and stable schema hints
+   before volatile per-run text. Put client clock/time-zone context near the
+   current user turn so provider prompt/KV caches can reuse the stable prefix.
+2. Preserve the active conversation branch in order: prior user turns, assistant
+   tool-call decisions, tool results or compacted tool-result summaries, and
+   assistant answers. Short follow-ups such as "what about the last hour" must
+   inherit the prior symptom or object target.
+3. For a retry, rewind to the retried turn and discard later branch content.
+   Do not append the retry as a new unrelated message after the old answer.
+4. Plan the smallest terminal evidence path for the user intent. If the path
+   returns enough proof, answer immediately instead of looking for optional
+   corroboration.
+5. Treat large tool results as artifacts. Put only compact evidence summaries,
+   artifact IDs, object identities, row snippets, and citation targets back into
+   the main transcript.
+
 ## Non-Negotiable Rules
 
 - Evidence first. Do not present Kubernetes state, absence, health, topology,
@@ -29,6 +50,24 @@ that can prove the answer, then stop.
   support a claim.
 - Ask the user only when namespace, object identity, cluster, or time window
   cannot be inferred safely from tool results.
+
+## Context Hygiene
+
+- Do not rebuild follow-up context by selecting only "important-looking" past
+  messages. Preserve the model-visible sequence that led to the previous answer,
+  or a faithful compact form of large tool results with artifact IDs and exact
+  source references.
+- Keep summaries evidence-bound. A summary that says "there was an OOM" is not
+  enough; include the object identity, fact/change key, timestamp, row number, or
+  artifact ID that lets the next turn cite the same proof.
+- Do not let hidden summaries replace the active transcript. They can reduce
+  tool-output size, but prior user intent and assistant conclusions still need to
+  remain visible to the next model call.
+- For relative-time prompts, include a client context block with `sentAt`,
+  `localTime` when known, `timeZone`, UTC offset, locale, and page/session
+  context. Compute exact UTC bounds before calling tools.
+- Keep tool calls provider-valid: every tool result in replayed context must
+  follow the assistant tool call that produced it.
 
 ## Tool Strategy
 
@@ -151,6 +190,21 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
 - Do not call history/topology for related objects unless the user asked for
   impact, relationships, raw proof, or root cause and the first result is
   insufficient.
+
+Common over-investigation patterns to avoid:
+
+- Running search, schema, SQL, history, and topology for a question that a typed
+  bundle already answered.
+- Searching several synonyms for the same symptom in parallel before looking at
+  the first exact result.
+- Calling SQL to reconfirm a fact or change that search/history/service tools
+  already returned with proof IDs.
+- Expanding an exact recent-change question into Pods, Events, topology, OOM, or
+  root cause when the user only asked what changed.
+- Turning a zero-result scoped search into broad wildcard scans without first
+  checking collector coverage and schema-supported facts.
+- Passing only the main agent's prose into a condenser or subagent. Always pass
+  concrete source artifacts, IDs, rows, snippets, and the specific question.
 
 ## Data Transform And Condensing
 

@@ -172,16 +172,20 @@ client context.
 Context assembly should be deterministic:
 
 1. Load session runs in branch order, respecting retry replacement metadata.
-2. For each visible run in the active branch, read ordered model-visible
-   `completion.message` and `completion.tool_result` events.
-3. Rebuild the next request messages from those events plus the new user input,
+2. For each visible run in the active branch, prefer the latest recorded
+   `completion.request` as the provider-shaped replay source. This preserves
+   streamed assistant tool-call messages even when the incremental
+   `completion.message` ledger only recorded the final assistant text.
+3. Fall back to ordered `completion.message` and `completion.tool_result`
+   events only when a prior run predates `completion.request`.
+4. Rebuild the next request messages from those events plus the new user input,
    preserving prior byte/order stability where possible.
-4. Add volatile client context as late as possible, normally as a system message
+5. Add volatile client context as late as possible, normally as a system message
    for the new run immediately before the current user message.
-5. Apply explicit compaction only after faithful replay has produced the
+6. Apply explicit compaction only after faithful replay has produced the
    candidate context, and record compaction as visible model-context events with
    source references.
-6. Persist the final assembled model request as `completion.request` before
+7. Persist the final assembled model request as `completion.request` before
    calling the model.
 
 The replay path must not read cumulative snapshots from previous runs. If old
@@ -201,6 +205,13 @@ model-context events are available. UI deltas, rendered final answers, and
 display summaries can differ from model-visible messages and should not become
 the authoritative replay source.
 
+Current implementation note: replay compacts oversized historical tool-result
+messages after reading the prior provider request. The compacted message keeps
+the original `tool_call_id`, tool name, status, summary, artifact reference, and
+a bounded preview. This protects follow-up prompts from repeatedly carrying
+large schema/search/SQL payloads while preserving provider-valid
+assistant-tool/tool-result order.
+
 ## Tool Output Policy
 
 Large tool output should not be repeatedly injected into the main transcript.
@@ -214,6 +225,9 @@ Target behavior:
 - Let the final answer cite artifacts, facts, rows, and snippets.
 - Re-inject exact raw tool output only for checkpoint resume or if the model
   explicitly needs a small proof snippet.
+- When replaying older provider requests whose tool messages still include large
+  raw content, replace only the historical replay copy with a compact
+  `kube-insight.agent.compacted_tool_result.v1` JSON payload.
 
 This keeps the model context faithful to what the model saw while allowing the
 UI and debugger to inspect raw evidence through artifacts.
@@ -307,17 +321,23 @@ Disallowed compaction:
   behavior-affecting options before invocation.
 - [x] Restore assistant tool calls and tool-result messages during replay instead of
   replaying only visible user/assistant text.
+- [x] Prefer the latest recorded `completion.request` for prior-run replay so
+  streamed assistant tool-call messages are not lost.
+- [x] Compact oversized historical tool-result messages during replay while
+  preserving tool-call identity and artifact/summary references.
 - [x] Keep volatile client context late in the request to preserve stable cacheable
   prefixes.
 - [x] Keep a legacy adapter for runs that lack completion events.
-- [ ] Add tests for:
+- [x] Add tests for:
   - [x] normal follow-up,
   - [x] intent correction follow-up,
   - [x] cache-friendly stable prefix ordering,
   - [x] retry rewind,
   - [x] mixed completion-event and legacy prior runs,
   - [x] mixed streamed and non-streamed assistant output,
-  - [x] tool-call continuation.
+  - [x] tool-call continuation,
+  - [x] streamed tool-call replay from recorded provider requests,
+  - [x] historical tool-result compaction.
 
 ### Phase 4: Subagent Child Runs
 
@@ -346,6 +366,23 @@ Disallowed compaction:
 - [x] Show child runs and artifacts from parent tool-call details in the UI.
 - [x] Keep SSE event compatibility for existing frontend panels.
 
+### Phase 6: Replay Audit and Efficiency Smoke
+
+- [x] Add `db agent-context RUN_ID` to inspect recorded provider-facing
+  `completion.request` messages, tool counts, event counts, and legacy fallback
+  replay candidates.
+- [x] Make old runs without `completion.request` diagnosable instead of failing
+  the audit command; exact provider request reconstruction remains unavailable
+  for those runs.
+- [x] Extend API smoke coverage to assert:
+  - follow-up runs preserve prior user turns and assistant context,
+  - provider message order keeps tool results after assistant tool-call
+    messages,
+  - retry runs rewind to the retried checkpoint and carry retry metadata,
+  - session projection exposes the active retry replacement branch,
+  - historical tool replay stays below a bounded size budget,
+  - follow-up tool calls and failed tool calls stay within configured budgets.
+
 ## Validation
 
 Required tests:
@@ -358,6 +395,9 @@ Required tests:
 - Retry projection tests for branch rewind and replacement.
 - Subagent test proving parent context stores compact child result while child
   run stores complete completion events.
+- API live smoke with `KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1` for
+  follow-up replay, retry rewind, session projection, tool-order, context-size,
+  and tool-efficiency budget checks.
 - `git diff --check`
 
 Manual inspection for a real run:
@@ -366,6 +406,8 @@ Manual inspection for a real run:
 - Confirm every model call has a preceding `completion.request`.
 - Confirm large SQL/search output exists as artifacts, not repeated in parent
   completion messages.
+- Confirm follow-up initial requests contain compacted historical tool results
+  when prior tool output exceeded the replay budget.
 - Confirm follow-up prompt includes the prior user intent and assistant answer.
 - Confirm stable prefix bytes/order do not change between follow-up runs except
   where the conversation itself intentionally appends new model-visible context.

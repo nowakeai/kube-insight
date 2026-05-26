@@ -45,6 +45,14 @@ subagent child-run context storage. The target is deterministic context
 reproduction and cache-friendly provider requests, not preserving opaque provider
 SDK internals for their own sake.
 
+Current status: provider-facing `completion.request` events are now the primary
+replay source for follow-up context. This preserves assistant tool-call and tool
+result order across streamed runs, compacts oversized historical tool outputs
+before replaying them into follow-up requests, and keeps retry replacement
+semantics as rewind rather than append. The API live smoke now enforces
+tool-order, retry, session-projection, historical tool-size, failed-tool, and
+follow-up tool-count budgets.
+
 ### 1. Schema-Guided Query Planning
 
 Improve the default agent instruction and schema notes so the model does not
@@ -95,6 +103,14 @@ Required behavior:
 - The condenser must not fetch new data or invent facts.
 - The condenser returns concise bullets or a small table with source IDs.
 - The main agent still decides which condensed evidence supports final claims.
+
+Current implementation status: historical replay of prior tool results now uses
+a deterministic compact payload for oversized tool messages, preserving the
+tool-call id, tool name, output summary, artifact id, original size, and a
+bounded preview. This is a cheap replay-time compaction, not a replacement for
+`evidence_condenser`. Use `evidence_condenser` when the model needs a
+higher-quality human-readable synthesis of noisy current-run evidence before
+answering.
 
 ### 4. Bounded Local Data Transform
 
@@ -169,6 +185,12 @@ Required cases:
 | noisy evidence | SQL/search returns large or repetitive rows | call `evidence_condenser` with source artifacts/snippets |
 | iteration pressure | useful evidence exists near budget | produce partial answer instead of failing without answer |
 
+HTTP API smoke now covers the session/context-specific regression path that the
+synthetic matrix does not: multi-turn OOM follow-up, retry rewind, session
+projection after retry, provider message order for tool calls, historical tool
+result compaction, failed-tool budget, follow-up tool-call budget, and
+provider-facing context-size metrics.
+
 Live model testing should compare MIMO, DeepSeek, and any OpenAI-compatible
 provider available in the local `.env` after explicit approval for sending the
 selected ClickHouse evidence snippets to that endpoint. The stable CI suite and
@@ -230,6 +252,12 @@ recoverable, model-visible budget result instead of executing another equivalent
 query. This is intentionally tool-agnostic and does not add symptom-specific
 storage.
 
+The API smoke adds an outer regression gate for this behavior: follow-up runs
+default to at most three tool calls, failed tool calls default to zero, and the
+summary records `initialContext`, `toolCalls`, `failedToolCalls`, and
+`toolNames` so prompt/context changes can be compared for cost and rediscovery
+regressions.
+
 ## ClickHouse Case-Smoke Findings
 
 Local ClickHouse smoke tests should exercise both the fast facts path and the
@@ -252,3 +280,14 @@ Do not add allocation-specific storage just to satisfy this case.
 5. Add `artifact_transform_js` as the first bounded language-shaped data tool.
 6. Add ClickHouse support to real prompt eval and a local no-LLM ClickHouse case smoke.
 7. Run narrow tests for agent contracts, config, API, and evaluation.
+
+Completed follow-up slice:
+
+1. Persist and audit provider-facing `completion.request` events.
+2. Replay follow-up context from the latest provider request when available.
+3. Preserve streamed assistant tool-call messages and provider-valid tool result
+   ordering.
+4. Compact oversized historical tool results before replaying them into
+   follow-up requests.
+5. Add retry rewind, session projection, context-size, and tool-efficiency
+   checks to the API live smoke.

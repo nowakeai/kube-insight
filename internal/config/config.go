@@ -205,12 +205,15 @@ type ListenerConfig struct {
 	Listen  string `yaml:"listen" json:"listen"`
 }
 
+const DefaultChatMaxIterations = 32
+
 type ChatConfig struct {
 	Enabled         bool   `yaml:"enabled" json:"enabled"`
 	Provider        string `yaml:"provider" json:"provider"`
 	APIKeyEnv       string `yaml:"apiKeyEnv" json:"apiKeyEnv"`
 	BaseURLEnv      string `yaml:"baseUrlEnv" json:"baseUrlEnv,omitempty"`
 	Model           string `yaml:"model" json:"model"`
+	MaxIterations   int    `yaml:"maxIterations" json:"maxIterations"`
 	OpenAIAPIKeyEnv string `yaml:"openaiApiKeyEnv" json:"openaiApiKeyEnv,omitempty"`
 }
 
@@ -225,6 +228,13 @@ func (c ChatConfig) EffectiveAPIKeyEnv() string {
 		return c.APIKeyEnv
 	}
 	return c.OpenAIAPIKeyEnv
+}
+
+func (c ChatConfig) EffectiveMaxIterations() int {
+	if c.MaxIterations > 0 {
+		return c.MaxIterations
+	}
+	return DefaultChatMaxIterations
 }
 
 type MCPConfig struct {

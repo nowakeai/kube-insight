@@ -358,14 +358,16 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 		t.Fatalf("queries=%#v schema=%#v", queries, schema)
 	}
 	joinedNotes := strings.Join(schema.Notes, "\n")
-	if !strings.Contains(joinedNotes, "facts.ts") || !strings.Contains(joinedNotes, "Prefer sorted columns") {
-		t.Fatalf("schema notes missing query discipline: %#v", schema.Notes)
+	for _, want := range []string{"facts.ts", "Prefer sorted columns", "JSONExtractRaw", "do not use JSONExtract without an explicit return type"} {
+		if !strings.Contains(joinedNotes, want) {
+			t.Fatalf("schema notes missing %q: %#v", want, schema.Notes)
+		}
 	}
 	var recipeNames string
 	for _, recipe := range schema.Recipes {
 		recipeNames += recipe.Name + "\n"
 	}
-	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "object_proof_after_candidate"} {
+	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "container_resource_allocation_rollup", "raw_doc_field_profile", "object_proof_after_candidate"} {
 		if !strings.Contains(recipeNames, want) {
 			t.Fatalf("schema recipes missing %q: %#v", want, schema.Recipes)
 		}

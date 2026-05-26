@@ -36,8 +36,12 @@ The default case set currently covers:
 | --- | --- | --- |
 | `service-health` | Service health | health + Service investigation tools, resource/topology artifacts, citation |
 | `oom-restart` | OOMKilled or restart evidence | search + history tools, resource/history artifacts, citation |
+| `oom-aggregate` | OOMKilled ranking/counting | health + schema + bounded aggregate SQL, citation |
+| `allocation-followup` | User corrects intent from live usage to allocation/configuration | schema-guided SQL and readable allocation/config evidence, citation |
 | `recent-changes` | recent object changes | search + history tools, history artifact, citation |
+| `exact-recent-changes` | exact object recent changes | health + schema + one rollup SQL, citation |
 | `topology-mapping` | namespace topology | search + topology tools, topology artifact, citation |
+| `js-transform-aggregation` | SQL rows need grouping/counting | schema + SQL + `artifact_transform_js`, cited answer |
 
 ## Live LLM Matrix
 
@@ -54,7 +58,7 @@ Run one model with the default OpenAI-compatible envs:
 KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
 OPENAI_API_KEY=... \
 OPENAI_BASE_URL=https://example-compatible-endpoint/v1 \
-go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -timeout 25m -v
 ```
 
 Run a model matrix by separating specs with `;`. Each spec is:
@@ -70,8 +74,11 @@ KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
 KUBE_INSIGHT_AGENT_LIVE_EVAL_MODELS='gpt52|gpt-5.2|OPENAI_API_KEY|OPENAI_BASE_URL;mimo|mimo-v2.5-pro|MIMO_API_KEY|MIMO_OPENAI_BASEURL' \
 KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS=12 \
 KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-live" \
-go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -timeout 25m -v
 ```
+
+Use `KUBE_INSIGHT_AGENT_LIVE_EVAL_CASES` with comma-separated case IDs for
+targeted reruns, for example `allocation-followup,exact-recent-changes`.
 
 The test fails on clear product regressions: missing required tools, missing
 evidence artifacts, no citations, terminal run failure, failed tools, missing
@@ -81,6 +88,29 @@ or latency outside the case budget. Runner failures are also written into the JS
 is configured, so max-iteration failures still leave a debuggable transcript
 summary. Minor wording differences should be scored through answer terms and
 evidence checks, not exact text matching.
+
+The fake SQL tool used by `TestLiveLLMEvaluation` is input-aware: it returns
+change rows for change-history SQL, allocation rows for requests/limits SQL, and
+OOM rows for OOM/fact SQL. This keeps synthetic eval useful for model behavior
+without requiring live ClickHouse access or exporting real cluster data.
+
+Latest synthetic provider findings after adding `js-transform-aggregation`,
+fixing the fake SQL branch order, and wrapping the JS transform tool as
+recoverable in live eval:
+
+| Provider | Full 8-case snapshot | Targeted OOM+JS rerun | Notes |
+| --- | ---: | ---: | --- |
+| `mimo` | 7/8 | 2/2 | Strong overall. The remaining full-matrix failure was evaluator-path related for broad recent changes; schema+SQL produced a valid cited answer. |
+| `deepseek` | 2/8 before targeted fixes | 2/2 | Correct but over-investigates in broad cases. The targeted OOM aggregate and JS transform cases pass after fixture and recoverability fixes. |
+| `sub2api` | 6/8 before fixture fix | 2/2 | Good default candidate. Previous OOM/JS failures were caused by fake SQL returning allocation rows for OOM-shaped queries. |
+| `moonshot` | 5/8 before fixture fix | 2/2 | Tool calling works but latency is high and it tends to verify more than needed. |
+| `deepinfra` | 7/8 | 2/2 | Fast and good on simple/aggregate/JS cases, but one exact recent-change run used history instead of schema+SQL. |
+
+Use an explicit `go test -timeout` for live matrix runs. Provider-side streaming
+latency can exceed the default ten-minute Go test timeout even when each case has
+a per-run timeout. For routine prompt work, prefer targeted case filters over
+running every provider and every case.
+
 
 ## API Live Smoke Path
 
@@ -109,6 +139,26 @@ Useful overrides:
   `KUBE_INSIGHT_AGENT_API_SMOKE_MCP_LISTEN`: local service addresses.
 - `KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS`: max wait per run.
 
+
+## 2026-05-25 Server Flow Smoke
+
+The full API server smoke passed with the Sub2API model and a fixture-backed
+SQLite database. The script built the current binary, ingested Service, Pod,
+EndpointSlice, and Event fixtures, started `kube-insight serve --api --mcp`,
+created one agent session, submitted three runs, followed SSE events, and
+verified terminal `run.completed`, final answer, artifacts, and citations.
+
+| Question shape | Status | Artifacts | Citations | Notable tool path |
+| --- | --- | ---: | ---: | --- |
+| Service health | `run.completed` | 5 | 3 | `kube_insight_health` + `kube_insight_service_investigation` |
+| Namespace topology | `run.completed` | 10 | 1 | search retries hit the budget guard, then `kube_insight_topology` completed |
+| SQL + JS grouping | `run.completed` | 6 | 2 | `kube_insight_schema` + `kube_insight_sql` + `artifact_transform_js` |
+
+A local ClickHouse-backed server smoke against `http://127.0.0.1:8080` also
+passed health, schema, and representative SQL cases: clusters, recent OOM facts,
+semantic profile, allocation profile, allocation doc profile, allocation rollup,
+and restart-by-namespace.
+
 ## 2026-05-24 DeepSeek API Smoke
 
 Using `deepseek-v4-flash` against the synthetic fixture DB, the API smoke passed
@@ -134,11 +184,21 @@ Add these after the first harness has settled:
 - `schema-sql-evidence`: ask for an aggregate proof query and require
   `kube_insight_schema` before `kube_insight_sql`, bounded rows, and cited SQL
   row identifiers.
+- `zero-result-pivot`: feed a transcript where one exact query returns zero rows
+  and require the next action to profile available keys/types or report a
+  coverage gap instead of repeating wildcard variants.
+- `js-transform-aggregation`: feed JSON rows that need grouping/sorting and
+  require `artifact_transform_js` before the final answer.
+- `noisy-evidence-condenser`: feed a large SQL/search artifact and require
+  `evidence_condenser` with source artifact IDs, titles, and snippets.
 - `recoverable-sql-error`: feed a transcript with one failed SQL call and a
   corrected retry, allowing failed tools only when a later successful tool call
   supports the final answer.
 - `missing-input`: ask an ambiguous question and require an input-required event
   once that event type exists.
+
+See `docs/dev/generic-agent-optimization-plan.md` for the generic agent
+optimization plan that these cases support.
 
 ## 2026-05-24 MIMO Smoke
 

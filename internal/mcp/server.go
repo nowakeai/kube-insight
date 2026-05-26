@@ -386,7 +386,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. For recent/today questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. When a bounded SQL query returns rows that answer a ranking, allocation, or exact recent-change question, that result is terminal evidence: answer from it instead of calling search, history, topology, or more SQL unless rows are empty or the user explicitly asks for impact, root cause, or raw proof. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. For recent/today questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

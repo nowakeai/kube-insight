@@ -119,10 +119,13 @@ ORDER BY table, position`, quoteString(database)))
 			"Active SQL backend: ClickHouse-compatible (ClickHouse or chDB).",
 			"ClickHouse timestamps use DateTime64 UTC columns unless noted otherwise.",
 			"Use observations and versions for proof; use facts, edges, and changes for investigation candidates.",
+			"When the requested semantic field is unknown, profile real data first: distinct fact_key/fact_value pairs, observation_type values, recent kind counts, cluster ids, and min/max timestamps with tight LIMITs.",
 			"Use kube_insight_health cluster display map to render cluster_id as a human-readable cluster/context name in final answers.",
 			"For recent/today/last-N queries, include UTC time bounds on facts.ts, changes.ts, observations.observed_at, versions.observed_at, edges.valid_from, or ingestion_offsets.updated_at.",
 			"Prefer sorted columns before text search: facts(cluster_id,fact_key,fact_value,ts), changes(cluster_id,change_family,path,ts), observations(cluster_id,kind,namespace,name,observed_at), edges(cluster_id,edge_type,src_id,valid_from_ms).",
 			"Avoid doc/detail text scans until candidates are narrowed by cluster, kind, namespace, name, exact fact/change/edge keys, and time.",
+			"For configuration fields such as container requests/limits, profile facts first; if facts do not carry those fields, use one scoped observations.doc profile over recent rows to find the relevant kind/observation_type before fetching proof.",
+			"For ClickHouse JSON proof snippets, prefer JSONExtractRaw(doc, 'spec', 'containers') or selecting a bounded substring(doc, ...) sample; do not use JSONExtract without an explicit return type.",
 			"SQL access is read-only; use SELECT/WITH/EXPLAIN/DESCRIBE/SHOW only.",
 		},
 		Recipes: clickHouseSchemaRecipes(),
@@ -185,6 +188,49 @@ where cluster_id = 'CLUSTER_ID'
 group by kind, namespace, name, change_family, path
 order by changes desc, last_seen desc
 limit 50`,
+		},
+		{
+			Name:        "container_resource_allocation_rollup",
+			Description: "Generic Kubernetes container requests/limits rollup for allocation/configuration questions. Use this after schema/health when the user asks for allocated resources rather than live usage; answer from returned rows instead of probing JSON syntax repeatedly.",
+			SQL: `with latest_pods as (
+  select namespace, name, uid, doc,
+         row_number() over (partition by cluster_id, kind, namespace, name, uid order by observed_at desc) as rn
+  from observations
+  where cluster_id = 'CLUSTER_ID'
+    and kind = 'Pod'
+    and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+    and position(doc, '\"resources\"') > 0
+), container_resources as (
+  select namespace, name,
+         arrayJoin(JSONExtractArrayRaw(doc, 'spec', 'containers')) as container_raw,
+         JSONExtractString(container_raw, 'resources', 'requests', 'cpu') as cpu_request,
+         JSONExtractString(container_raw, 'resources', 'requests', 'memory') as memory_request
+  from latest_pods
+  where rn = 1
+)
+select namespace,
+       countDistinct(name) as pods,
+       count() as containers,
+       countIf(JSONExtractRaw(container_raw, 'resources', 'requests') != '') as containers_with_requests,
+       countIf(JSONExtractRaw(container_raw, 'resources', 'limits') != '') as containers_with_limits,
+       arrayStringConcat(arraySlice(groupUniqArrayIf(cpu_request, cpu_request != ''), 1, 5), ', ') as cpu_request_samples,
+       arrayStringConcat(arraySlice(groupUniqArrayIf(memory_request, memory_request != ''), 1, 5), ', ') as memory_request_samples
+from container_resources
+group by namespace
+order by containers_with_requests desc, containers desc
+limit 25`,
+		},
+		{
+			Name:        "raw_doc_field_profile",
+			Description: "Fallback only after facts/changes do not carry a requested configuration field. Keep time and identity predicates tight before scanning doc text.",
+			SQL: `select cluster_id, kind, observation_type, count() as rows, max(observed_at) as last_seen
+from observations
+where observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+  and kind = 'KIND'
+  and position(doc, '\"FIELD_NAME\"') > 0
+group by cluster_id, kind, observation_type
+order by rows desc, last_seen desc
+limit 25`,
 		},
 		{
 			Name:        "object_proof_after_candidate",

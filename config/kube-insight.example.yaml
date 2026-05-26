@@ -340,6 +340,7 @@ server:
     apiKeyEnv: OPENAI_API_KEY
     baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
+    maxIterations: 32
   agentRetention:
     # Server-side cleanup for hidden retry branches and unreferenced agent artifacts.
     enabled: true

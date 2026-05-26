@@ -11,16 +11,18 @@ import (
 // agent run. It intentionally scores emitted run events instead of model text
 // alone so tests can verify evidence collection, citations, and latency.
 type EvaluationCase struct {
-	ID                     string
-	Question               string
-	RequiredTools          []string
-	RequiredArtifactKinds  []string
-	RequiredAnswerTerms    []string
-	MinCitations           int
-	MaxToolCalls           int
-	MaxToolCallDurationMS  int64
-	MaxTotalToolDurationMS int64
-	AllowFailedTools       bool
+	ID                       string
+	Question                 string
+	RequiredTools            []string
+	RequiredArtifactKinds    []string
+	AlternativeRequiredTools [][]string
+	AlternativeArtifactKinds [][]string
+	RequiredAnswerTerms      []string
+	MinCitations             int
+	MaxToolCalls             int
+	MaxToolCallDurationMS    int64
+	MaxTotalToolDurationMS   int64
+	AllowFailedTools         bool
 }
 
 type EvaluationReport struct {
@@ -90,14 +92,24 @@ func DefaultEvaluationCases() []EvaluationCase {
 			MaxToolCallDurationMS: 2000,
 		},
 		{
-			ID:                    "recent-changes",
-			Question:              "Show recent changes for default/api.",
-			RequiredTools:         []string{"kube_insight_search", "kube_insight_history"},
-			RequiredArtifactKinds: []string{ArtifactKindK8sHistory},
-			RequiredAnswerTerms:   []string{"change", "default/api"},
+			ID:                    "allocation-followup",
+			Question:              "I meant allocated resources, not actual usage. Show the requests and limits distribution.",
+			RequiredTools:         []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:   []string{"request", "limit", "allocation"},
 			MinCitations:          1,
-			MaxToolCalls:          4,
+			MaxToolCalls:          6,
 			MaxToolCallDurationMS: 2000,
+		},
+		{
+			ID:                       "recent-changes",
+			Question:                 "Show recent changes for default/api.",
+			AlternativeRequiredTools: [][]string{{"kube_insight_search", "kube_insight_history"}, {"kube_insight_schema", "kube_insight_sql"}},
+			AlternativeArtifactKinds: [][]string{{ArtifactKindK8sHistory}, {ArtifactKindMarkdown}},
+			RequiredAnswerTerms:      []string{"change", "default/api"},
+			MinCitations:             1,
+			MaxToolCalls:             4,
+			MaxToolCallDurationMS:    2000,
 		},
 		{
 			ID:                    "exact-recent-changes",
@@ -117,6 +129,16 @@ func DefaultEvaluationCases() []EvaluationCase {
 			RequiredAnswerTerms:   []string{"topology", "default"},
 			MinCitations:          1,
 			MaxToolCalls:          5,
+			MaxToolCallDurationMS: 2000,
+		},
+		{
+			ID:                    "js-transform-aggregation",
+			Question:              "Run a bounded SQL query for recent OOMKilled Pod fact rows, then use artifact_transform_js to group the returned rows by namespace and report counts.",
+			RequiredTools:         []string{"kube_insight_schema", "kube_insight_sql", jsTransformToolName},
+			RequiredArtifactKinds: []string{ArtifactKindToolCall},
+			RequiredAnswerTerms:   []string{"oomkilled", "namespace", "count"},
+			MinCitations:          1,
+			MaxToolCalls:          6,
 			MaxToolCallDurationMS: 2000,
 		},
 	}
@@ -149,8 +171,8 @@ func EvaluateRunEvents(tc EvaluationCase, events []RunEvent) EvaluationReport {
 		seenArtifacts[kind] = true
 	}
 
-	report.Missing.Tools = missingStrings(tc.RequiredTools, seenTools)
-	report.Missing.ArtifactKinds = missingStrings(tc.RequiredArtifactKinds, seenArtifacts)
+	report.Missing.Tools = missingRequiredSet(tc.RequiredTools, tc.AlternativeRequiredTools, seenTools)
+	report.Missing.ArtifactKinds = missingRequiredSet(tc.RequiredArtifactKinds, tc.AlternativeArtifactKinds, seenArtifacts)
 	report.Missing.AnswerTerms = missingAnswerTerms(tc.RequiredAnswerTerms, report.FinalAnswer)
 
 	report.addCheck("required tools", len(report.Missing.Tools) == 0, missingMessage("missing tools", report.Missing.Tools))
@@ -269,6 +291,23 @@ func finalAnswerFromEvents(events []RunEvent) string {
 		}
 	}
 	return ""
+}
+
+func missingRequiredSet(required []string, alternatives [][]string, seen map[string]bool) []string {
+	if len(alternatives) == 0 {
+		return missingStrings(required, seen)
+	}
+	best := []string(nil)
+	for _, candidate := range alternatives {
+		missing := missingStrings(candidate, seen)
+		if len(missing) == 0 {
+			return nil
+		}
+		if best == nil || len(missing) < len(best) {
+			best = missing
+		}
+	}
+	return best
 }
 
 func missingStrings(required []string, seen map[string]bool) []string {

@@ -37,6 +37,61 @@ func TestEinoRunnerRunsChatModelAgent(t *testing.T) {
 	}
 }
 
+func TestToolBudgetMiddlewareAddsWarningAfterRepeatedTool(t *testing.T) {
+	mw := toolBudgetMiddleware{maxIterations: 12}
+	state := &adk.ChatModelAgentState{Messages: []adk.Message{
+		schema.UserMessage("check recent OOM"),
+		schema.ToolMessage(`{"matches":0}`, "tool_1", schema.WithToolName("kube_insight_search")),
+		schema.ToolMessage(`{"matches":0}`, "tool_2", schema.WithToolName("kube_insight_search")),
+		schema.ToolMessage(`{"matches":0}`, "tool_3", schema.WithToolName("kube_insight_search")),
+	}}
+	_, next, err := mw.BeforeModelRewriteState(context.Background(), state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == state {
+		t.Fatal("expected rewritten state")
+	}
+	if len(next.Messages) != len(state.Messages)+1 {
+		t.Fatalf("messages = %d, want %d", len(next.Messages), len(state.Messages)+1)
+	}
+	warning := next.Messages[len(next.Messages)-1]
+	if warning.Role != schema.System || !strings.Contains(warning.Content, toolBudgetWarningMarker) || !strings.Contains(warning.Content, "kube_insight_search called repeatedly") {
+		t.Fatalf("warning = %#v", warning)
+	}
+	if len(state.Messages) != 4 {
+		t.Fatalf("original state mutated: %d messages", len(state.Messages))
+	}
+}
+
+func TestToolBudgetMiddlewareGuardsFourthRepeatedTool(t *testing.T) {
+	mw := toolBudgetMiddleware{maxIterations: 12}
+	if mw.shouldReturnBudgetGuard(5, 3) {
+		t.Fatal("third same-tool call should still execute")
+	}
+	if !mw.shouldReturnBudgetGuard(6, 4) {
+		t.Fatal("fourth same-tool call should return budget guard")
+	}
+}
+
+func TestToolBudgetMiddlewareDoesNotDuplicateWarning(t *testing.T) {
+	mw := toolBudgetMiddleware{maxIterations: 12}
+	state := &adk.ChatModelAgentState{Messages: []adk.Message{
+		schema.UserMessage("check allocation"),
+		schema.ToolMessage(`{"rows":[]}`, "tool_1", schema.WithToolName("kube_insight_sql")),
+		schema.ToolMessage(`{"rows":[]}`, "tool_2", schema.WithToolName("kube_insight_sql")),
+		schema.ToolMessage(`{"rows":[]}`, "tool_3", schema.WithToolName("kube_insight_sql")),
+		schema.SystemMessage(toolBudgetWarningMarker + ": already warned"),
+	}}
+	_, next, err := mw.BeforeModelRewriteState(context.Background(), state, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != state {
+		t.Fatal("expected existing warning to be left unchanged")
+	}
+}
+
 func TestEinoRunnerUsesDefaultInstruction(t *testing.T) {
 	ctx := context.Background()
 	fake := &fakeEinoModel{answer: "checked cluster health"}

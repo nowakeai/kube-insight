@@ -20,8 +20,10 @@ export function displayRunIdsForRetryBranches<T extends RetryBranchRun>(runIds: 
       const candidate = runsById[candidateId]
       return candidate ? retryRootRunId(candidate, runsById) === rootId : false
     })
-    if (replaceIndex >= 0) {
-      visible.splice(replaceIndex, visible.length - replaceIndex, run.id)
+    const missingRetryParent = !runsById[retryOf]
+    const fallbackReplaceIndex = replaceIndex >= 0 ? replaceIndex : missingRetryParent && visible.length > 0 ? 0 : -1
+    if (fallbackReplaceIndex >= 0) {
+      visible.splice(fallbackReplaceIndex, visible.length - fallbackReplaceIndex, run.id)
     } else {
       visible.push(run.id)
     }
@@ -46,6 +48,8 @@ function parseCreatedAt(value: string | undefined) {
 }
 
 export function retryRootRunId<T extends RetryBranchRun>(run: T, runsById: Record<string, T | undefined>) {
+  const metadataRoot = retryRootMetadataRunId(run)
+  if (metadataRoot) return metadataRoot
   let root = run
   const seen = new Set<string>()
   while (!seen.has(root.id)) {
@@ -63,4 +67,11 @@ export function retryOfRunId(run: RetryBranchRun) {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
   const retryOf = (metadata as Record<string, unknown>).retryOfRunId
   return typeof retryOf === "string" && retryOf ? retryOf : undefined
+}
+
+function retryRootMetadataRunId(run: RetryBranchRun) {
+  const metadata = run.metadata
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
+  const retryRoot = (metadata as Record<string, unknown>).retryRootRunId
+  return typeof retryRoot === "string" && retryRoot ? retryRoot : undefined
 }

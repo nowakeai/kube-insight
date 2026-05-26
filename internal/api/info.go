@@ -24,6 +24,7 @@ type ServerChatInfo struct {
 	Enabled           bool   `json:"enabled"`
 	Provider          string `json:"provider,omitempty"`
 	Model             string `json:"model,omitempty"`
+	MaxIterations     int    `json:"maxIterations,omitempty"`
 	APIKeyEnv         string `json:"apiKeyEnv,omitempty"`
 	APIKeyConfigured  bool   `json:"apiKeyConfigured"`
 	BaseURLEnv        string `json:"baseUrlEnv,omitempty"`

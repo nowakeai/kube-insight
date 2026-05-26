@@ -495,6 +495,7 @@ func apiServerInfo(cfg appconfig.Config, dbPath string, selection serveSelection
 			Enabled:           cfg.Server.Chat.Enabled,
 			Provider:          cfg.Server.Chat.Provider,
 			Model:             cfg.Server.Chat.Model,
+			MaxIterations:     cfg.Server.Chat.EffectiveMaxIterations(),
 			APIKeyEnv:         apiKeyEnv,
 			APIKeyConfigured:  apiKeyConfigured,
 			BaseURLEnv:        baseURLEnv,

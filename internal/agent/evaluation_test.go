@@ -11,18 +11,20 @@ func TestDefaultEvaluationCasesCoverRepresentativeAgentQuestions(t *testing.T) {
 		t.Fatalf("default evaluation cases = %d, want at least 5", len(cases))
 	}
 	wantIDs := map[string]bool{
-		"service-health":       false,
-		"oom-restart":          false,
-		"oom-aggregate":        false,
-		"recent-changes":       false,
-		"exact-recent-changes": false,
-		"topology-mapping":     false,
+		"service-health":           false,
+		"oom-restart":              false,
+		"oom-aggregate":            false,
+		"allocation-followup":      false,
+		"recent-changes":           false,
+		"exact-recent-changes":     false,
+		"topology-mapping":         false,
+		"js-transform-aggregation": false,
 	}
 	for _, tc := range cases {
 		if tc.ID == "" || tc.Question == "" {
 			t.Fatalf("case must have id and question: %#v", tc)
 		}
-		if len(tc.RequiredTools) == 0 || len(tc.RequiredAnswerTerms) == 0 {
+		if (len(tc.RequiredTools) == 0 && len(tc.AlternativeRequiredTools) == 0) || len(tc.RequiredAnswerTerms) == 0 {
 			t.Fatalf("case must require tools and answer terms: %#v", tc)
 		}
 		if _, ok := wantIDs[tc.ID]; ok {

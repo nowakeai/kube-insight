@@ -167,6 +167,10 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Add a specialist evidence-condenser subagent as `AgentAsTool` or
   `NewAgentTool` for noisy evidence summaries; the main agent must pass
   source artifact IDs/titles and row/snippet excerpts, not only prose.
+- [x] Add `parallel_investigation` as a first-pass parallel-subagent wrapper.
+  - The main agent can proactively fan out broad triage prompts into 2-3
+    bounded specialist branches that run concurrently, while exact Service and
+    exact object-change prompts still use the narrow terminal paths.
 - [ ] Pre-wire the run event model for subagent start/completion/error events,
   including parent tool call id, input artifact handles, compact findings, and
   citations.
@@ -218,9 +222,19 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [ ] Add run checkpoint and recovery semantics: retry from failed model call,
   continue from last completed tool result, branch from an earlier run, and
   preserve tool evidence IDs.
-- [ ] Add session memory compaction: short rolling run summaries, pinned user
-  facts, artifact references, and explicit exclusion of oversized raw tool
-  outputs from future prompts.
+- [x] Replay prior visible conversation messages for follow-up runs.
+  - Server-started runs persist the actual runner input transcript in the
+    existing `run.created` event payload, then reconstruct follow-up prompts from
+    the latest prior raw transcript snapshot plus the prior final answer. This
+    keeps the database shape as an append-only run-event log instead of adding a
+    separate session-memory table. Do not replace the transcript with selective
+    summaries for normal follow-ups; keep token reduction in tool-output
+    reduction, subagent/evidence condensation, and future explicit compaction
+    layers.
+- [ ] Add session memory compaction only as an explicit layer above the faithful
+  transcript: pinned user facts, durable run summaries, artifact references, and
+  exclusion of oversized raw tool outputs from future prompts unless resuming a
+  checkpoint needs exact tool messages.
 - [ ] Add optional MCP prompts for common investigations, but keep them as
   launch templates that the model can adapt rather than fixed workflows.
 - [ ] Add missing-input events for namespace, cluster, time range, destructive
@@ -367,6 +381,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
     runs still require stop before retry. The Web UI uses `retryOfRunId` as
     branch metadata: retry replaces the original run and hides later runs in
     that visible branch instead of appending as a new conversational turn.
+    Retry runs also carry server-owned retryRootRunId so the Web UI can still
+    rewind correctly after retention prunes the direct parent run.
 - [x] Add structured audit records for agent tool calls.
   - Eino tool completions now emit `tool.audit` events with run id, tool call
     id, name, input, output summary, output artifact id, status, and duration

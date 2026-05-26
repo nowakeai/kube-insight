@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kube-insight/internal/storage/clickhouse"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -29,9 +30,9 @@ func TestRealDBPromptContextEvaluation(t *testing.T) {
 	if os.Getenv(realPromptLiveEvalEnabledEnv) != "1" {
 		t.Skipf("set %s=1 to run live LLM evaluation against a real kube-insight DB", realPromptLiveEvalEnabledEnv)
 	}
-	dbPath := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_REAL_EVAL_DB"))
-	if dbPath == "" {
-		t.Fatal("KUBE_INSIGHT_AGENT_REAL_EVAL_DB is required")
+	source := realPromptEvalDataSourceFromEnv()
+	if source.DBPath == "" && source.ClickHouseEndpoint == "" {
+		t.Fatal("KUBE_INSIGHT_AGENT_REAL_EVAL_DB or KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_ENDPOINT is required")
 	}
 	questions := realPromptEvalQuestions()
 	if len(questions) == 0 {
@@ -44,13 +45,12 @@ func TestRealDBPromptContextEvaluation(t *testing.T) {
 	richContext := realPromptEvalContext(t)
 	modes := realPromptEvalModes(richContext)
 
-	ctx, cancel := context.WithTimeout(context.Background(), realPromptEvalTimeout())
-	defer cancel()
+	baseCtx := context.Background()
 
 	allReports := []realPromptEvalReport{}
 	for _, spec := range specs {
 		t.Run(spec.Name, func(t *testing.T) {
-			model, err := openaimodel.NewChatModel(ctx, &openaimodel.ChatModelConfig{
+			model, err := openaimodel.NewChatModel(baseCtx, &openaimodel.ChatModelConfig{
 				APIKey:  os.Getenv(spec.APIKeyEnv),
 				BaseURL: os.Getenv(spec.BaseURLEnv),
 				Model:   spec.Model,
@@ -59,10 +59,10 @@ func TestRealDBPromptContextEvaluation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			tools := realPromptEvalTools(t, ctx, dbPath)
+			tools := realPromptEvalTools(t, baseCtx, source)
 			for _, mode := range modes {
 				t.Run(mode, func(t *testing.T) {
-					runner, err := kiagent.NewEinoRunner(ctx, kiagent.EinoRunnerConfig{
+					runner, err := kiagent.NewEinoRunner(baseCtx, kiagent.EinoRunnerConfig{
 						Description:        "Kubernetes investigation assistant real DB prompt-context evaluation runner.",
 						Instruction:        realPromptEvalInstruction(mode, richContext),
 						Model:              model,
@@ -76,16 +76,19 @@ func TestRealDBPromptContextEvaluation(t *testing.T) {
 					}
 					for _, question := range questions {
 						t.Run(realPromptEvalCaseName(question), func(t *testing.T) {
-							report := runRealPromptEvalCase(t, ctx, runner, spec, mode, question)
+							caseCtx, cancel := context.WithTimeout(baseCtx, realPromptEvalTimeout())
+							defer cancel()
+							report := runRealPromptEvalCase(t, caseCtx, runner, spec, mode, question)
 							allReports = append(allReports, report)
+							writeRealPromptEvalReports(t, allReports)
 							if report.Error != "" {
-								t.Fatalf("runner failed: %s", report.Error)
+								t.Errorf("runner failed: %s", report.Error)
 							}
 							if strings.TrimSpace(report.FinalAnswer) == "" {
-								t.Fatal("final answer is empty")
+								t.Error("final answer is empty")
 							}
 							if report.ToolCallCount == 0 {
-								t.Fatal("expected at least one evidence tool call")
+								t.Error("expected at least one evidence tool call")
 							}
 						})
 					}
@@ -103,17 +106,28 @@ type realPromptEvalModelSpec struct {
 	BaseURLEnv string
 }
 
+type realPromptEvalToolCall struct {
+	ID               string `json:"id,omitempty"`
+	Name             string `json:"name"`
+	Status           string `json:"status"`
+	DurationMS       int64  `json:"durationMs,omitempty"`
+	Input            string `json:"input,omitempty"`
+	OutputSummary    string `json:"outputSummary,omitempty"`
+	OutputArtifactID string `json:"outputArtifactId,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
 type realPromptEvalReport struct {
-	Model         string                       `json:"model"`
-	Mode          string                       `json:"mode"`
-	Question      string                       `json:"question"`
-	DurationMS    int64                        `json:"durationMs"`
-	ToolCallCount int                          `json:"toolCallCount"`
-	ToolCalls     []kiagent.EvaluationToolCall `json:"toolCalls"`
-	Citations     int                          `json:"citations"`
-	ArtifactKinds []string                     `json:"artifactKinds"`
-	FinalAnswer   string                       `json:"finalAnswer"`
-	Error         string                       `json:"error,omitempty"`
+	Model         string                   `json:"model"`
+	Mode          string                   `json:"mode"`
+	Question      string                   `json:"question"`
+	DurationMS    int64                    `json:"durationMs"`
+	ToolCallCount int                      `json:"toolCallCount"`
+	ToolCalls     []realPromptEvalToolCall `json:"toolCalls"`
+	Citations     int                      `json:"citations"`
+	ArtifactKinds []string                 `json:"artifactKinds"`
+	FinalAnswer   string                   `json:"finalAnswer"`
+	Error         string                   `json:"error,omitempty"`
 }
 
 func runRealPromptEvalCase(t *testing.T, ctx context.Context, runner *kiagent.EinoRunner, spec realPromptEvalModelSpec, mode, question string) realPromptEvalReport {
@@ -133,7 +147,7 @@ func runRealPromptEvalCase(t *testing.T, ctx context.Context, runner *kiagent.Ei
 		Store:    store,
 		RunID:    run.ID,
 	})
-	events, err := store.ListRunEvents(ctx, run.ID)
+	events, err := store.ListRunEvents(context.Background(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,9 +168,34 @@ func runRealPromptEvalCase(t *testing.T, ctx context.Context, runner *kiagent.Ei
 	return report
 }
 
-func realPromptEvalTools(t *testing.T, ctx context.Context, dbPath string) []tool.BaseTool {
+type realPromptEvalDataSource struct {
+	DBPath             string
+	ClickHouseEndpoint string
+	ClickHouseDatabase string
+}
+
+func realPromptEvalDataSourceFromEnv() realPromptEvalDataSource {
+	endpoint := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_ENDPOINT"))
+	if endpoint == "" {
+		endpoint = strings.TrimSpace(os.Getenv("KUBE_INSIGHT_CLICKHOUSE_DSN"))
+	}
+	database := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_DATABASE"))
+	if database == "" {
+		database = strings.TrimSpace(os.Getenv("CLICKHOUSE_DATABASE"))
+	}
+	if database == "" {
+		database = "kube_insight"
+	}
+	return realPromptEvalDataSource{
+		DBPath:             strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_REAL_EVAL_DB")),
+		ClickHouseEndpoint: endpoint,
+		ClickHouseDatabase: database,
+	}
+}
+
+func realPromptEvalTools(t *testing.T, ctx context.Context, source realPromptEvalDataSource) []tool.BaseTool {
 	t.Helper()
-	srv, err := insightmcp.NewServer(insightmcp.ServerOptions{DBPath: dbPath})
+	srv, err := insightmcp.NewServer(realPromptEvalMCPServerOptions(source))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +219,23 @@ func realPromptEvalTools(t *testing.T, ctx context.Context, dbPath string) []too
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tools
+	tools = append(tools, kiagent.NewJSTransformTool())
+	return kiagent.WrapRecoverableToolErrors(tools)
+}
+
+func realPromptEvalMCPServerOptions(source realPromptEvalDataSource) insightmcp.ServerOptions {
+	if source.ClickHouseEndpoint != "" {
+		database := source.ClickHouseDatabase
+		if database == "" {
+			database = "kube_insight"
+		}
+		return insightmcp.ServerOptions{
+			OpenStore: func(context.Context) (insightmcp.ReadStore, error) {
+				return clickhouse.NewHTTPStore(source.ClickHouseEndpoint, clickhouse.Options{Database: database})
+			},
+		}
+	}
+	return insightmcp.ServerOptions{DBPath: source.DBPath}
 }
 
 func realPromptEvalInstruction(mode, richContext string) string {
@@ -356,11 +411,11 @@ func realPromptEvalCountEvents(events []kiagent.RunEvent, eventType kiagent.RunE
 	return count
 }
 
-func realPromptEvalToolCalls(events []kiagent.RunEvent) []kiagent.EvaluationToolCall {
-	callsByID := map[string]kiagent.EvaluationToolCall{}
+func realPromptEvalToolCalls(events []kiagent.RunEvent) []realPromptEvalToolCall {
+	callsByID := map[string]realPromptEvalToolCall{}
 	order := []string{}
 	for _, event := range events {
-		if event.Type != kiagent.EventToolAudit && event.Type != kiagent.EventToolCompleted && event.Type != kiagent.EventToolFailed {
+		if event.Type != kiagent.EventToolStarted && event.Type != kiagent.EventToolAudit && event.Type != kiagent.EventToolCompleted && event.Type != kiagent.EventToolFailed {
 			continue
 		}
 		var data kiagent.ToolCallEventData
@@ -369,7 +424,17 @@ func realPromptEvalToolCalls(events []kiagent.RunEvent) []kiagent.EvaluationTool
 			if err := json.Unmarshal(event.Data, &audit); err != nil {
 				continue
 			}
-			data = kiagent.ToolCallEventData{ToolCallID: audit.ToolCallID, Name: audit.Name, Status: audit.Status, DurationMS: audit.DurationMS, Error: audit.Error}
+			data = kiagent.ToolCallEventData{
+				ToolCallID:       audit.ToolCallID,
+				Name:             audit.Name,
+				Status:           audit.Status,
+				Input:            audit.Input,
+				Output:           audit.Output,
+				OutputSummary:    audit.OutputSummary,
+				OutputArtifactID: audit.OutputArtifactID,
+				DurationMS:       audit.DurationMS,
+				Error:            audit.Error,
+			}
 		} else if err := json.Unmarshal(event.Data, &data); err != nil {
 			continue
 		}
@@ -377,16 +442,60 @@ func realPromptEvalToolCalls(events []kiagent.RunEvent) []kiagent.EvaluationTool
 		if key == "" {
 			key = fmt.Sprintf("%s-%d", data.Name, len(order)+1)
 		}
-		if _, ok := callsByID[key]; !ok {
+		call, ok := callsByID[key]
+		if !ok {
 			order = append(order, key)
+			call = realPromptEvalToolCall{ID: data.ToolCallID}
 		}
-		callsByID[key] = kiagent.EvaluationToolCall{ID: data.ToolCallID, Name: data.Name, Status: data.Status, DurationMS: data.DurationMS, Error: data.Error}
+		if data.Name != "" {
+			call.Name = data.Name
+		}
+		if data.Status != "" {
+			call.Status = data.Status
+		}
+		if data.DurationMS > 0 {
+			call.DurationMS = data.DurationMS
+		}
+		if len(data.Input) > 0 {
+			call.Input = realPromptEvalCompactRaw(data.Input, 1600)
+		}
+		if data.OutputSummary != "" {
+			call.OutputSummary = realPromptEvalCompactString(data.OutputSummary, 1600)
+		}
+		if data.OutputArtifactID != "" {
+			call.OutputArtifactID = data.OutputArtifactID
+		}
+		if data.Error != "" {
+			call.Error = realPromptEvalCompactString(data.Error, 1600)
+		}
+		callsByID[key] = call
 	}
-	calls := make([]kiagent.EvaluationToolCall, 0, len(order))
+	calls := make([]realPromptEvalToolCall, 0, len(order))
 	for _, key := range order {
 		calls = append(calls, callsByID[key])
 	}
 	return calls
+}
+
+func realPromptEvalCompactRaw(raw json.RawMessage, limit int) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err == nil {
+		if data, err := json.Marshal(value); err == nil {
+			return realPromptEvalCompactString(string(data), limit)
+		}
+	}
+	return realPromptEvalCompactString(string(raw), limit)
+}
+
+func realPromptEvalCompactString(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "..."
 }
 
 func realPromptEvalArtifactKinds(events []kiagent.RunEvent) []string {

@@ -70,7 +70,11 @@ func NewEinoRunner(ctx context.Context, cfg EinoRunnerConfig) (*EinoRunner, erro
 		instruction = DefaultAgentInstruction()
 	}
 	toolTimings := newToolTimingStore()
-	handlers := append([]adk.ChatModelAgentMiddleware{&toolTimingMiddleware{timings: toolTimings}}, cfg.Handlers...)
+	handlers := []adk.ChatModelAgentMiddleware{
+		&toolTimingMiddleware{timings: toolTimings},
+		&toolBudgetMiddleware{maxIterations: cfg.MaxIterations},
+	}
+	handlers = append(handlers, cfg.Handlers...)
 	agentConfig := &adk.ChatModelAgentConfig{
 		Name:             name,
 		Description:      cfg.Description,

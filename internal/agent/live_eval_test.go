@@ -30,13 +30,12 @@ func TestLiveLLMEvaluation(t *testing.T) {
 		t.Fatal("no live evaluation model specs configured")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), liveEvalTimeout())
-	defer cancel()
+	baseCtx := context.Background()
 
 	allReports := []liveEvalReport{}
 	for _, spec := range specs {
 		t.Run(spec.Name, func(t *testing.T) {
-			model, err := openaimodel.NewChatModel(ctx, &openaimodel.ChatModelConfig{
+			model, err := openaimodel.NewChatModel(baseCtx, &openaimodel.ChatModelConfig{
 				APIKey:  os.Getenv(spec.APIKeyEnv),
 				BaseURL: os.Getenv(spec.BaseURLEnv),
 				Model:   spec.Model,
@@ -45,7 +44,7 @@ func TestLiveLLMEvaluation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := NewEinoRunner(ctx, EinoRunnerConfig{
+			runner, err := NewEinoRunner(baseCtx, EinoRunnerConfig{
 				Description:        "Kubernetes investigation assistant live evaluation runner.",
 				Model:              model,
 				Tools:              liveEvalTools(),
@@ -56,23 +55,25 @@ func TestLiveLLMEvaluation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, tc := range DefaultEvaluationCases() {
+			for _, tc := range liveEvalCases(t) {
 				t.Run(tc.ID, func(t *testing.T) {
+					caseCtx, cancel := context.WithTimeout(baseCtx, liveEvalTimeout())
+					defer cancel()
 					store := NewMemoryStore()
-					session, err := store.CreateSession(ctx, CreateSessionInput{Title: tc.Question, Provider: "openai-compatible", Model: spec.Model})
+					session, err := store.CreateSession(caseCtx, CreateSessionInput{Title: tc.Question, Provider: "openai-compatible", Model: spec.Model})
 					if err != nil {
 						t.Fatal(err)
 					}
-					run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: tc.Question, Provider: "openai-compatible", Model: spec.Model})
+					run, err := store.CreateRun(caseCtx, session.ID, CreateRunInput{Input: tc.Question, Provider: "openai-compatible", Model: spec.Model})
 					if err != nil {
 						t.Fatal(err)
 					}
-					_, runErr := runner.Run(ctx, EinoRunInput{
+					_, runErr := runner.Run(caseCtx, EinoRunInput{
 						Messages: []Message{{Role: RoleUser, Content: tc.Question}},
 						Store:    store,
 						RunID:    run.ID,
 					})
-					events, err := store.ListRunEvents(ctx, run.ID)
+					events, err := store.ListRunEvents(context.Background(), run.ID)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -82,11 +83,12 @@ func TestLiveLLMEvaluation(t *testing.T) {
 						report.addCheck("runner", false, runErr.Error())
 					}
 					allReports = append(allReports, liveEvalReport{Model: spec.Name, EvaluationReport: report})
+					writeLiveEvalReports(t, allReports)
 					if runErr != nil {
-						t.Fatalf("runner failed for model %s case %s: %v", spec.Name, tc.ID, runErr)
+						t.Errorf("runner failed for model %s case %s: %v", spec.Name, tc.ID, runErr)
 					}
 					if !report.Passed {
-						t.Fatalf("live eval failed for model %s case %s: %+v", spec.Name, tc.ID, report)
+						t.Errorf("live eval failed for model %s case %s: %+v", spec.Name, tc.ID, report)
 					}
 				})
 			}
@@ -150,6 +152,40 @@ func liveEvalModelSpecsFromEnv() ([]liveEvalModelSpec, error) {
 	return specs, nil
 }
 
+func liveEvalCases(t *testing.T) []EvaluationCase {
+	t.Helper()
+	cases := DefaultEvaluationCases()
+	raw := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_LIVE_EVAL_CASES"))
+	if raw == "" {
+		return cases
+	}
+	wanted := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id != "" {
+			wanted[id] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return cases
+	}
+	filtered := make([]EvaluationCase, 0, len(wanted))
+	for _, tc := range cases {
+		if wanted[tc.ID] {
+			filtered = append(filtered, tc)
+			delete(wanted, tc.ID)
+		}
+	}
+	if len(wanted) > 0 {
+		missing := make([]string, 0, len(wanted))
+		for id := range wanted {
+			missing = append(missing, id)
+		}
+		t.Fatalf("unknown live eval case ids: %s", strings.Join(missing, ", "))
+	}
+	return filtered
+}
+
 func liveEvalMaxIterations() int {
 	raw := strings.TrimSpace(os.Getenv("KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS"))
 	if raw == "" {
@@ -195,7 +231,7 @@ func writeLiveEvalReports(t *testing.T, reports []liveEvalReport) {
 }
 
 func liveEvalTools() []tool.BaseTool {
-	return []tool.BaseTool{
+	tools := []tool.BaseTool{
 		liveEvalTool{
 			name: "kube_insight_health",
 			desc: "Check collector and current health before current-state claims. Use this first for health questions. Returns compact resource coverage and freshness.",
@@ -279,22 +315,71 @@ func liveEvalTools() []tool.BaseTool {
 			output: map[string]any{
 				"backend": "sqlite",
 				"tables":  []any{"objects", "facts", "edges", "changes", "versions", "latest_index"},
-				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'."},
+				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows."},
 			},
 		},
-		liveEvalTool{
-			name: "kube_insight_sql",
-			desc: "Run bounded read-only SQL after calling kube_insight_schema. Use only for aggregates or proof rows that typed tools cannot already provide. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
-			params: map[string]*schema.ParameterInfo{
-				"sql":     {Type: schema.String, Required: true, Desc: "Read-only SQL."},
-				"maxRows": {Type: schema.Integer, Desc: "Maximum rows."},
+		liveEvalSQLTool{},
+	}
+	tools = append(tools, WrapRecoverableToolErrors([]tool.BaseTool{NewJSTransformTool()})...)
+	return tools
+}
+
+type liveEvalSQLTool struct{}
+
+func (t liveEvalSQLTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: "kube_insight_sql",
+		Desc: "Run bounded read-only SQL after calling kube_insight_schema. Use only for aggregates or proof rows that typed tools cannot already provide. Terminal rule: when SQL returns rows for OOM ranking, allocation requests/limits, or exact recent changes, answer from those rows immediately; do not call search, history, topology, or more SQL unless rows are empty or the user explicitly asks for root cause/impact/raw proof. If the user asked to use artifact_transform_js, run only one proof SQL query before the transform. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"sql":     {Type: schema.String, Required: true, Desc: "Read-only SQL."},
+			"maxRows": {Type: schema.Integer, Desc: "Maximum rows."},
+		}),
+	}, nil
+}
+
+func (t liveEvalSQLTool) InvokableRun(_ context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	var args struct {
+		SQL string `json:"sql"`
+	}
+	_ = json.Unmarshal([]byte(argumentsInJSON), &args)
+	query := strings.ToLower(args.SQL)
+	switch {
+	case strings.Contains(query, "oom") || strings.Contains(query, "oomkilled") || strings.Contains(query, "last_reason"):
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"kind", "namespace", "name", "fact_key", "fact_value", "fact_count", "last_seen"},
+			"rows": []any{
+				[]any{"Pod", "default", "api-0", "pod_status.last_reason", "OOMKilled", 1, "2026-05-24T10:05:00Z"},
 			},
-			output: map[string]any{
-				"columns": []any{"kind", "namespace", "name", "fact_key", "fact_value"},
-				"rows":    []any{[]any{"Pod", "default", "api-0", "pod_status.last_reason", "OOMKilled"}},
-				"rowIds":  []any{"sqlrow-oom-1"},
+			"rowIds": []any{"sqlrow-oom-1"},
+		})), nil
+	case strings.Contains(query, "changes") || strings.Contains(query, "change_family") || strings.Contains(query, "deployment"):
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"kind", "namespace", "name", "change_family", "path", "changes", "first_seen", "last_seen", "sample_old", "sample_new"},
+			"rows": []any{
+				[]any{"Deployment", "default", "api", "spec", "spec.template.spec.containers[api].resources.requests.memory", 1, "2026-05-24T10:05:00Z", "2026-05-24T10:05:00Z", "128Mi", "256Mi"},
+				[]any{"Deployment", "default", "api", "spec", "spec.template.spec.containers[api].resources.limits.memory", 1, "2026-05-24T10:06:00Z", "2026-05-24T10:06:00Z", "256Mi", "512Mi"},
 			},
-		},
+			"rowIds": []any{"sqlrow-change-request-memory", "sqlrow-change-limit-memory"},
+		})), nil
+	case strings.Contains(query, "request") || strings.Contains(query, "limit") || strings.Contains(query, "allocation") || strings.Contains(query, "resource"):
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"kind", "namespace", "name", "fact_key", "fact_value"},
+			"rows": []any{
+				[]any{"Deployment", "default", "api", "container.resources.requests.memory", "256Mi"},
+				[]any{"Deployment", "default", "api", "container.resources.limits.memory", "512Mi"},
+			},
+			"rowIds": []any{"sqlrow-alloc-requests", "sqlrow-alloc-limits"},
+		})), nil
+	default:
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"kind", "namespace", "name", "fact_key", "fact_value"},
+			"rows": []any{
+				[]any{"Pod", "default", "api-0", "pod_status.last_reason", "OOMKilled"},
+				[]any{"Deployment", "default", "api", "container.resources.requests.memory", "256Mi"},
+				[]any{"Deployment", "default", "api", "container.resources.limits.memory", "512Mi"},
+			},
+			"rowIds": []any{"sqlrow-oom-1", "sqlrow-alloc-requests", "sqlrow-alloc-limits"},
+		})), nil
 	}
 }
 

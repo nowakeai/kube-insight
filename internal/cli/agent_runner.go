@@ -44,6 +44,10 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 	if err != nil {
 		return nil, nil, err
 	}
+	jsTools := agent.WrapRecoverableToolErrors([]tool.BaseTool{agent.NewJSTransformTool()})
+	parallelTools := append([]tool.BaseTool(nil), tools...)
+	parallelTools = append(parallelTools, jsTools...)
+	tools = append(tools, agent.NewParallelInvestigationTool(model, parallelTools))
 	condenser, err := agent.NewEvidenceCondenserTool(ctx, model)
 	if err != nil {
 		if closeTools != nil {
@@ -52,12 +56,14 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 		return nil, nil, err
 	}
 	tools = append(tools, condenser)
+	tools = append(tools, jsTools...)
 	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
 		Description:        "Kubernetes investigation assistant backed by kube-insight MCP evidence tools.",
 		Model:              model,
 		Tools:              tools,
 		EmitInternalEvents: true,
 		EnableStreaming:    true,
+		MaxIterations:      cfg.Server.Chat.EffectiveMaxIterations(),
 	})
 	if err != nil {
 		if closeTools != nil {

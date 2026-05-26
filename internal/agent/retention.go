@@ -216,6 +216,9 @@ func retryOfRunID(run Run) string {
 }
 
 func retryRootRunID(run Run, runsByID map[string]Run) string {
+	if rootID := retryRootRunIDMetadata(run); rootID != "" {
+		return rootID
+	}
 	root := run
 	seen := map[string]struct{}{}
 	for {
@@ -233,6 +236,18 @@ func retryRootRunID(run Run, runsByID map[string]Run) string {
 		}
 		root = parent
 	}
+}
+
+func retryRootRunIDMetadata(run Run) string {
+	if len(run.Metadata) == 0 || !json.Valid(run.Metadata) {
+		return ""
+	}
+	var metadata map[string]any
+	if json.Unmarshal(run.Metadata, &metadata) != nil {
+		return ""
+	}
+	value, _ := metadata["retryRootRunId"].(string)
+	return value
 }
 
 func terminalRunIDSet(runs []Run) map[string]struct{} {

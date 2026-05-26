@@ -309,6 +309,8 @@ same backend:
 | OOM ranking | `过去 24 小时哪些 Pod 有 OOMKilled，按次数排序。` | health + schema + one facts SQL | <=3 tools |
 | Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
 | Service health | exact Service health question | health + service investigation | <=2 tools |
+| Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-3 independent branches | avoid for exact Service or exact object-change prompts |
+| JS transform | aggregate or reshape returned JSON rows | SQL/search result + `artifact_transform_js` | only bounded current-run JSON, no data fetch |
 | Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
 
 For exact recent-change prompts, the SQL should be a rollup over `changes`
@@ -337,6 +339,19 @@ removed by retention, the fallback replacement run must still carry
 npm --prefix web run test -- src/lib/agent-retry-branches.spec.ts src/lib/agent-retry-policy.spec.ts src/lib/agent-store.spec.ts
 ```
 
+Run the synthetic live LLM matrix first when adding a new model endpoint. This
+uses fake kube-insight tool data and validates tool-calling compatibility without
+sending real cluster evidence:
+
+```bash
+KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODELS='name|model|API_KEY_ENV|BASE_URL_ENV' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS=16 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_TIMEOUT=3m \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-synthetic" \
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -timeout 25m -v
+```
+
 Run the opt-in real DB prompt-context comparison when evaluating whether a
 larger system prompt reduces discovery calls. This sends selected evidence DB
 content and user questions to the configured live model endpoint, so use only
@@ -344,13 +359,22 @@ with approved data/export boundaries:
 
 ```bash
 KUBE_INSIGHT_AGENT_REAL_PROMPT_EVAL=1 \
-KUBE_INSIGHT_AGENT_REAL_EVAL_DB="$PWD/testdata/generated/real-cluster/kubeinsight.db" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_ENDPOINT="$KUBE_INSIGHT_CLICKHOUSE_DSN" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_DATABASE="kube_insight" \
 KUBE_INSIGHT_AGENT_REAL_EVAL_CONTEXT_FILE="$PWD/testdata/generated/real-cluster/context.md" \
-KUBE_INSIGHT_AGENT_REAL_EVAL_QUESTIONS='Is ns/name Service healthy?;;Map topology around ns/name Service.' \
+KUBE_INSIGHT_AGENT_REAL_EVAL_QUESTIONS='最近有没有 oom 现象？;;看看 gcp cluster 2 集群资源分配情况，不是实际使用;;过去24小时哪些 namespace 的 Pod 重启最多？' \
 KUBE_INSIGHT_AGENT_REAL_EVAL_MODES='baseline,rich' \
 KUBE_INSIGHT_AGENT_LIVE_EVAL_MODEL='mimo-v2.5-pro' \
 KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-real" \
-go test ./internal/agent -run TestRealDBPromptContextEvaluation -count=1 -v
+go test ./internal/agent -run TestRealDBPromptContextEvaluation -count=1 -timeout 30m -v
+```
+
+Run the no-LLM ClickHouse case smoke before sending real evidence to a live
+model. This uses the compose API and writes JSON outputs for schema, health, and
+representative SQL/profile cases:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
 ```
 
 Run the local agent-vs-kubectl benchmark. Refresh the evidence database first

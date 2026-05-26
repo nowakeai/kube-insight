@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"kube-insight/internal/agent"
@@ -141,11 +140,12 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeAgentStoreError(w, err)
 		return
 	}
-	if err := s.recordRunCreated(r.Context(), run); err != nil {
+	messages := s.agentMessagesForRun(r.Context(), run)
+	if err := s.recordRunCreated(r.Context(), run, messages); err != nil {
 		writeAgentStoreError(w, err)
 		return
 	}
-	s.startAgentRun(run)
+	s.startAgentRun(run, messages)
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -174,21 +174,26 @@ func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
 		writeAgentStoreError(w, err)
 		return
 	}
-	if err := s.recordRunCreated(r.Context(), run); err != nil {
+	messages := s.agentMessagesForRun(r.Context(), run)
+	if err := s.recordRunCreated(r.Context(), run, messages); err != nil {
 		writeAgentStoreError(w, err)
 		return
 	}
-	s.startAgentRun(run)
+	s.startAgentRun(run, messages)
 	writeJSON(w, http.StatusCreated, run)
 }
 
-func (s *Server) recordRunCreated(ctx context.Context, run agent.Run) error {
+func (s *Server) recordRunCreated(ctx context.Context, run agent.Run, messages []agent.Message) error {
 	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
 		Type: agent.EventRunCreated,
-		Data: mustJSON(agent.RunStatusEventData{
-			RunID:     run.ID,
-			SessionID: run.SessionID,
-			Status:    run.Status,
+		Data: mustJSON(map[string]any{
+			"runId":     run.ID,
+			"sessionId": run.SessionID,
+			"status":    run.Status,
+			"transcript": map[string]any{
+				"format":   "kube-insight.agent.messages.v1",
+				"messages": agentTranscriptMessagesValue(messages),
+			},
 		}),
 	})
 	return err
@@ -199,6 +204,7 @@ func retryAgentRunMetadata(original agent.Run, override json.RawMessage) json.Ra
 	mergeRawObject(metadata, original.Metadata)
 	mergeRawObject(metadata, override)
 	metadata["retryOfRunId"] = original.ID
+	metadata["retryRootRunId"] = retryRootRunIDFromMetadata(original)
 	return mustJSON(metadata)
 }
 
@@ -213,6 +219,18 @@ func mergeRawObject(target map[string]any, raw json.RawMessage) {
 	for key, item := range value {
 		target[key] = item
 	}
+}
+
+func retryRootRunIDFromMetadata(run agent.Run) string {
+	metadata := map[string]any{}
+	mergeRawObject(metadata, run.Metadata)
+	if value, _ := metadata["retryRootRunId"].(string); value != "" {
+		return value
+	}
+	if value, _ := metadata["retryOfRunId"].(string); value != "" {
+		return value
+	}
+	return run.ID
 }
 
 func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +334,7 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) startAgentRun(run agent.Run) {
+func (s *Server) startAgentRun(run agent.Run, messages []agent.Message) {
 	if s.agentRunner == nil {
 		return
 	}
@@ -327,7 +345,7 @@ func (s *Server) startAgentRun(run agent.Run) {
 		defer s.agentRunWG.Done()
 		defer s.unregisterAgentRunCancel(run.ID)
 		_, err := s.agentRunner.Run(runCtx, agent.EinoRunInput{
-			Messages: agentMessagesForRun(run),
+			Messages: messages,
 			Store:    s.agentStore,
 			RunID:    run.ID,
 		})
@@ -386,114 +404,6 @@ func (s *Server) runAgentRetentionJob(ctx context.Context) {
 	s.agentRetentionMu.Lock()
 	defer s.agentRetentionMu.Unlock()
 	_, _ = retentionStore.ApplyAgentRetention(ctx, agent.DefaultRetentionOptions())
-}
-
-func agentMessagesForRun(run agent.Run) []agent.Message {
-	messages := make([]agent.Message, 0, 2)
-	if context := agentRunClientContextMessage(run.Metadata); context != "" {
-		messages = append(messages, agent.Message{Role: agent.RoleSystem, Content: context})
-	}
-	messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input})
-	return messages
-}
-
-func agentRunClientContextMessage(metadata json.RawMessage) string {
-	if len(metadata) == 0 || !json.Valid(metadata) {
-		return ""
-	}
-	var record map[string]any
-	if err := json.Unmarshal(metadata, &record); err != nil || record == nil {
-		return ""
-	}
-	contextRecord := mapValue(record["clientContext"])
-	if contextRecord == nil {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("Client context for this run:\n")
-	b.WriteString("- Use this to interpret relative user dates/times such as today, yesterday, last 10 minutes, or this week. It is not proof about Kubernetes state. Use UTC for tool arguments and SQL predicates, but render final-answer timestamps in the client time zone when provided, preferably with the IANA time zone name or numeric offset instead of ambiguous abbreviations; include UTC only as a secondary reference when useful.\n")
-	writeClientContextLine(&b, "Client sent at", contextString(contextRecord, "sentAt"))
-	writeClientContextLine(&b, "Client local time", contextString(contextRecord, "localTime"))
-	writeClientContextLine(&b, "Client time zone", contextString(contextRecord, "timeZone"))
-	writeClientContextLine(&b, "Client UTC offset minutes", contextNumberOrString(contextRecord, "timezoneOffsetMinutes"))
-	writeClientContextLine(&b, "Client locale", contextString(contextRecord, "locale"))
-	writeClientContextLine(&b, "Client languages", contextStringList(contextRecord, "languages"))
-	writeClientContextLine(&b, "Page URL", contextString(contextRecord, "pageURL"))
-	value := strings.TrimSpace(b.String())
-	if value == "Client context for this run:" {
-		return ""
-	}
-	return value
-}
-
-func writeClientContextLine(b *strings.Builder, key, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	if len(value) > 160 {
-		value = value[:157] + "..."
-	}
-	b.WriteString("- ")
-	b.WriteString(key)
-	b.WriteString(": ")
-	b.WriteString(value)
-	b.WriteString(".\n")
-}
-
-func mapValue(value any) map[string]any {
-	record, ok := value.(map[string]any)
-	if !ok {
-		return nil
-	}
-	return record
-}
-
-func contextString(record map[string]any, key string) string {
-	value, ok := record[key]
-	if !ok {
-		return ""
-	}
-	text, ok := value.(string)
-	if !ok {
-		return ""
-	}
-	return text
-}
-
-func contextNumberOrString(record map[string]any, key string) string {
-	value, ok := record[key]
-	if !ok {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case float64:
-		return strconv.FormatFloat(typed, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(typed)
-	default:
-		return ""
-	}
-}
-
-func contextStringList(record map[string]any, key string) string {
-	value, ok := record[key]
-	if !ok {
-		return ""
-	}
-	items, ok := value.([]any)
-	if !ok {
-		return contextString(record, key)
-	}
-	parts := make([]string, 0, len(items))
-	for _, item := range items {
-		if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, ", ")
 }
 
 func (s *Server) registerAgentRunCancel(runID string, cancel context.CancelFunc) {

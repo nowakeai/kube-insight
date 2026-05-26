@@ -47,6 +47,25 @@ test("retry rewinds later conversation turns in the same branch", () => {
   expect(displayRunIdsForRetryBranches(["intro", "run_1", "run_2", "retry_1"], runs)).toEqual(["intro", "retry_1"])
 })
 
+
+test("retry root metadata replaces the original after the direct parent was pruned", () => {
+  const runs = {
+    run_1: { id: "run_1" },
+    retry_2: { id: "retry_2", metadata: { retryOfRunId: "retry_1", retryRootRunId: "run_1" } },
+  }
+
+  expect(displayRunIdsForRetryBranches(["run_1", "retry_2"], runs)).toEqual(["retry_2"])
+})
+
+test("retry with a pruned parent does not append to stale visible turns", () => {
+  const runs = {
+    run_1: { id: "run_1" },
+    retry_2: { id: "retry_2", metadata: { retryOfRunId: "retry_1" } },
+  }
+
+  expect(displayRunIdsForRetryBranches(["run_1", "retry_2"], runs)).toEqual(["retry_2"])
+})
+
 test("retry chains keep only the latest attempt", () => {
   const runs = {
     run_1: { id: "run_1" },

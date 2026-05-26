@@ -52,7 +52,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if len(cfg.ProfileRules()) == 0 {
 		t.Fatalf("profile rules missing")
 	}
-	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.BaseURLEnv != "OPENAI_BASE_URL" || cfg.Server.Chat.Model == "" {
+	if cfg.Server.Chat.Provider != "openai" || cfg.Server.Chat.APIKeyEnv != "OPENAI_API_KEY" || cfg.Server.Chat.BaseURLEnv != "OPENAI_BASE_URL" || cfg.Server.Chat.Model == "" || cfg.Server.Chat.MaxIterations != 32 {
 		t.Fatalf("chat = %#v", cfg.Server.Chat)
 	}
 	if !cfg.Server.AgentRetention.Enabled || cfg.Server.AgentRetention.IntervalSeconds <= 0 || !cfg.Server.AgentRetention.RunOnStart {
@@ -401,6 +401,27 @@ func TestValidateRejectsChatWithoutAPIKeyEnv(t *testing.T) {
 	cfg.Server.Chat.OpenAIAPIKeyEnv = ""
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "server.chat.apiKeyEnv") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDefaultChatMaxIterations(t *testing.T) {
+	cfg := Default()
+	if cfg.Server.Chat.EffectiveMaxIterations() != DefaultChatMaxIterations {
+		t.Fatalf("max iterations = %d, want %d", cfg.Server.Chat.EffectiveMaxIterations(), DefaultChatMaxIterations)
+	}
+	cfg.Server.Chat.MaxIterations = 64
+	if cfg.Server.Chat.EffectiveMaxIterations() != 64 {
+		t.Fatalf("override max iterations = %d", cfg.Server.Chat.EffectiveMaxIterations())
+	}
+}
+
+func TestValidateRejectsNegativeChatMaxIterations(t *testing.T) {
+	cfg := Default()
+	cfg.Server.Chat.Enabled = true
+	cfg.Server.Chat.MaxIterations = -1
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "server.chat.maxIterations") {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -47,6 +47,15 @@ test("retry fallback replacement still rewinds later turns", () => {
   expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
 })
 
+test("server retry with pruned parent does not append to stale session projection", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerRun(runDTO("run_1", "question"))
+  store.upsertServerRun(runDTO("run_retry", "question", { retryOfRunId: "run_pruned" }))
+
+  expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
+})
+
 function runDTO(id: string, input: string, metadata?: unknown): AgentRunDTO {
   return {
     id,

@@ -300,10 +300,15 @@ Optimization principles:
   namespace/resource allowlists, redaction, and future RBAC should live in
   MCP/API policy hooks before tool execution and in audit records after tool
   execution.
-- Hierarchical memory/context. Keep stable product instructions in repo docs;
-  keep session state in server sessions; keep run summaries and selected
-  artifacts as compact context for future runs. Do not persist raw conversation
-  or huge tool outputs as prompt context by default.
+- Transcript-first memory/context. Persist the session/run event log as the
+  replayable source of truth. Each server-started run stores the actual runner
+  input transcript inside the existing `run.created` event payload; normal
+  follow-up prompts are reconstructed from that ordered visible user/assistant
+  transcript instead of selective summaries. Keep stable product instructions in
+  repo docs. Use explicit compaction, selected artifact references, and
+  subagent/tool-output condensation only above that transcript layer, and do not
+  inject oversized raw tool outputs into future prompts unless checkpoint resume
+  requires the exact tool message.
 - Checkpoints and recovery. Long agent runs should be recoverable. Store every
   run event, tool call, error, and artifact so a user can inspect, retry,
   continue, or branch from a failed run.
@@ -350,11 +355,13 @@ Adopt in the first hardening pass:
 Pre-wire, but do not overuse in the first UI milestone:
 
 - `AgentAsTool` / `NewAgentTool` for specialist subagents. The first specialist
-  should be an evidence condenser that accepts artifact/resource handles and
-  returns compact findings with citations when raw output is too large for the
-  main agent.
-- `SetSubAgents` transfer for interactive specialist handoff, if the model
-  needs to delegate an investigation rather than call a bounded analysis tool.
+  is an evidence condenser that accepts artifact/resource handles and returns
+  compact findings with citations when raw output is too large for the main
+  agent. Broad triage can also use `parallel_investigation` to run 2-3 bounded
+  specialist branches concurrently and return compact branch findings.
+- `SetSubAgents` transfer for interactive specialist handoff remains a future
+  option if the model needs to delegate an investigation rather than call a
+  bounded analysis tool.
 - Supervisor or DeepAgents style orchestration for broad multi-step work, such
   as cluster-wide incident triage. This should remain optional because fixed
   orchestration can reduce model autonomy if introduced too early.
@@ -583,6 +590,7 @@ server:
     apiKeyEnv: OPENAI_API_KEY
     baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
+    maxIterations: 32
 ```
 
 ## Packaging And Release

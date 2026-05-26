@@ -1,11 +1,12 @@
-import { FileText, PanelRightClose, PanelRightOpen, X } from "lucide-react"
-import { lazy, Suspense, type ReactNode } from "react"
+import { FileText, PanelRightClose, PanelRightOpen, RefreshCw, X } from "lucide-react"
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { K8sResourceArtifact } from "@/components/k8s-resource-artifact"
 import { K8sResourceListArtifact } from "@/components/k8s-resource-list-artifact"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import { type AgentArtifact, useAgentProjectionStore } from "@/lib/agent-store"
+import { isWatchableArtifactKind, refreshArtifact, watchableArtifactTarget } from "@/lib/artifact-watch"
 
 
 const LazyK8sDiffArtifact = lazy(() =>
@@ -24,17 +25,106 @@ const LazyUnknownArtifact = lazy(() =>
 
 export function ArtifactDock({
   artifacts,
+  sessionId,
   selectedArtifactId,
   collapsed,
+  watchIntervalSeconds,
   onCollapsedChange,
   onCloseArtifact,
+  onUpdateArtifact,
+  onWatchIntervalChange,
 }: {
   artifacts: AgentArtifact[]
+  sessionId?: string
   selectedArtifactId?: string
   collapsed: boolean
+  watchIntervalSeconds?: number
   onCollapsedChange: (collapsed: boolean) => void
   onCloseArtifact: (artifactId: string) => void
+  onUpdateArtifact: (artifactId: string, input: { title?: string; data?: unknown }) => void
+  onWatchIntervalChange: (sessionId: string, seconds?: number) => void
 }) {
+  const [documentVisible, setDocumentVisible] = useState(() => isDocumentVisible())
+  const [watchStates, setWatchStates] = useState<Record<string, ArtifactWatchState>>({})
+  const watchableArtifacts = useMemo(
+    () => artifacts.filter((artifact) => isWatchableArtifactKind(artifact.kind) && watchableArtifactTarget(artifact)),
+    [artifacts],
+  )
+  const watchableArtifactsRef = useRef(watchableArtifacts)
+  const watchEnabled = Boolean(watchIntervalSeconds && watchIntervalSeconds > 0)
+  const watchPaused = watchEnabled && (collapsed || !documentVisible)
+  const canWatch = Boolean(sessionId && watchableArtifacts.length > 0)
+  const refreshWatchableArtifacts = useCallback(async (signal?: AbortSignal) => {
+    for (const artifact of watchableArtifactsRef.current) {
+      if (signal?.aborted) return
+      setWatchStates((current) => ({
+        ...current,
+        [artifact.id]: { status: "refreshing", refreshedAt: current[artifact.id]?.refreshedAt },
+      }))
+      try {
+        const refreshed = await refreshArtifact(artifact, { signal })
+        if (signal?.aborted) return
+        onUpdateArtifact(artifact.id, refreshed)
+        setWatchStates((current) => ({
+          ...current,
+          [artifact.id]: { status: "ok", refreshedAt: new Date().toISOString() },
+        }))
+      } catch (error) {
+        if (signal?.aborted) return
+        setWatchStates((current) => ({
+          ...current,
+          [artifact.id]: {
+            status: "error",
+            error: error instanceof Error ? error.message : "Refresh failed",
+            refreshedAt: current[artifact.id]?.refreshedAt,
+          },
+        }))
+      }
+    }
+  }, [onUpdateArtifact])
+
+  useEffect(() => {
+    watchableArtifactsRef.current = watchableArtifacts
+  }, [watchableArtifacts])
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined
+    const onVisibilityChange = () => setDocumentVisible(isDocumentVisible())
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange)
+  }, [])
+
+  useEffect(() => {
+    if (!watchEnabled || !canWatch || watchPaused) return undefined
+    let activeController: AbortController | undefined
+    const run = () => {
+      activeController?.abort()
+      activeController = new AbortController()
+      void refreshWatchableArtifacts(activeController.signal)
+    }
+    run()
+    const intervalId = window.setInterval(run, watchIntervalSeconds! * 1000)
+    return () => {
+      window.clearInterval(intervalId)
+      activeController?.abort()
+    }
+  }, [canWatch, refreshWatchableArtifacts, watchEnabled, watchIntervalSeconds, watchPaused])
+
+  const handleWatchToggle = useCallback(() => {
+    if (!sessionId) return
+    onWatchIntervalChange(sessionId, watchEnabled ? undefined : watchIntervalSeconds ?? 15)
+  }, [onWatchIntervalChange, sessionId, watchEnabled, watchIntervalSeconds])
+
+  const handleIntervalChange = useCallback((value: string) => {
+    if (!sessionId) return
+    const seconds = Number(value)
+    onWatchIntervalChange(sessionId, Number.isFinite(seconds) && seconds > 0 ? seconds : undefined)
+  }, [onWatchIntervalChange, sessionId])
+
+  const handleRefreshNow = useCallback(() => {
+    void refreshWatchableArtifacts()
+  }, [refreshWatchableArtifacts])
+
   if (collapsed) {
     return (
       <aside className="pointer-events-none absolute right-3 top-4 z-20 hidden lg:block" aria-label="Panel dock collapsed">
@@ -63,12 +153,38 @@ export function ArtifactDock({
             <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold text-foreground">Panel dock</h2>
-              <p className="truncate text-[0.7rem] text-muted-foreground">{artifacts.length} pinned</p>
+              <p className="truncate text-[0.7rem] text-muted-foreground">{watchStatusText(artifacts.length, watchableArtifacts.length, watchEnabled, watchPaused, watchIntervalSeconds)}</p>
             </div>
           </div>
-          <Button type="button" size="icon-sm" variant="ghost" onClick={() => onCollapsedChange(true)} aria-label="Collapse panel dock">
-            <PanelRightClose className="size-4" aria-hidden="true" />
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              type="button"
+              size="sm"
+              variant={watchEnabled ? "secondary" : "outline"}
+              disabled={!sessionId}
+              onClick={handleWatchToggle}
+            >
+              Watch
+            </Button>
+            <select
+              className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground disabled:opacity-50"
+              aria-label="Watch interval"
+              disabled={!sessionId || !watchEnabled}
+              value={String(watchIntervalSeconds ?? 15)}
+              onChange={(event) => handleIntervalChange(event.target.value)}
+            >
+              <option value="5">5s</option>
+              <option value="15">15s</option>
+              <option value="30">30s</option>
+              <option value="60">60s</option>
+            </select>
+            <Button type="button" size="icon-sm" variant="ghost" disabled={!canWatch} onClick={handleRefreshNow} aria-label="Refresh watchable panels">
+              <RefreshCw className="size-4" aria-hidden="true" />
+            </Button>
+            <Button type="button" size="icon-sm" variant="ghost" onClick={() => onCollapsedChange(true)} aria-label="Collapse panel dock">
+              <PanelRightClose className="size-4" aria-hidden="true" />
+            </Button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
@@ -82,6 +198,8 @@ export function ArtifactDock({
                 key={artifact.id}
                 artifact={artifact}
                 selected={artifact.id === selectedArtifactId}
+                watchState={watchStates[artifact.id]}
+                watchable={Boolean(watchableArtifactTarget(artifact))}
                 onClose={() => onCloseArtifact(artifact.id)}
               />
             ))
@@ -95,10 +213,14 @@ export function ArtifactDock({
 function DockPanel({
   artifact,
   selected,
+  watchState,
+  watchable,
   onClose,
 }: {
   artifact: AgentArtifact
   selected: boolean
+  watchState?: ArtifactWatchState
+  watchable: boolean
   onClose: () => void
 }) {
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
@@ -108,6 +230,7 @@ function DockPanel({
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectArtifact(artifact.id)}>
           <div className="truncate text-[0.7rem] text-muted-foreground">{artifact.kind}</div>
           <div className="mt-1 truncate text-sm font-medium text-foreground">{artifact.title || "Artifact"}</div>
+          <div className="mt-1 truncate text-[0.65rem] text-muted-foreground">{panelWatchStateText(watchable, watchState)}</div>
         </button>
         <Button type="button" size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close artifact panel">
           <X className="size-3.5" aria-hidden="true" />
@@ -118,6 +241,12 @@ function DockPanel({
       </div>
     </section>
   )
+}
+
+type ArtifactWatchState = {
+  status: "refreshing" | "ok" | "error"
+  refreshedAt?: string
+  error?: string
 }
 
 export function ArtifactPanel({
@@ -221,4 +350,29 @@ function formatArtifactTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+}
+
+function isDocumentVisible() {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
+}
+
+function watchStatusText(
+  pinnedCount: number,
+  watchableCount: number,
+  watchEnabled: boolean,
+  watchPaused: boolean,
+  intervalSeconds?: number,
+) {
+  if (!watchEnabled) return `${pinnedCount} pinned`
+  if (watchableCount === 0) return "No watchable panels"
+  if (watchPaused) return `Watch paused - ${watchableCount} panels`
+  return `Watching ${watchableCount} panels - ${intervalSeconds ?? 15}s`
+}
+
+function panelWatchStateText(watchable: boolean, state?: ArtifactWatchState) {
+  if (!watchable) return "Watch unavailable"
+  if (!state) return "Watch ready"
+  if (state.status === "refreshing") return "Refreshing..."
+  if (state.status === "error") return state.error ?? "Refresh failed"
+  return state.refreshedAt ? `Refreshed ${formatArtifactTime(state.refreshedAt)}` : "Refreshed"
 }

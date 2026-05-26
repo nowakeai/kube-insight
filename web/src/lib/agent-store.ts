@@ -85,6 +85,11 @@ type UpsertArtifactInput = {
   data?: unknown
 }
 
+type UpdateArtifactInput = {
+  title?: string
+  data?: unknown
+}
+
 type AddCitationInput = {
   id?: string
   artifactId?: string
@@ -116,9 +121,11 @@ type AgentProjectionState = {
   failRun: (runId: string, error: string) => void
   cancelRun: (runId: string) => void
   upsertArtifact: (runId: string, input: UpsertArtifactInput) => string
+  updateArtifact: (artifactId: string, input: UpdateArtifactInput) => void
   addCitation: (runId: string, input: AddCitationInput) => string
   selectArtifact: (artifactId?: string) => void
   setPanelDockCollapsed: (sessionId: string, collapsed: boolean) => void
+  setPanelWatchIntervalSeconds: (sessionId: string, seconds?: number) => void
   unpinArtifactForSession: (sessionId: string, artifactId: string) => void
   selectSession: (sessionId?: string) => void
   removeSession: (sessionId: string) => void
@@ -430,6 +437,31 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
     get().appendRunEvent(runId, { type: "artifact.created", data: artifact })
     return id
   },
+  updateArtifact: (artifactId, input) => {
+    const now = nowISO()
+    set((current) => {
+      const artifact = current.artifacts[artifactId]
+      if (!artifact) return current
+      const run = current.runs[artifact.runId]
+      return {
+        artifacts: {
+          ...current.artifacts,
+          [artifactId]: {
+            ...artifact,
+            title: input.title ?? artifact.title,
+            data: input.data ?? artifact.data,
+            updatedAt: now,
+          },
+        },
+        runs: run
+          ? {
+              ...current.runs,
+              [artifact.runId]: { ...run, updatedAt: now },
+            }
+          : current.runs,
+      }
+    })
+  },
 
   addCitation: (runId, input) => {
     const id = input.id ?? newProjectionId("citation")
@@ -485,6 +517,20 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
       const panelWorkspaces = {
         ...current.panelWorkspaces,
         [sessionId]: { ...workspace, dockCollapsed: collapsed },
+      }
+      writePanelWorkspaces(panelWorkspaces)
+      return { panelWorkspaces }
+    })
+  },
+  setPanelWatchIntervalSeconds: (sessionId, seconds) => {
+    set((current) => {
+      const workspace = current.panelWorkspaces[sessionId] ?? emptyPanelWorkspace()
+      const watchIntervalSeconds = typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0
+        ? seconds
+        : undefined
+      const panelWorkspaces = {
+        ...current.panelWorkspaces,
+        [sessionId]: { ...workspace, watchIntervalSeconds },
       }
       writePanelWorkspaces(panelWorkspaces)
       return { panelWorkspaces }

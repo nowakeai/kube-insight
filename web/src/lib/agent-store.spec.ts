@@ -111,6 +111,31 @@ test("server retry with pruned parent does not append to stale session projectio
   expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
 })
 
+test("panel watch interval is stored per session", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.setPanelWatchIntervalSeconds("sess_1", 15)
+  expect(useAgentProjectionStore.getState().panelWorkspaces.sess_1.watchIntervalSeconds).toBe(15)
+
+  store.setPanelWatchIntervalSeconds("sess_1", undefined)
+  expect(useAgentProjectionStore.getState().panelWorkspaces.sess_1.watchIntervalSeconds).toBeUndefined()
+})
+
+test("updateArtifact refreshes panel data without appending another artifact event", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerRun(runDTO("run_1", "question"))
+  store.upsertArtifact("run_1", { id: "artifact_1", kind: "k8s.history", title: "Before", data: { versions: [] } })
+  const beforeEvents = useAgentProjectionStore.getState().runs.run_1.eventIds.length
+
+  store.updateArtifact("artifact_1", { title: "After", data: { versions: [{ id: "v1" }] } })
+
+  const state = useAgentProjectionStore.getState()
+  expect(state.artifacts.artifact_1.title).toBe("After")
+  expect(state.artifacts.artifact_1.data).toEqual({ versions: [{ id: "v1" }] })
+  expect(state.runs.run_1.eventIds.length).toBe(beforeEvents)
+})
+
 function runDTO(id: string, input: string, metadata?: unknown): AgentRunDTO {
   return {
     id,

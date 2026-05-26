@@ -53,12 +53,14 @@ export function AgentChat() {
   const completeRun = useAgentProjectionStore((state) => state.completeRun)
   const cancelRun = useAgentProjectionStore((state) => state.cancelRun)
   const upsertArtifact = useAgentProjectionStore((state) => state.upsertArtifact)
+  const updateArtifact = useAgentProjectionStore((state) => state.updateArtifact)
   const addCitation = useAgentProjectionStore((state) => state.addCitation)
   const startNewSession = useAgentProjectionStore((state) => state.startNewSession)
   const selectSession = useAgentProjectionStore((state) => state.selectSession)
   const removeSession = useAgentProjectionStore((state) => state.removeSession)
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
   const setPanelDockCollapsed = useAgentProjectionStore((state) => state.setPanelDockCollapsed)
+  const setPanelWatchIntervalSeconds = useAgentProjectionStore((state) => state.setPanelWatchIntervalSeconds)
   const unpinArtifactForSession = useAgentProjectionStore((state) => state.unpinArtifactForSession)
   const handleSelectArtifact = useCallback((artifactId?: string) => {
     selectArtifact(artifactId)
@@ -434,10 +436,14 @@ export function AgentChat() {
 
             <ArtifactDock
               artifacts={visiblePanelArtifacts}
+              sessionId={visibleSessionId}
               selectedArtifactId={selectedArtifactId}
               collapsed={!panelDockExpanded}
+              watchIntervalSeconds={visiblePanelWorkspace?.watchIntervalSeconds}
               onCollapsedChange={handlePanelDockCollapsedChange}
               onCloseArtifact={handleCloseArtifactPanel}
+              onUpdateArtifact={updateArtifact}
+              onWatchIntervalChange={setPanelWatchIntervalSeconds}
             />
           </div>
         </div>

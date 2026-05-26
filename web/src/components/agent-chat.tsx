@@ -22,13 +22,7 @@ import { displayRunIdsForRetryBranches, parentRunId } from "@/lib/agent-retry-br
 import { formatPromptWithContextBlocks, type ComposerContextBlock } from "@/lib/composer-context"
 import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
-
-const starterPrompts = [
-  "Is the API service healthy right now?",
-  "Show recent changes for default/api",
-  "Find pods with restart evidence",
-  "Map topology for namespace default",
-]
+import { randomStarterPrompts } from "@/lib/starter-prompts"
 
 const emptyEventIds: string[] = []
 
@@ -39,6 +33,7 @@ export function AgentChat() {
   const [routeRun, setRouteRun] = useState(readRouteRun)
   const [emptyDockExpandedBySession, setEmptyDockExpandedBySession] = useState<Record<string, boolean>>({})
   const [composerContextBlocks, setComposerContextBlocks] = useState<ComposerContextBlock[]>([])
+  const [starterPrompts] = useState(() => randomStarterPrompts(4))
   const eventSubscriptionRef = useRef<AgentRunEventSubscription | undefined>(undefined)
   const activeServerRunRef = useRef<string | undefined>(undefined)
   const hydratedRunRef = useRef<string | undefined>(undefined)

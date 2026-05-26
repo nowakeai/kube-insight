@@ -128,7 +128,9 @@ context in the latest provider-facing `completion.request`.
 Set `KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1` to retry the first completed
 run after later questions. The retry assertion checks that the replacement
 run's first provider request rewinds to the original user input and excludes
-later turns.
+later turns. It also checks the session endpoint exposes the replacement run
+with `retryOfRunId` and `retryRootRunId`; retention may already have removed
+the superseded branch by the time the session is fetched.
 
 ```bash
 make build

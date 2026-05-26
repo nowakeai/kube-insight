@@ -269,6 +269,15 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
       fi
     done
   fi
+  session_after_retry_json="${WORK_DIR}/retry-first.session.json"
+  curl -fsS "http://${API_LISTEN}/api/v1/agent/sessions/${session_id}" >"${session_after_retry_json}"
+  if ! jq -e --arg runId "${retry_run_id}" --arg retryOf "${original_run_id}" '
+    any(.runs[]?; .id == $runId and .metadata.retryOfRunId == $retryOf and .metadata.retryRootRunId == $retryOf)
+  ' "${session_after_retry_json}" >/dev/null; then
+    echo "Session ${session_id} does not expose retry replacement run ${retry_run_id} with retry metadata." >&2
+    jq '{id, runs: [.runs[]? | {id, input, status, metadata}]}' "${session_after_retry_json}" >&2
+    exit 1
+  fi
   if [[ "${first_summary}" -eq 0 ]]; then
     printf ',' >>"${SUMMARY_PATH}"
   fi
@@ -282,7 +291,9 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
     --argjson contextMessages "$(jq '.requests[0].messageCount' "${retry_context_json}")" \
     --arg eventsPath "${retry_events_json}" \
     --arg contextPath "${retry_context_json}" \
-    '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
+    --arg sessionPath "${session_after_retry_json}" \
+    --argjson sessionRunCount "$(jq '.runs | length' "${session_after_retry_json}")" \
+    '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, sessionRunCount:$sessionRunCount, eventsPath:$eventsPath, contextPath:$contextPath, sessionPath:$sessionPath}' >>"${SUMMARY_PATH}"
 fi
 printf ']\n' >>"${SUMMARY_PATH}"
 

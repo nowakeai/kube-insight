@@ -1,0 +1,318 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/schema"
+
+	"kube-insight/internal/agent"
+)
+
+func TestAgentConversationReplayPreservesToolCallsAndResults(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: first.Input, RunID: first.ID}))},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{
+			Role: agent.RoleAssistant,
+			ToolCalls: []agent.ToolCall{{
+				ID:   "call_oom",
+				Type: "function",
+				Function: agent.FunctionCall{
+					Name:      "kube_insight_search",
+					Arguments: `{"query":"OOMKilled","kind":"Pod"}`,
+				},
+			}},
+			RunID: first.ID,
+		}))},
+		{Type: agent.EventCompletionToolResult, Data: mustJSON(map[string]any{
+			"format":        "kube-insight.agent.message.v1",
+			"role":          agent.RoleTool,
+			"toolCallId":    "call_oom",
+			"name":          "kube_insight_search",
+			"content":       `{"matches":1}`,
+			"runId":         first.ID,
+			"outputSummary": "matches=1",
+		})},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "发现 1 个 OOMKilled Pod。", RunID: first.ID}))},
+	}
+	for _, event := range events {
+		if _, err := store.AppendRunEvent(ctx, first.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, first.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages := agentConversationMessagesForRun(ctx, store, second)
+	if len(messages) != 4 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[1].Role != agent.RoleAssistant || len(messages[1].ToolCalls) != 1 || messages[1].ToolCalls[0].Function.Name != "kube_insight_search" {
+		t.Fatalf("assistant tool call was not replayed: %#v", messages[1])
+	}
+	if messages[2].Role != agent.RoleTool || messages[2].ToolCallID != "call_oom" || messages[2].ToolName != "kube_insight_search" || messages[2].Content != `{"matches":1}` {
+		t.Fatalf("tool result was not replayed: %#v", messages[2])
+	}
+}
+
+func TestAgentMessagesPlaceVolatileClientContextAfterStableHistory(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: first.Input, RunID: first.ID}))},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "发现 1 个 OOMKilled Pod。", RunID: first.ID}))},
+	} {
+		if _, err := store.AppendRunEvent(ctx, first.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, first.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{
+		Input: "最近1小时内呢",
+		Metadata: mustJSON(map[string]any{
+			"clientContext": map[string]any{
+				"sentAt":   "2026-05-26T10:00:00Z",
+				"timeZone": "Asia/Shanghai",
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{agentStore: store}
+	messages := server.agentMessagesForRun(ctx, second)
+	if len(messages) != 4 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[0].Content != "最近有没有 OOM 现象？" || messages[1].Content != "发现 1 个 OOMKilled Pod。" {
+		t.Fatalf("stable history order changed: %#v", messages)
+	}
+	if messages[2].Role != agent.RoleSystem || !strings.Contains(messages[2].Content, "Client context for this run") || !strings.Contains(messages[2].Content, "Asia/Shanghai") {
+		t.Fatalf("client context should be late system message: %#v", messages[2])
+	}
+	if messages[3].Role != agent.RoleUser || messages[3].Content != "最近1小时内呢" {
+		t.Fatalf("current user should remain final message: %#v", messages[3])
+	}
+}
+
+func TestAgentConversationReplaySkipsSubagentChildRuns(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: parent.Input, RunID: parent.ID}))},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "会检查 OOM 分支。", RunID: parent.ID}))},
+	} {
+		if _, err := store.AppendRunEvent(ctx, parent.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, parent.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{
+		Input: "child branch prompt",
+		Metadata: mustJSON(map[string]any{
+			"parentRunId":  parent.ID,
+			"subagentName": "parallel_investigation",
+			"branchName":   "oom_restarts",
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: child.Input, RunID: child.ID}))},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "child branch answer", RunID: child.ID}))},
+	} {
+		if _, err := store.AppendRunEvent(ctx, child.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, child.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	next, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages := agentConversationMessagesForRun(ctx, store, next)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	joined := completionRequestMessageText([]completionRequestMessageForTest{
+		{Role: string(messages[0].Role), Content: messages[0].Content},
+		{Role: string(messages[1].Role), Content: messages[1].Content},
+	})
+	if strings.Contains(joined, "child branch prompt") || strings.Contains(joined, "child branch answer") {
+		t.Fatalf("child run leaked into main replay: %#v", messages)
+	}
+}
+
+func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing.T) {
+	ctx := context.Background()
+	runner, err := agent.NewEinoRunner(ctx, agent.EinoRunnerConfig{
+		Instruction: "Stable instruction.",
+		Model:       intentFollowupModel{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		AgentRunner: runner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	var session struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions", `{}`, http.StatusCreated, &session)
+
+	var first struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"最近有没有 OOM 现象？","provider":"openai-compatible","model":"test-model"}`, http.StatusCreated, &first)
+	getBody(t, server.URL+"/api/v1/agent/runs/"+first.ID+"/events?follow=true", http.StatusOK)
+
+	var second struct {
+		ID string `json:"id"`
+	}
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"最近1小时内呢","provider":"openai-compatible","model":"test-model","metadata":{"clientContext":{"sentAt":"2026-05-26T10:00:00Z","timeZone":"Asia/Shanghai"}}}`, http.StatusCreated, &second)
+	getBody(t, server.URL+"/api/v1/agent/runs/"+second.ID+"/events?follow=true", http.StatusOK)
+
+	request := completionRequestForRun(t, handler.agentStore, second.ID)
+	if request.Provider != "openai-compatible" || request.Model != "test-model" {
+		t.Fatalf("request provider/model = %#v", request)
+	}
+	joined := completionRequestMessageText(request.Messages)
+	for _, want := range []string{"Stable instruction.", "最近有没有 OOM 现象？", "发现 OOMKilled Pod", "Client context for this run", "Asia/Shanghai", "最近1小时内呢"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("completion request missing %q: %#v", want, request.Messages)
+		}
+	}
+	if indexOfMessageContaining(request.Messages, "最近有没有 OOM 现象？") > indexOfMessageContaining(request.Messages, "最近1小时内呢") {
+		t.Fatalf("prior intent must appear before follow-up input: %#v", request.Messages)
+	}
+	if indexOfMessageContaining(request.Messages, "Client context for this run") < indexOfMessageContaining(request.Messages, "发现 OOMKilled Pod") {
+		t.Fatalf("volatile client context should stay after stable history: %#v", request.Messages)
+	}
+}
+
+type intentFollowupModel struct{}
+
+func (m intentFollowupModel) Generate(_ context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	lastUser := ""
+	for _, message := range input {
+		if message.Role == schema.User {
+			lastUser = message.Content
+		}
+	}
+	if strings.Contains(lastUser, "1小时") {
+		return schema.AssistantMessage("最近1小时内仍按 OOM 问题继续检查。", nil), nil
+	}
+	return schema.AssistantMessage("发现 OOMKilled Pod。", nil), nil
+}
+
+func (m intentFollowupModel) Stream(context.Context, []*schema.Message, ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	return nil, errors.New("stream is not implemented in intentFollowupModel")
+}
+
+type completionRequestMessageForTest struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type completionRequestForTest struct {
+	Provider string                            `json:"provider"`
+	Model    string                            `json:"model"`
+	Messages []completionRequestMessageForTest `json:"messages"`
+}
+
+func completionRequestForRun(t *testing.T, store agent.Store, runID string) completionRequestForTest {
+	t.Helper()
+	events, err := store.ListRunEvents(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type != agent.EventCompletionRequest {
+			continue
+		}
+		var request completionRequestForTest
+		if err := json.Unmarshal(event.Data, &request); err != nil {
+			t.Fatal(err)
+		}
+		return request
+	}
+	t.Fatalf("run %s has no completion.request event", runID)
+	return completionRequestForTest{}
+}
+
+func completionRequestMessageText(messages []completionRequestMessageForTest) string {
+	var b strings.Builder
+	for _, message := range messages {
+		b.WriteString(message.Role)
+		b.WriteString(": ")
+		b.WriteString(message.Content)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func indexOfMessageContaining(messages []completionRequestMessageForTest, needle string) int {
+	for i, message := range messages {
+		if strings.Contains(message.Content, needle) {
+			return i
+		}
+	}
+	return -1
+}

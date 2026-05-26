@@ -75,6 +75,8 @@ export type ToolSegment = {
   type: "tool"
   id: string
   toolCallId: string
+  childRunIds?: string[]
+  childRuns?: ToolChildRunSummary[]
   name?: string
   status: string
   input?: unknown
@@ -82,6 +84,17 @@ export type ToolSegment = {
   outputArtifactId?: string
   durationMs?: number
   error?: string
+}
+
+export type ToolChildRunSummary = {
+  id: string
+  status?: string
+  subagentName?: string
+  branchName?: string
+  input?: string
+  eventCount?: number
+  artifactCount?: number
+  finalAnswer?: string
 }
 
 export function runActivitySummary(
@@ -143,12 +156,19 @@ function toolDurationMs(raw: unknown, startedAt: number | undefined, eventAt: nu
   return Math.max(1, Math.round(end - startedAt))
 }
 
-export function conversationSegments(run: AgentRun | undefined, events: AgentRunEvent[], status: string, nowMs = Date.now()): ConversationSegment[] {
+export function conversationSegments(
+  run: AgentRun | undefined,
+  events: AgentRunEvent[],
+  status: string,
+  nowMs = Date.now(),
+  childRunsByToolCallId: Record<string, ToolChildRunSummary[]> = {},
+): ConversationSegment[] {
   const segments: ConversationSegment[] = []
   if (run?.input) segments.push({ type: "user", id: `user_${run.id}`, content: run.input })
   const toolIndexes = new Map<string, number>()
   const toolStartedAt = new Map<string, number>()
   const toolArtifactDurations = new Map<string, number>()
+  const toolArtifactChildRunIds = new Map<string, string[]>()
   let hasAssistantText = false
 
   for (const event of events) {
@@ -185,6 +205,12 @@ export function conversationSegments(run: AgentRun | undefined, events: AgentRun
       if (artifact?.toolCallId && typeof artifact.durationMs === "number") {
         toolArtifactDurations.set(artifact.toolCallId, artifact.durationMs)
       }
+      if (artifact?.toolCallId && artifact.childRunIds.length > 0) {
+        toolArtifactChildRunIds.set(artifact.toolCallId, uniqueValues([
+          ...(toolArtifactChildRunIds.get(artifact.toolCallId) ?? []),
+          ...artifact.childRunIds,
+        ]))
+      }
       continue
     }
 
@@ -195,10 +221,17 @@ export function conversationSegments(run: AgentRun | undefined, events: AgentRun
       if (event.type === "tool.started") toolStartedAt.set(toolCallId, Date.parse(event.createdAt))
       const startedAt = toolStartedAt.get(toolCallId)
       const durationMs = toolDurationMs(data.durationMs ?? toolArtifactDurations.get(toolCallId), startedAt, Date.parse(event.createdAt), nowMs, status)
+      const childRuns = childRunsByToolCallId[toolCallId] ?? []
+      const childRunIds = uniqueValues([
+        ...(toolArtifactChildRunIds.get(toolCallId) ?? []),
+        ...childRuns.map((childRun) => childRun.id),
+      ])
       const next: ToolSegment = {
         type: "tool",
         id: `tool_${toolCallId}`,
         toolCallId,
+        childRunIds: childRunIds.length > 0 ? childRunIds : undefined,
+        childRuns: childRuns.length > 0 ? childRuns : undefined,
         name: typeof data.name === "string" ? data.name : undefined,
         status,
         input: data.input,
@@ -320,6 +353,8 @@ export function toolSegmentDetail(segment: ToolSegment) {
   return JSON.stringify({
     name: segment.name,
     status: segment.status,
+    childRunIds: segment.childRunIds,
+    childRuns: segment.childRuns,
     durationMs: segment.durationMs,
     input: segment.input,
     outputSummary: segment.outputSummary,
@@ -349,13 +384,36 @@ function toolCallArtifactData(value: unknown) {
   const artifactData = eventDataRecord(artifact.data)
   const toolCallId = typeof artifactData.toolCallId === "string" ? artifactData.toolCallId : undefined
   const durationMs = typeof artifactData.durationMs === "number" && Number.isFinite(artifactData.durationMs) ? artifactData.durationMs : undefined
+  const childRunIds = childRunIdsFromToolOutput(artifactData.output)
   if (!toolCallId) return undefined
-  return { toolCallId, durationMs }
+  return { toolCallId, durationMs, childRunIds }
 }
 
 function eventDataRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {}
   return value as Record<string, unknown>
+}
+
+function childRunIdsFromToolOutput(value: unknown) {
+  const output = parseMaybeJSON(value)
+  const record = eventDataRecord(output)
+  const branches = Array.isArray(record.branches) ? record.branches : []
+  return uniqueValues(branches
+    .map((branch) => eventDataRecord(branch).childRunId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0))
+}
+
+function parseMaybeJSON(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return value
+  }
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values))
 }
 
 function compactJSON(value: unknown) {

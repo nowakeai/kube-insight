@@ -20,44 +20,74 @@ func (s *Server) agentMessagesForRun(ctx context.Context, run agent.Run) []agent
 }
 
 func agentConversationMessagesForRun(ctx context.Context, store agent.Store, run agent.Run) []agent.Message {
-	if store == nil || run.SessionID == "" {
+	return newAgentContextReplayBuilder(ctx, store).Build(run)
+}
+
+type agentContextReplayBuilder struct {
+	ctx   context.Context
+	store agent.Store
+}
+
+func newAgentContextReplayBuilder(ctx context.Context, store agent.Store) agentContextReplayBuilder {
+	return agentContextReplayBuilder{ctx: ctx, store: store}
+}
+
+func (b agentContextReplayBuilder) Build(run agent.Run) []agent.Message {
+	prior := b.priorRuns(run)
+	if len(prior) == 0 {
 		return nil
 	}
-	session, err := store.GetSession(ctx, run.SessionID)
+	if transcript := conversationFromCompletionEvents(b.ctx, b.store, prior); len(transcript) > 0 {
+		return transcript
+	}
+	latest := prior[len(prior)-1]
+	if transcript := visibleConversationFromRunCreatedTranscript(b.ctx, b.store, latest.ID); len(transcript) > 0 {
+		return appendFinalAnswerIfMissing(b.ctx, b.store, latest.ID, transcript)
+	}
+	messages := make([]agent.Message, 0, len(prior)*2)
+	for _, candidate := range prior {
+		messages = append(messages, agent.Message{Role: agent.RoleUser, Content: candidate.Input, RunID: candidate.ID, CreatedAt: candidate.CreatedAt})
+		if answer := finalAnswerForRunContext(b.ctx, b.store, candidate.ID); answer != "" {
+			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: candidate.ID})
+		}
+	}
+	return messages
+}
+
+func (b agentContextReplayBuilder) priorRuns(run agent.Run) []agent.Run {
+	if b.store == nil || run.SessionID == "" {
+		return nil
+	}
+	session, err := b.store.GetSession(b.ctx, run.SessionID)
 	if err != nil {
 		return nil
 	}
 	contextRoot := run
 	if retryOfRunID := retryOfRunIDFromMetadata(run.Metadata); retryOfRunID != "" {
-		if retried, err := store.GetRun(ctx, retryOfRunID); err == nil {
+		if retried, err := b.store.GetRun(b.ctx, retryOfRunID); err == nil {
 			contextRoot = retried
 		}
 	}
 	prior := make([]agent.Run, 0, len(session.Runs))
 	for _, candidate := range session.Runs {
-		if candidate.ID == run.ID || candidate.ID == contextRoot.ID || !candidate.CreatedAt.Before(contextRoot.CreatedAt) || !agentRunStatusTerminal(candidate.Status) {
+		if candidate.ID == run.ID || candidate.ID == contextRoot.ID || agentRunParentID(candidate.Metadata) != "" || !candidate.CreatedAt.Before(contextRoot.CreatedAt) || !agentRunStatusTerminal(candidate.Status) {
 			continue
 		}
 		prior = append(prior, candidate)
 	}
-	if len(prior) == 0 {
-		return nil
+	return prior
+}
+
+func agentRunParentID(metadata json.RawMessage) string {
+	if len(metadata) == 0 || !json.Valid(metadata) {
+		return ""
 	}
-	if transcript := conversationFromCompletionEvents(ctx, store, prior); len(transcript) > 0 {
-		return transcript
+	var record map[string]any
+	if json.Unmarshal(metadata, &record) != nil {
+		return ""
 	}
-	latest := prior[len(prior)-1]
-	if transcript := visibleConversationFromRunCreatedTranscript(ctx, store, latest.ID); len(transcript) > 0 {
-		return appendFinalAnswerIfMissing(ctx, store, latest.ID, transcript)
-	}
-	messages := make([]agent.Message, 0, len(prior)*2)
-	for _, candidate := range prior {
-		messages = append(messages, agent.Message{Role: agent.RoleUser, Content: candidate.Input, RunID: candidate.ID, CreatedAt: candidate.CreatedAt})
-		if answer := finalAnswerForRunContext(ctx, store, candidate.ID); answer != "" {
-			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: candidate.ID})
-		}
-	}
-	return messages
+	value, _ := record["parentRunId"].(string)
+	return value
 }
 
 func retryOfRunIDFromMetadata(metadata json.RawMessage) string {
@@ -72,22 +102,11 @@ func retryOfRunIDFromMetadata(metadata json.RawMessage) string {
 	return value
 }
 
-func (s *Server) recordCompletionInput(ctx context.Context, run agent.Run, messages []agent.Message) error {
+func (s *Server) recordCompletionInput(ctx context.Context, run agent.Run) error {
 	userMessage := agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt}
-	if _, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
 		Type: agent.EventCompletionMessage,
 		Data: mustJSON(completionMessageEventValue(userMessage)),
-	}); err != nil {
-		return err
-	}
-	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
-		Type: agent.EventCompletionRequest,
-		Data: mustJSON(map[string]any{
-			"format":   "kube-insight.agent.completion.v1",
-			"provider": run.Provider,
-			"model":    run.Model,
-			"messages": completionMessagesValue(messages),
-		}),
 	})
 	return err
 }
@@ -109,10 +128,10 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 					continue
 				}
 				sawCompletionEvents = true
-				if message.Role != agent.RoleUser && message.Role != agent.RoleAssistant {
+				if message.Role != agent.RoleUser && message.Role != agent.RoleAssistant && message.Role != agent.RoleTool {
 					continue
 				}
-				if message.Role == agent.RoleAssistant && strings.TrimSpace(message.Content) == "" {
+				if message.Role == agent.RoleAssistant && strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0 {
 					continue
 				}
 				if message.RunID == "" {
@@ -124,6 +143,14 @@ func conversationFromCompletionEvents(ctx context.Context, store agent.Store, ru
 				}
 			case agent.EventCompletionToolResult:
 				sawCompletionEvents = true
+				message, ok := completionToolResultFromEventData(event.Data)
+				if !ok {
+					continue
+				}
+				if message.RunID == "" {
+					message.RunID = run.ID
+				}
+				messages = append(messages, message)
 			}
 		}
 		if sawCompletionEvents && !runHadAssistant {
@@ -173,14 +200,6 @@ func appendFinalAnswerIfMissing(ctx context.Context, store agent.Store, runID st
 	return append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: runID})
 }
 
-func completionMessagesValue(messages []agent.Message) []map[string]any {
-	values := make([]map[string]any, 0, len(messages))
-	for _, message := range messages {
-		values = append(values, completionRequestMessageValue(message))
-	}
-	return values
-}
-
 func completionMessageEventValue(message agent.Message) map[string]any {
 	value := completionRequestMessageValue(message)
 	value["format"] = "kube-insight.agent.message.v1"
@@ -191,6 +210,31 @@ func completionRequestMessageValue(message agent.Message) map[string]any {
 	value := map[string]any{
 		"role":    message.Role,
 		"content": message.Content,
+	}
+	if len(message.ToolCalls) > 0 {
+		toolCalls := make([]map[string]any, 0, len(message.ToolCalls))
+		for _, call := range message.ToolCalls {
+			callType := call.Type
+			if callType == "" {
+				callType = "function"
+			}
+			toolCalls = append(toolCalls, map[string]any{
+				"id":   call.ID,
+				"type": callType,
+				"function": map[string]any{
+					"name":      call.Function.Name,
+					"arguments": call.Function.Arguments,
+				},
+			})
+		}
+		value["tool_calls"] = toolCalls
+	}
+	if message.ToolCallID != "" {
+		value["tool_call_id"] = message.ToolCallID
+		value["toolCallId"] = message.ToolCallID
+	}
+	if message.ToolName != "" {
+		value["name"] = message.ToolName
 	}
 	if message.ID != "" {
 		value["id"] = message.ID
@@ -224,6 +268,9 @@ func completionMessageFromEventData(raw json.RawMessage) (agent.Message, bool) {
 		return agent.Message{}, false
 	}
 	message := agent.Message{Role: agent.MessageRole(role), Content: content}
+	message.ToolCalls = toolCallsFromEventObject(object)
+	message.ToolCallID = firstNonEmptyStringFromMap(object, "tool_call_id", "toolCallId")
+	message.ToolName = firstNonEmptyStringFromMap(object, "name", "toolName")
 	message.ID, _ = object["id"].(string)
 	message.RunID, _ = object["runId"].(string)
 	if createdAt, _ := object["createdAt"].(string); createdAt != "" {
@@ -237,6 +284,67 @@ func completionMessageFromEventData(raw json.RawMessage) (agent.Message, bool) {
 		}
 	}
 	return message, true
+}
+
+func completionToolResultFromEventData(raw json.RawMessage) (agent.Message, bool) {
+	message, ok := completionMessageFromEventData(raw)
+	if !ok {
+		return agent.Message{}, false
+	}
+	if message.Role != agent.RoleTool {
+		return agent.Message{}, false
+	}
+	if strings.TrimSpace(message.Content) == "" {
+		var object map[string]any
+		if json.Unmarshal(raw, &object) == nil {
+			message.Content, _ = object["outputSummary"].(string)
+		}
+	}
+	if message.ToolCallID == "" {
+		return agent.Message{}, false
+	}
+	return message, true
+}
+
+func toolCallsFromEventObject(object map[string]any) []agent.ToolCall {
+	items, _ := object["tool_calls"].([]any)
+	if len(items) == 0 {
+		return nil
+	}
+	calls := make([]agent.ToolCall, 0, len(items))
+	for _, item := range items {
+		callObject, _ := item.(map[string]any)
+		if callObject == nil {
+			continue
+		}
+		functionObject, _ := callObject["function"].(map[string]any)
+		id, _ := callObject["id"].(string)
+		callType, _ := callObject["type"].(string)
+		name, _ := functionObject["name"].(string)
+		arguments, _ := functionObject["arguments"].(string)
+		if id == "" && name == "" {
+			continue
+		}
+		calls = append(calls, agent.ToolCall{
+			ID:   id,
+			Type: callType,
+			Function: agent.FunctionCall{
+				Name:      name,
+				Arguments: arguments,
+			},
+		})
+	}
+	return calls
+}
+
+func firstNonEmptyStringFromMap(object map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, _ := object[key].(string)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func agentTranscriptMessagesFromRunCreatedData(raw json.RawMessage) []agent.Message {

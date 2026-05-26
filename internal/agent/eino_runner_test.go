@@ -125,7 +125,7 @@ func TestEinoRunnerRecordsRunEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := runner.Run(ctx, EinoRunInput{Messages: []Message{{Role: RoleUser, Content: run.Input}}, Store: store, RunID: run.ID})
+	result, err := runner.Run(ctx, EinoRunInput{Messages: []Message{{Role: RoleUser, Content: run.Input}}, Store: store, RunID: run.ID, Provider: "openai-compatible", Model: "test-model"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestEinoRunnerRecordsRunEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []RunEventType{EventRunStarted, EventMessageCreated, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
+	wantTypes := []RunEventType{EventRunStarted, EventCompletionRequest, EventMessageCreated, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
 	if len(events) != len(wantTypes) {
 		t.Fatalf("events = %#v", events)
 	}
@@ -145,12 +145,83 @@ func TestEinoRunnerRecordsRunEvents(t *testing.T) {
 			t.Fatalf("event %d type = %s, want %s", i, events[i].Type, want)
 		}
 	}
+	var request map[string]any
+	if err := json.Unmarshal(events[1].Data, &request); err != nil {
+		t.Fatal(err)
+	}
+	requestMessages, _ := request["messages"].([]any)
+	if request["provider"] != "openai-compatible" || request["model"] != "test-model" || len(requestMessages) != 2 {
+		t.Fatalf("completion request = %#v", request)
+	}
 	completed, err := store.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if completed.Status != RunCompleted || completed.StartedAt == nil || completed.CompletedAt == nil {
 		t.Fatalf("completed run = %#v", completed)
+	}
+}
+
+func TestEinoRunnerCompletionRequestKeepsStablePrefixBeforeVolatileContext(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "最近1小时内呢", Provider: "openai-compatible", Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewEinoRunner(ctx, EinoRunnerConfig{
+		Instruction: "Stable instruction.",
+		Model:       &fakeEinoModel{answer: "checked recent OOM"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputMessages := []Message{
+		{Role: RoleUser, Content: "最近有没有 OOM 现象？"},
+		{Role: RoleAssistant, Content: "发现 1 个 OOMKilled Pod。"},
+		{Role: RoleSystem, Content: "Client context for this run:\n- Client local time: 2026-05-26 18:00\n- Client time zone: Asia/Shanghai"},
+		{Role: RoleUser, Content: run.Input},
+	}
+	if _, err := runner.Run(ctx, EinoRunInput{Messages: inputMessages, Store: store, RunID: run.ID, Provider: run.Provider, Model: run.Model}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) < 2 || events[1].Type != EventCompletionRequest {
+		t.Fatalf("events = %#v", events)
+	}
+	var request struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(events[1].Data, &request); err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Messages) != 5 {
+		t.Fatalf("request messages = %#v", request.Messages)
+	}
+	want := []struct {
+		role    string
+		content string
+	}{
+		{role: "system", content: "Stable instruction."},
+		{role: "user", content: "最近有没有 OOM 现象？"},
+		{role: "assistant", content: "发现 1 个 OOMKilled Pod。"},
+		{role: "system", content: "Client context for this run:"},
+		{role: "user", content: "最近1小时内呢"},
+	}
+	for i, item := range want {
+		if request.Messages[i].Role != item.role || !strings.Contains(request.Messages[i].Content, item.content) {
+			t.Fatalf("message %d = %#v, want role=%s content containing %q", i, request.Messages[i], item.role, item.content)
+		}
 	}
 }
 
@@ -465,7 +536,7 @@ func TestEinoRunnerConfiguresHandlersCheckpointAndStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []RunEventType{EventRunStarted, EventMessageDelta, EventMessageDelta, EventMessageDone, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
+	wantTypes := []RunEventType{EventRunStarted, EventCompletionRequest, EventMessageDelta, EventMessageDelta, EventMessageDone, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
 	if len(events) != len(wantTypes) {
 		t.Fatalf("events = %#v", events)
 	}
@@ -475,7 +546,7 @@ func TestEinoRunnerConfiguresHandlersCheckpointAndStreaming(t *testing.T) {
 		}
 	}
 	var completed MessageEventData
-	if err := json.Unmarshal(events[3].Data, &completed); err != nil {
+	if err := json.Unmarshal(events[4].Data, &completed); err != nil {
 		t.Fatal(err)
 	}
 	if completed.Content != "hello world" || completed.Role != RoleAssistant {
@@ -505,7 +576,7 @@ func TestEinoRunnerRecordsFailureEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []RunEventType{EventRunStarted, EventError, EventRunFailed}
+	wantTypes := []RunEventType{EventRunStarted, EventCompletionRequest, EventError, EventRunFailed}
 	if len(events) != len(wantTypes) {
 		t.Fatalf("events = %#v", events)
 	}

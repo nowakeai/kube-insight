@@ -372,6 +372,7 @@ export function AgentChat() {
                         onRetryRun={handleRetryRun}
                         onSelectArtifact={handleSelectArtifact}
                         runs={visibleRuns}
+                        runsById={runsById}
                         eventsById={eventsById}
                         status={activeRun?.status ?? (effectiveIsRunning ? "running" : "completed")}
                       />

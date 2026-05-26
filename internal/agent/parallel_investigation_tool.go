@@ -9,10 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -53,6 +51,7 @@ type parallelInvestigationBranchResult struct {
 	Objective  string `json:"objective"`
 	Status     string `json:"status"`
 	DurationMS int64  `json:"durationMs"`
+	ChildRunID string `json:"childRunId,omitempty"`
 	Answer     string `json:"answer,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -107,6 +106,8 @@ func (t ParallelInvestigationTool) InvokableRun(ctx context.Context, argumentsIn
 	if len(branches) > maxParallelInvestigationBranches {
 		return "", fmt.Errorf("%s supports at most %d branches", parallelInvestigationToolName, maxParallelInvestigationBranches)
 	}
+	parentRun, hasParentRun := RunExecutionContextFromContext(ctx)
+	parentToolCall, _ := ToolCallExecutionContextFromContext(ctx)
 	timeout := boundedParallelInvestigationTimeout(args.TimeoutMillis)
 	results := make([]parallelInvestigationBranchResult, len(branches))
 	var wg sync.WaitGroup
@@ -117,7 +118,7 @@ func (t ParallelInvestigationTool) InvokableRun(ctx context.Context, argumentsIn
 			defer wg.Done()
 			branchCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			results[i] = t.runBranch(branchCtx, args.Question, args.Context, branch)
+			results[i] = t.runBranch(branchCtx, args.Question, args.Context, branch, parentRun, parentToolCall, hasParentRun)
 		}()
 	}
 	wg.Wait()
@@ -149,68 +150,109 @@ func normalizeParallelInvestigationBranches(branches []parallelInvestigationBran
 	return out
 }
 
-func (t ParallelInvestigationTool) runBranch(ctx context.Context, question string, sharedContext string, branch parallelInvestigationBranch) parallelInvestigationBranchResult {
+func (t ParallelInvestigationTool) runBranch(ctx context.Context, question string, sharedContext string, branch parallelInvestigationBranch, parentRun RunExecutionContext, parentToolCall ToolCallExecutionContext, hasParentRun bool) parallelInvestigationBranchResult {
 	start := time.Now()
 	result := parallelInvestigationBranchResult{Name: branch.Name, Objective: branch.Objective, Status: "completed"}
-	agentConfig := &adk.ChatModelAgentConfig{
-		Name:          "kube_insight_" + branch.Name,
-		Description:   "Specialist kube-insight investigation subagent for " + branch.Name,
-		Instruction:   parallelInvestigationBranchInstruction(branch),
-		Model:         t.model,
-		MaxIterations: 6,
-	}
-	if len(t.tools) > 0 {
-		agentConfig.ToolsConfig = adk.ToolsConfig{ToolsNodeConfig: compose.ToolsNodeConfig{Tools: t.tools}}
-	}
-	agent, err := adk.NewChatModelAgent(ctx, agentConfig)
-	if err != nil {
-		result.Status = "failed"
-		result.Error = err.Error()
-		result.DurationMS = toolAuditDurationMS(start)
-		return result
-	}
-	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: agent})
-	iter := runner.Run(ctx, []adk.Message{schema.UserMessage(parallelInvestigationBranchPrompt(question, sharedContext, branch))})
-	answer := ""
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if event == nil {
-			continue
-		}
-		if event.Err != nil {
-			result.Status = "failed"
-			result.Error = event.Err.Error()
-			result.DurationMS = toolAuditDurationMS(start)
-			return result
-		}
-		if event.Output == nil || event.Output.MessageOutput == nil {
-			continue
-		}
-		msg, err := event.Output.MessageOutput.GetMessage()
+	input := parallelInvestigationBranchPrompt(question, sharedContext, branch)
+	childRunID := ""
+	childStore := parentRun.Store
+	if hasParentRun {
+		run, err := t.createChildRun(ctx, parentRun, parentToolCall, branch, input)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = err.Error()
 			result.DurationMS = toolAuditDurationMS(start)
 			return result
 		}
-		if msg != nil && msg.Role == schema.Assistant && strings.TrimSpace(msg.Content) != "" {
-			answer = msg.Content
+		childRunID = run.ID
+		result.ChildRunID = childRunID
+	}
+	runner, err := NewEinoRunner(ctx, EinoRunnerConfig{
+		Name:          "kube_insight_" + branch.Name,
+		Description:   "Specialist kube-insight investigation subagent for " + branch.Name,
+		Instruction:   parallelInvestigationBranchInstruction(branch),
+		Model:         t.model,
+		Tools:         t.tools,
+		MaxIterations: 6,
+	})
+	if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+		result.DurationMS = toolAuditDurationMS(start)
+		return result
+	}
+	if hasParentRun {
+		if err := appendChildRunCreatedEvent(ctx, childStore, childRunID, parentRun.RunID); err != nil {
+			result.Status = "failed"
+			result.Error = err.Error()
+			result.DurationMS = toolAuditDurationMS(start)
+			return result
 		}
 	}
+	runResult, err := runner.Run(ctx, EinoRunInput{
+		Messages: []Message{{Role: RoleUser, Content: input}},
+		Store:    childStore,
+		RunID:    childRunID,
+		Provider: parentRun.Provider,
+		Model:    parentRun.Model,
+	})
 	if err := ctx.Err(); err != nil {
 		result.Status = "failed"
 		result.Error = err.Error()
-	} else if answer == "" {
+	} else if err != nil {
+		result.Status = "failed"
+		result.Error = err.Error()
+	} else if runResult.FinalAnswer == "" {
 		result.Status = "failed"
 		result.Error = "subagent returned no answer"
 	} else {
-		result.Answer = compactText(answer, maxParallelInvestigationAnswerRunes)
+		result.Answer = compactText(runResult.FinalAnswer, maxParallelInvestigationAnswerRunes)
 	}
 	result.DurationMS = toolAuditDurationMS(start)
 	return result
+}
+
+func (t ParallelInvestigationTool) createChildRun(ctx context.Context, parent RunExecutionContext, parentToolCall ToolCallExecutionContext, branch parallelInvestigationBranch, input string) (Run, error) {
+	parentRun, err := parent.Store.GetRun(ctx, parent.RunID)
+	if err != nil {
+		return Run{}, err
+	}
+	metadata := jsonRaw(map[string]any{
+		"parentRunId":       parent.RunID,
+		"parentToolCallId":  parentToolCall.CallID,
+		"parentToolName":    parentToolCall.Name,
+		"subagentName":      parallelInvestigationToolName,
+		"branchName":        branch.Name,
+		"branchObjective":   branch.Objective,
+		"contextPolicy":     "child-full-parent-compact",
+		"modelContextScope": "subagent",
+	})
+	return parent.Store.CreateRun(ctx, parentRun.SessionID, CreateRunInput{
+		Input:    input,
+		Provider: parent.Provider,
+		Model:    parent.Model,
+		Metadata: metadata,
+	})
+}
+
+func appendChildRunCreatedEvent(ctx context.Context, store Store, runID string, parentRunID string) error {
+	if store == nil || runID == "" {
+		return nil
+	}
+	run, err := store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	_, err = store.AppendRunEvent(ctx, runID, AppendEventInput{
+		Type: EventRunCreated,
+		Data: jsonRaw(map[string]any{
+			"runId":       run.ID,
+			"sessionId":   run.SessionID,
+			"status":      run.Status,
+			"parentRunId": parentRunID,
+		}),
+	})
+	return err
 }
 
 func parallelInvestigationBranchInstruction(branch parallelInvestigationBranch) string {

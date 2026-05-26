@@ -125,7 +125,7 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 	}
 
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
-	for _, want := range []string{"event: run.created", "event: completion.message", "event: completion.request", "event: run.started", "event: answer.final", "event: run.completed", `"content":"checked cluster health"`, `"messages"`, `"is the api healthy?"`} {
+	for _, want := range []string{"event: run.created", "event: completion.message", "event: run.started", "event: answer.final", "event: run.completed", `"content":"checked cluster health"`, "is the api healthy?"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
@@ -168,7 +168,7 @@ func TestCreateAgentRunReplaysPriorConversationMessages(t *testing.T) {
 		t.Fatal("first runner input missing")
 	}
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+first.ID+"/events?follow=true", http.StatusOK)
-	for _, want := range []string{"event: completion.message", "event: completion.request", `"messages"`, "最近有没有 OOM 现象？"} {
+	for _, want := range []string{"event: completion.message", "最近有没有 OOM 现象？"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("first run events missing %q: %s", want, body)
 		}

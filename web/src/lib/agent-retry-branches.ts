@@ -5,14 +5,15 @@ export type RetryBranchRun = {
 }
 
 export function displayRunIdsForRetryBranches<T extends RetryBranchRun>(runIds: string[], runsById: Record<string, T | undefined>) {
-  const visible: string[] = []
-  for (const runId of chronologicalRunIds(runIds, runsById)) {
-    const run = runsById[runId]
-    if (!run) continue
-    const retryOf = retryOfRunId(run)
-    if (!retryOf) {
-      visible.push(run.id)
-      continue
+	const visible: string[] = []
+	for (const runId of chronologicalRunIds(runIds, runsById)) {
+		const run = runsById[runId]
+		if (!run) continue
+		if (parentRunId(run)) continue
+		const retryOf = retryOfRunId(run)
+		if (!retryOf) {
+			visible.push(run.id)
+			continue
     }
 
     const rootId = retryRootRunId(run, runsById)
@@ -63,15 +64,22 @@ export function retryRootRunId<T extends RetryBranchRun>(run: T, runsById: Recor
 }
 
 export function retryOfRunId(run: RetryBranchRun) {
-  const metadata = run.metadata
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
-  const retryOf = (metadata as Record<string, unknown>).retryOfRunId
-  return typeof retryOf === "string" && retryOf ? retryOf : undefined
+	const metadata = run.metadata
+	if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
+	const retryOf = (metadata as Record<string, unknown>).retryOfRunId
+	return typeof retryOf === "string" && retryOf ? retryOf : undefined
+}
+
+export function parentRunId(run: RetryBranchRun) {
+	const metadata = run.metadata
+	if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
+	const parent = (metadata as Record<string, unknown>).parentRunId
+	return typeof parent === "string" && parent ? parent : undefined
 }
 
 function retryRootMetadataRunId(run: RetryBranchRun) {
-  const metadata = run.metadata
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
+	const metadata = run.metadata
+	if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined
   const retryRoot = (metadata as Record<string, unknown>).retryRootRunId
   return typeof retryRoot === "string" && retryRoot ? retryRoot : undefined
 }

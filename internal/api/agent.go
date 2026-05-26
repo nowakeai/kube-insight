@@ -340,7 +340,7 @@ func (s *Server) startAgentRun(run agent.Run, messages []agent.Message) {
 	go func() {
 		defer s.agentRunWG.Done()
 		defer s.unregisterAgentRunCancel(run.ID)
-		if err := s.recordCompletionInput(runCtx, run, messages); err != nil {
+		if err := s.recordCompletionInput(runCtx, run); err != nil {
 			s.recordAgentRunFailure(context.Background(), run.ID, err)
 			return
 		}
@@ -348,6 +348,8 @@ func (s *Server) startAgentRun(run agent.Run, messages []agent.Message) {
 			Messages: messages,
 			Store:    s.agentStore,
 			RunID:    run.ID,
+			Provider: run.Provider,
+			Model:    run.Model,
 		})
 		if err != nil {
 			s.recordAgentRunFailure(context.Background(), run.ID, err)

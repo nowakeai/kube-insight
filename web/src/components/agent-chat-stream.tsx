@@ -29,6 +29,7 @@ import {
   type EvidenceSegment,
   type ResponseSegment,
   type RunActivitySummary,
+  type ToolChildRunSummary,
   type ToolGroupSegment,
   type ToolSegment,
 } from "@/components/agent-chat-stream-model"
@@ -65,6 +66,7 @@ type SessionConversationProps = {
   onRetryRun: (run: AgentRun) => void
   onSelectArtifact: (artifactId?: string) => void
   runs: AgentRun[]
+  runsById: Record<string, AgentRun>
   status: string
 }
 
@@ -76,6 +78,7 @@ export function SessionConversation({
   onRetryRun,
   onSelectArtifact,
   runs,
+  runsById,
 }: SessionConversationProps) {
   return (
     <div className="space-y-5 pb-2">
@@ -89,6 +92,7 @@ export function SessionConversation({
           onRetryRun={onRetryRun}
           onSelectArtifact={onSelectArtifact}
           run={run}
+          runsById={runsById}
           status={run.status}
         />
       ))}
@@ -104,6 +108,7 @@ type RunConversationProps = {
   onRetryRun: (run: AgentRun) => void
   onSelectArtifact: (artifactId?: string) => void
   run: AgentRun
+  runsById: Record<string, AgentRun>
   status: string
 }
 
@@ -115,10 +120,11 @@ function RunConversation({
   onRetryRun,
   onSelectArtifact,
   run,
+  runsById,
   status,
 }: RunConversationProps) {
   const nowMs = useRunClock(isRunning)
-  const segments = conversationSegments(run, events, status, nowMs)
+  const segments = conversationSegments(run, events, status, nowMs, childRunsByToolCallId(run.id, runsById))
   const activity = runActivitySummary(run, events, segments, status)
   const response = splitRunResponse(segments, isRunning, status)
   const citations = runCitations(events)
@@ -319,6 +325,41 @@ function useRunClock(active: boolean) {
   return nowMs
 }
 
+function childRunsByToolCallId(parentRunId: string, runsById: Record<string, AgentRun>) {
+  const grouped: Record<string, ToolChildRunSummary[]> = {}
+  for (const run of Object.values(runsById)) {
+    const metadata = runMetadata(run)
+    if (metadata.parentRunId !== parentRunId || !metadata.parentToolCallId) continue
+    const summary: ToolChildRunSummary = {
+      id: run.id,
+      status: run.status,
+      subagentName: metadata.subagentName,
+      branchName: metadata.branchName,
+      input: run.input,
+      eventCount: run.eventIds.length,
+      artifactCount: run.artifactIds.length,
+      finalAnswer: run.finalAnswer,
+    }
+    grouped[metadata.parentToolCallId] = [...(grouped[metadata.parentToolCallId] ?? []), summary]
+  }
+  for (const toolCallID of Object.keys(grouped)) {
+    grouped[toolCallID].sort((a, b) => a.id.localeCompare(b.id))
+  }
+  return grouped
+}
+
+function runMetadata(run: AgentRun) {
+  const metadata = run.metadata
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {}
+  const record = metadata as Record<string, unknown>
+  return {
+    branchName: typeof record.branchName === "string" ? record.branchName : undefined,
+    parentRunId: typeof record.parentRunId === "string" ? record.parentRunId : undefined,
+    parentToolCallId: typeof record.parentToolCallId === "string" ? record.parentToolCallId : undefined,
+    subagentName: typeof record.subagentName === "string" ? record.subagentName : undefined,
+  }
+}
+
 
 function UserStreamMessage({ text }: { text: string }) {
   return (
@@ -410,6 +451,7 @@ function ToolStreamMessage({
         </button>
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="min-w-0 truncate">{toolSegmentSummary(segment)}</span>
+          <ChildRunBadges segment={segment} />
         </div>
         {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{detail}</pre> : null}
       </div>
@@ -488,9 +530,39 @@ function ToolGroupRow({ segment }: { segment: ToolSegment }) {
         <ChevronDown className={expanded ? "size-3.5 rotate-180 text-muted-foreground transition" : "size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       <div className="mt-1 truncate text-xs text-muted-foreground">{toolSegmentSummary(segment)}</div>
+      <ChildRunBadges segment={segment} compact />
       {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{toolSegmentDetail(segment)}</pre> : null}
     </div>
   )
+}
+
+function ChildRunBadges({ compact, segment }: { compact?: boolean; segment: ToolSegment }) {
+  const childRunIds = segment.childRunIds ?? []
+  if (childRunIds.length === 0) return null
+  const childRunsById = new Map((segment.childRuns ?? []).map((run) => [run.id, run]))
+  const visibleIds = childRunIds.slice(0, compact ? 2 : 3)
+  return (
+    <span className={compact ? "mt-2 flex min-w-0 flex-wrap gap-1" : "flex min-w-0 flex-wrap gap-1"}>
+      {visibleIds.map((runID) => {
+        const childRun = childRunsById.get(runID)
+        const label = childRunLabel(runID, childRun)
+        return (
+          <span key={runID} className="max-w-36 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground" title={`Child run ${runID}`}>
+            {label}
+          </span>
+        )
+      })}
+      {childRunIds.length > visibleIds.length ? (
+        <span className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">+{childRunIds.length - visibleIds.length}</span>
+      ) : null}
+    </span>
+  )
+}
+
+function childRunLabel(runID: string, run?: ToolChildRunSummary) {
+  const name = run?.branchName || run?.subagentName || "child"
+  const status = run?.status ? ` ${runStatusLabel(run.status)}` : ""
+  return `${name}${status} ${shortID(runID)}`
 }
 
 function ErrorStreamMessage({ text }: { text: string }) {

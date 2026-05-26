@@ -54,6 +54,76 @@ func TestParallelInvestigationToolInfoEncouragesBroadTriage(t *testing.T) {
 	}
 }
 
+func TestParallelInvestigationToolCreatesChildRunsWhenParentContextExists(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "triage broad issue", Provider: "openai-compatible", Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = withRunExecutionContext(ctx, RunExecutionContext{Store: store, RunID: parent.ID, Provider: parent.Provider, Model: parent.Model})
+	ctx = context.WithValue(ctx, toolCallExecutionContextKey{}, ToolCallExecutionContext{Name: parallelInvestigationToolName, CallID: "call_parallel"})
+	tool := NewParallelInvestigationTool(&parallelTestModel{}, nil).(ParallelInvestigationTool)
+
+	out, err := tool.InvokableRun(ctx, `{
+		"question":"最近有没有 OOM，同时最近一小时有什么变化？",
+		"branches":[
+			{"name":"oom_restarts","objective":"Check OOMKilled and restart evidence."},
+			{"name":"recent_changes","objective":"Check recent changes in the last hour."}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result parallelInvestigationResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v: %s", err, out)
+	}
+	if len(result.Branches) != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	for _, branch := range result.Branches {
+		if branch.ChildRunID == "" {
+			t.Fatalf("branch missing child run id: %#v", branch)
+		}
+		child, err := store.GetRun(ctx, branch.ChildRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var metadata map[string]any
+		if err := json.Unmarshal(child.Metadata, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		if metadata["parentRunId"] != parent.ID || metadata["parentToolCallId"] != "call_parallel" || metadata["subagentName"] != parallelInvestigationToolName || metadata["branchName"] != branch.Name {
+			t.Fatalf("child metadata = %#v", metadata)
+		}
+		events, err := store.ListRunEvents(ctx, child.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !runEventsContainTypes(events, EventRunCreated, EventRunStarted, EventCompletionRequest, EventCompletionMessage, EventFinalAnswer, EventRunCompleted) {
+			t.Fatalf("child events = %#v", events)
+		}
+	}
+}
+
+func runEventsContainTypes(events []RunEvent, wants ...RunEventType) bool {
+	seen := map[RunEventType]bool{}
+	for _, event := range events {
+		seen[event.Type] = true
+	}
+	for _, want := range wants {
+		if !seen[want] {
+			return false
+		}
+	}
+	return true
+}
+
 type parallelTestModel struct {
 	delay     time.Duration
 	active    atomic.Int32

@@ -36,12 +36,26 @@ type Session struct {
 }
 
 type Message struct {
-	ID        string          `json:"id"`
-	Role      MessageRole     `json:"role"`
-	Content   string          `json:"content"`
-	RunID     string          `json:"runId,omitempty"`
-	CreatedAt time.Time       `json:"createdAt"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
+	ID         string          `json:"id"`
+	Role       MessageRole     `json:"role"`
+	Content    string          `json:"content"`
+	ToolCalls  []ToolCall      `json:"tool_calls,omitempty"`
+	ToolCallID string          `json:"tool_call_id,omitempty"`
+	ToolName   string          `json:"name,omitempty"`
+	RunID      string          `json:"runId,omitempty"`
+	CreatedAt  time.Time       `json:"createdAt"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type,omitempty"`
+	Function FunctionCall `json:"function"`
+}
+
+type FunctionCall struct {
+	Name      string `json:"name,omitempty"`
+	Arguments string `json:"arguments,omitempty"`
 }
 
 type Run struct {

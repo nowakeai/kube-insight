@@ -1,10 +1,15 @@
 import { expect, test } from "@playwright/test"
 
-import { displayRunIdsForRetryBranches, retryOfRunId } from "./agent-retry-branches"
+import { displayRunIdsForRetryBranches, parentRunId, retryOfRunId } from "./agent-retry-branches"
 
 test("retry metadata is detected from run metadata", () => {
-  expect(retryOfRunId({ id: "run_retry", metadata: { retryOfRunId: "run_original" } })).toBe("run_original")
-  expect(retryOfRunId({ id: "run_plain", metadata: {} })).toBeUndefined()
+	expect(retryOfRunId({ id: "run_retry", metadata: { retryOfRunId: "run_original" } })).toBe("run_original")
+	expect(retryOfRunId({ id: "run_plain", metadata: {} })).toBeUndefined()
+})
+
+test("child run metadata is detected from run metadata", () => {
+	expect(parentRunId({ id: "run_child", metadata: { parentRunId: "run_parent" } })).toBe("run_parent")
+	expect(parentRunId({ id: "run_plain", metadata: {} })).toBeUndefined()
 })
 
 test("retry replaces the retried response instead of appending", () => {
@@ -67,11 +72,21 @@ test("retry with a pruned parent does not append to stale visible turns", () => 
 })
 
 test("retry chains keep only the latest attempt", () => {
-  const runs = {
-    run_1: { id: "run_1" },
-    retry_1: { id: "retry_1", metadata: { retryOfRunId: "run_1" } },
+	const runs = {
+		run_1: { id: "run_1" },
+		retry_1: { id: "retry_1", metadata: { retryOfRunId: "run_1" } },
     retry_2: { id: "retry_2", metadata: { retryOfRunId: "retry_1" } },
   }
 
-  expect(displayRunIdsForRetryBranches(["run_1", "retry_1", "retry_2"], runs)).toEqual(["retry_2"])
+	expect(displayRunIdsForRetryBranches(["run_1", "retry_1", "retry_2"], runs)).toEqual(["retry_2"])
+})
+
+test("child runs are hidden from the top-level session branch", () => {
+	const runs = {
+		run_parent: { id: "run_parent" },
+		run_child: { id: "run_child", metadata: { parentRunId: "run_parent", parentToolCallId: "call_1" } },
+		run_followup: { id: "run_followup" },
+	}
+
+	expect(displayRunIdsForRetryBranches(["run_parent", "run_child", "run_followup"], runs)).toEqual(["run_parent", "run_followup"])
 })

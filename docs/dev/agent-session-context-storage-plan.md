@@ -1,11 +1,13 @@
 # Agent Session and Context Storage Plan
 
-This plan defines the target storage model for agent sessions, raw
-transcripts, context replay, and subagent transcript isolation.
+This plan defines the target storage model for agent sessions, stable
+model-context replay, and subagent context isolation.
 
-The goal is to keep session history faithful enough to replay and debug model
-behavior while avoiding cumulative context snapshots and repeated large tool
-outputs in the main conversation.
+The goal is to reproduce the model's useful context deterministically across
+runs, so follow-up questions do not drift and API providers can reuse prompt/KV
+cache-friendly prefixes where supported. The stored context must be faithful to
+what the model actually saw after local policy, tool-output reduction, and
+compaction are applied, without repeatedly injecting large raw tool payloads.
 
 ## Problem
 
@@ -36,20 +38,28 @@ Redundancy addressed by this plan:
   `artifact.created`, with `tool.completed` and `tool.audit` pointing at the
   artifact through `outputArtifactId`.
 
-The cumulative `run.created.transcript.messages` snapshot is not a clean raw
-transcript model. It must remain legacy-only compatibility input, not a
-permanent session-memory layer.
+The cumulative `run.created.transcript.messages` snapshot is not a clean context
+model. It must remain legacy-only compatibility input, not a permanent
+session-memory layer.
 
 ## Goals
 
-- Store a complete raw transcript as an append-only event log, close to the
-  provider's chat/completions message shape.
-- Reconstruct model input from ordered transcript events, not from cumulative
-  per-run snapshots or selective summaries.
+- Store a complete, deterministic model-context ledger as an append-only event
+  log, close enough to the provider's chat/completions message shape to replay
+  behavior and inspect drift.
+- Reconstruct model input from ordered model-visible context events, not from
+  cumulative per-run snapshots or selective summaries.
+- Keep stable prefix material stable across follow-up runs: base instruction,
+  skill/tool contracts, replayed prior messages, and compact model-visible tool
+  results should keep the same order and bytes unless the underlying content
+  intentionally changes.
+- Place volatile per-run material such as client clock/time-zone context near the
+  suffix of the request so provider prompt caches can still reuse the stable
+  prefix.
 - Keep large tool outputs out of the main agent prompt unless exact checkpoint
   resume requires them.
-- Support subagents as first-class runs with their own raw transcript, artifacts,
-  and evidence summaries.
+- Support subagents as first-class runs with their own model-context ledgers,
+  artifacts, and evidence summaries.
 - Preserve retry rewind semantics: a retry replaces the retried branch in the
   session projection and does not append a new unrelated conversation tail.
 - Keep storage backend semantics shared across SQLite and ClickHouse.
@@ -59,7 +69,8 @@ permanent session-memory layer.
 
 - Do not add a separate `session_memory`, `session_context`, or
   `conversation_messages` table for the main transcript.
-- Do not replace raw transcript with automatic summaries.
+- Do not replace active-branch model-visible context with hidden automatic
+  summaries.
 - Do not make subagents a permission boundary. Policy enforcement remains in
   API/MCP/tool layers.
 - Do not store provider SDK internals that cannot be meaningfully replayed or
@@ -67,7 +78,7 @@ permanent session-memory layer.
 
 ## Target Model
 
-`agent_run_events` is the canonical transcript and audit log.
+`agent_run_events` is the canonical model-context and audit log.
 
 `agent_runs` remains a control-plane index for UI and status queries. It may
 keep `input` as a convenience summary, but it must not be the source of truth for
@@ -83,7 +94,7 @@ remove ambiguity:
 | Event | Purpose | Stored data |
 | --- | --- | --- |
 | `run.created` | lifecycle | run id, session id, queued status, metadata pointers only |
-| `completion.request` | raw model request | provider, model, ordered messages, tool schemas or tool names, options |
+| `completion.request` | canonical model request | provider, model, ordered messages, tool schemas or tool names, options, stable prefix/version metadata |
 | `completion.message` | model-visible assistant/user/system/tool message | provider-shaped message content, tool calls, tool call ids |
 | `completion.tool_result` | model-visible tool result message | tool call id, name, compact content sent back to model, optional artifact id |
 | `tool.started` | UI/audit | tool call id, name, input |
@@ -91,16 +102,23 @@ remove ambiguity:
 | `artifact.created` | raw proof payload | bounded raw tool output, SQL rows, rendered evidence, large JSON |
 | `answer.final` | UI final answer | final rendered assistant answer with citations |
 
-`completion.request` should represent exactly what the runner sends to the
-model for that model call. For OpenAI-compatible chat completion requests, store
-the `messages` array and tool definitions in the same role/content/tool_call
-shape the provider receives, after local policy and compaction are applied.
+`completion.request` should represent exactly what the runner sends to the model
+for that model call after local policy, context replay, and tool-output
+reduction. For OpenAI-compatible chat completion requests, store the `messages`
+array and tool definitions in the same role/content/tool_call shape the provider
+receives, after local policy and compaction are applied.
+
+The request record is not required to preserve opaque provider SDK internals, but
+it must preserve all behavior-affecting inputs: ordered messages, tool
+definitions or stable tool schema hashes, tool-choice/options when used,
+temperature/top-p/stop/max-token settings, model id, and any provider-specific
+fields that can change model behavior.
 
 `completion.message` and `completion.tool_result` should represent what is
 needed to continue the next model call. UI-specific display events can still
 exist, but replay should prefer the completion transcript.
 
-### Raw Message Shape
+### Stable Message Shape
 
 Use a stable internal envelope, with provider-shaped payload inside:
 
@@ -140,19 +158,29 @@ Use a stable internal envelope, with provider-shaped payload inside:
 
 Provider-specific fields that affect behavior should be preserved under
 `providerRequest` when available. Fields used only for UI rendering should stay
-outside the raw transcript.
+outside the model-context ledger.
+
+To improve provider-side cache reuse, the canonical request builder should keep
+the longest possible stable prefix byte-identical between related runs. Do not
+put changing values such as "request started at" before the replayed conversation
+unless that value is required to interpret the whole prefix. Prefer a short
+per-run system message immediately before the current user message for volatile
+client context.
 
 ## Context Reconstruction
 
 Context assembly should be deterministic:
 
 1. Load session runs in branch order, respecting retry replacement metadata.
-2. For each visible run in the active branch, read ordered
+2. For each visible run in the active branch, read ordered model-visible
    `completion.message` and `completion.tool_result` events.
-3. Rebuild the next request messages from those events plus the new user input.
-4. Add client context as a system message for the new run only.
+3. Rebuild the next request messages from those events plus the new user input,
+   preserving prior byte/order stability where possible.
+4. Add volatile client context as late as possible, normally as a system message
+   for the new run immediately before the current user message.
 5. Apply explicit compaction only after faithful replay has produced the
-   candidate transcript.
+   candidate context, and record compaction as visible model-context events with
+   source references.
 6. Persist the final assembled model request as `completion.request` before
    calling the model.
 
@@ -161,6 +189,11 @@ runs only contain legacy events, use a compatibility adapter that reconstructs
 visible user/assistant turns from `agent_runs.input`, `message.completed`, and
 `answer.final`, then immediately records the next run's real
 `completion.request`.
+
+The replay path must not reconstruct context from UI-only events when
+model-context events are available. UI deltas, rendered final answers, and
+display summaries can differ from model-visible messages and should not become
+the authoritative replay source.
 
 ## Tool Output Policy
 
@@ -176,8 +209,8 @@ Target behavior:
 - Re-inject exact raw tool output only for checkpoint resume or if the model
   explicitly needs a small proof snippet.
 
-This keeps the transcript faithful to what the model saw while allowing the UI
-and debugger to inspect raw evidence through artifacts.
+This keeps the model context faithful to what the model saw while allowing the
+UI and debugger to inspect raw evidence through artifacts.
 
 ## Subagent Storage
 
@@ -199,8 +232,8 @@ The parent transcript should not inline every child tool result. It should store
 only the subagent's compact return value plus references to child run IDs and
 artifact IDs.
 
-This gives the main agent enough context to answer while preserving full raw
-subagent transcripts for audit, replay, and debugging.
+This gives the main agent enough context to answer while preserving complete
+subagent model-context ledgers for audit, replay, and debugging.
 
 ## Retry and Branch Projection
 
@@ -210,15 +243,15 @@ Rules:
 
 - A retry run records `retryOfRunId` and `retryRootRunId`.
 - The session projection hides the retried run and later runs in that branch.
-- Raw events are still retained according to retention policy unless the branch
-  is pruned after a successful replacement.
-- Context replay for a retry starts from the transcript before the retried run,
+- Model-context events are still retained according to retention policy unless
+  the branch is pruned after a successful replacement.
+- Context replay for a retry starts from the context before the retried run,
   then appends the replacement run input.
 - UI retry actions must never silently fall back to a plain appended message.
 
 ## Retention and Compaction
 
-Raw transcript is the source of truth. Compaction is a layer above it.
+The model-context ledger is the source of truth. Compaction is a layer above it.
 
 Allowed compaction:
 
@@ -232,7 +265,7 @@ Allowed compaction:
 
 Disallowed compaction:
 
-- silently replacing transcript history with summaries,
+- silently replacing active-branch context history with summaries,
 - dropping active-branch messages needed to replay the current conversation,
 - using hidden summaries as the only source for follow-up prompts.
 
@@ -246,45 +279,65 @@ Disallowed compaction:
   cumulative snapshots.
 - [x] Keep legacy parsing only for existing data created before the change.
 
-### Phase 2: Add Raw Completion Events
+### Phase 2: Add Model-Context Completion Events
 
 - [x] Add event constants for `completion.request`,
   `completion.message`, and `completion.tool_result`.
-- [x] Record the initial `completion.request` immediately before each run's
-  Eino runner call. Per-tool-loop provider request capture remains future work.
+- [x] Record each Eino model call's canonical `completion.request` through
+  `ChatModelAgentMiddleware.WrapModel` immediately before invoking the provider
+  model. API-layer user-message recording remains separate from model-call
+  request capture.
 - [x] Record assistant messages with tool calls in provider-shaped form.
 - [x] Record model-visible tool result messages separately from UI/audit tool
   events.
 - [x] Update replay to prefer completion events.
 
-### Phase 3: Make Context Replay Transcript-First
+### Phase 3: Make Context Replay Model-Context-First
 
-- Replace `agentConversationMessagesForRun` with a replay builder that reads
-  completion events from the active session branch.
-- Keep a legacy adapter for runs that lack completion events.
-- Add tests for:
-  - normal follow-up,
-  - intent correction follow-up,
-  - retry rewind,
-  - mixed streamed and non-streamed assistant output,
-  - tool-call continuation.
+- [x] Replace `agentConversationMessagesForRun` with a replay builder that reads
+  model-context completion events from the active session branch.
+- [x] Add a model-call recorder through Eino `ChatModelAgentMiddleware.WrapModel` so
+  every provider-facing model call records its exact ordered messages, tools, and
+  behavior-affecting options before invocation.
+- [x] Restore assistant tool calls and tool-result messages during replay instead of
+  replaying only visible user/assistant text.
+- [x] Keep volatile client context late in the request to preserve stable cacheable
+  prefixes.
+- [x] Keep a legacy adapter for runs that lack completion events.
+- [ ] Add tests for:
+  - [x] normal follow-up,
+  - [x] intent correction follow-up,
+  - [x] cache-friendly stable prefix ordering,
+  - [x] retry rewind,
+  - [x] mixed streamed and non-streamed assistant output,
+  - [x] tool-call continuation.
 
 ### Phase 4: Subagent Child Runs
 
-- Give subagent tools a store-aware runner path that creates child runs.
-- Record child run metadata: parent run, parent tool call, subagent name, branch.
-- Persist full child raw transcript and artifacts.
-- Return compact child summaries to the parent transcript with child run links.
-- Add parallel subagent tests that prove child transcripts are complete while
-  parent context stays compact.
+- [x] Give `parallel_investigation` a store-aware runner path that creates child
+  runs when parent run context is available.
+- [x] Propagate parent run and parent tool-call context through Eino tool
+  middleware.
+- [x] Record child run metadata: parent run, parent tool call, subagent name,
+  branch, and context policy.
+- [x] Persist complete child model-context events for `parallel_investigation`
+  branches.
+- [x] Return compact child summaries to the parent transcript with child run IDs.
+- [x] Skip child runs during normal parent session context replay.
+- [x] Give `evidence_condenser` the same store-aware child-run path.
+- [x] Extend retention to understand parent/child run references and artifact
+  references.
+- [x] Add UI projection for child runs under parent tool-call details.
 
 ### Phase 5: Retention and UI Projection
 
-- Update retention to understand parent/child run references and artifact
+- [x] Update retention to understand parent/child run references and artifact
   references.
-- Ensure active branch raw transcript is retained.
-- Show child runs and artifacts from parent tool-call details in the UI.
-- Keep SSE event compatibility for existing frontend panels.
+- [x] Ensure active branch model context is retained by pruning retry descendants
+  only after a successful replacement and by protecting child artifacts while a
+  parent run is still in progress.
+- [x] Show child runs and artifacts from parent tool-call details in the UI.
+- [x] Keep SSE event compatibility for existing frontend panels.
 
 ## Validation
 
@@ -296,8 +349,8 @@ Required tests:
   snapshot is emitted.
 - API test that follow-up context is reconstructed from completion events.
 - Retry projection tests for branch rewind and replacement.
-- Subagent test proving parent transcript stores compact child result while child
-  run stores complete raw completion events.
+- Subagent test proving parent context stores compact child result while child
+  run stores complete completion events.
 - `git diff --check`
 
 Manual inspection for a real run:
@@ -307,6 +360,8 @@ Manual inspection for a real run:
 - Confirm large SQL/search output exists as artifacts, not repeated in parent
   completion messages.
 - Confirm follow-up prompt includes the prior user intent and assistant answer.
+- Confirm stable prefix bytes/order do not change between follow-up runs except
+  where the conversation itself intentionally appends new model-visible context.
 
 ## Open Questions
 
@@ -314,6 +369,4 @@ Manual inspection for a real run:
   store tool names plus a schema version hash for common built-in tools.
 - Whether streamed delta events should remain UI-only, with
   `completion.message` as the replay source.
-- Whether child subagent runs should be visible in the normal session timeline
-  or only under parent tool-call details.
 - How long to retain inactive retry branches by default.

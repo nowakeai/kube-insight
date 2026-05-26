@@ -40,8 +40,10 @@ The failure mode to prevent is:
 
 Session and context storage are tracked in
 `docs/dev/agent-session-context-storage-plan.md`. That plan is authoritative for
-raw transcript persistence, context replay, retry branch projection, and
-subagent child-run transcript storage.
+stable model-context persistence, context replay, retry branch projection, and
+subagent child-run context storage. The target is deterministic context
+reproduction and cache-friendly provider requests, not preserving opaque provider
+SDK internals for their own sake.
 
 ### 1. Schema-Guided Query Planning
 

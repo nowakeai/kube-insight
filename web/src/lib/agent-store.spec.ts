@@ -20,9 +20,9 @@ test("server retry run replaces the retried branch in session projection", () =>
 })
 
 test("server session hydration keeps retry branch projection stable", () => {
-  const store = useAgentProjectionStore.getState()
+	const store = useAgentProjectionStore.getState()
 
-  store.upsertServerSession({
+	store.upsertServerSession({
     id: "sess_1",
     title: "Retry branch",
     createdAt,
@@ -34,11 +34,31 @@ test("server session hydration keeps retry branch projection stable", () => {
     ],
   })
 
-  expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
+	expect(useAgentProjectionStore.getState().sessions.sess_1.runIds).toEqual(["run_retry"])
+})
+
+test("server session hydration keeps child runs available but out of top-level projection", () => {
+	const store = useAgentProjectionStore.getState()
+
+	store.upsertServerSession({
+		id: "sess_1",
+		title: "Subagent branch",
+		createdAt,
+		updatedAt: createdAt,
+		runs: [
+			runDTO("run_parent", "investigate"),
+			runDTO("run_child", "child branch", { parentRunId: "run_parent", parentToolCallId: "call_1" }),
+			runDTO("run_followup", "follow up"),
+		],
+	})
+
+	const state = useAgentProjectionStore.getState()
+	expect(state.sessions.sess_1.runIds).toEqual(["run_parent", "run_followup"])
+	expect(state.runs.run_child?.metadata).toEqual({ parentRunId: "run_parent", parentToolCallId: "call_1" })
 })
 
 test("retry fallback replacement still rewinds later turns", () => {
-  const store = useAgentProjectionStore.getState()
+	const store = useAgentProjectionStore.getState()
 
   store.upsertServerRun(runDTO("run_1", "question"))
   store.upsertServerRun(runDTO("run_2", "follow-up"))

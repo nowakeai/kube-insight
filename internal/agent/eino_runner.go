@@ -48,6 +48,8 @@ type EinoRunInput struct {
 	Messages     []Message
 	Store        Store
 	RunID        string
+	Provider     string
+	Model        string
 	CheckPointID string
 	RunOptions   []adk.AgentRunOption
 }
@@ -75,6 +77,7 @@ func NewEinoRunner(ctx context.Context, cfg EinoRunnerConfig) (*EinoRunner, erro
 		&toolBudgetMiddleware{maxIterations: cfg.MaxIterations},
 	}
 	handlers = append(handlers, cfg.Handlers...)
+	handlers = append(handlers, &modelContextRecorderMiddleware{})
 	agentConfig := &adk.ChatModelAgentConfig{
 		Name:             name,
 		Description:      cfg.Description,
@@ -116,6 +119,18 @@ func (r *EinoRunner) Run(ctx context.Context, input EinoRunInput) (EinoRunResult
 	if err := recorder.Start(ctx); err != nil {
 		return EinoRunResult{}, err
 	}
+	ctx = withModelContextRecorder(ctx, modelContextRecorderConfig{
+		Store:    input.Store,
+		RunID:    input.RunID,
+		Provider: input.Provider,
+		Model:    input.Model,
+	})
+	ctx = withRunExecutionContext(ctx, RunExecutionContext{
+		Store:    input.Store,
+		RunID:    input.RunID,
+		Provider: input.Provider,
+		Model:    input.Model,
+	})
 	messages := make([]adk.Message, 0, len(input.Messages))
 	for _, message := range input.Messages {
 		messages = append(messages, einoMessage(message))
@@ -160,10 +175,14 @@ func einoMessage(message Message) adk.Message {
 	case RoleSystem:
 		return schema.SystemMessage(message.Content)
 	case RoleAssistant:
-		return schema.AssistantMessage(message.Content, nil)
+		return schema.AssistantMessage(message.Content, schemaToolCalls(message.ToolCalls))
 	case RoleTool:
-		if message.ID != "" {
-			return schema.ToolMessage(message.Content, message.ID)
+		callID := firstNonEmptyString(message.ToolCallID, message.ID)
+		if callID != "" {
+			if message.ToolName != "" {
+				return schema.ToolMessage(message.Content, callID, schema.WithToolName(message.ToolName))
+			}
+			return schema.ToolMessage(message.Content, callID)
 		}
 		return &schema.Message{Role: schema.Tool, Content: message.Content}
 	case RoleUser:
@@ -171,6 +190,28 @@ func einoMessage(message Message) adk.Message {
 	default:
 		return schema.UserMessage(fmt.Sprintf("%s", message.Content))
 	}
+}
+
+func schemaToolCalls(calls []ToolCall) []schema.ToolCall {
+	if len(calls) == 0 {
+		return nil
+	}
+	out := make([]schema.ToolCall, 0, len(calls))
+	for _, call := range calls {
+		callType := call.Type
+		if callType == "" {
+			callType = "function"
+		}
+		out = append(out, schema.ToolCall{
+			ID:   call.ID,
+			Type: callType,
+			Function: schema.FunctionCall{
+				Name:      call.Function.Name,
+				Arguments: call.Function.Arguments,
+			},
+		})
+	}
+	return out
 }
 
 type einoRunRecorder struct {
@@ -233,7 +274,7 @@ type toolTimingMiddleware struct {
 func (m toolTimingMiddleware) WrapInvokableToolCall(ctx context.Context, endpoint adk.InvokableToolCallEndpoint, tCtx *adk.ToolContext) (adk.InvokableToolCallEndpoint, error) {
 	return func(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 		start := time.Now()
-		result, err := endpoint(ctx, argumentsInJSON, opts...)
+		result, err := endpoint(withToolCallExecutionContext(ctx, tCtx), argumentsInJSON, opts...)
 		if tCtx != nil {
 			m.timings.put(tCtx.CallID, toolTiming{Name: tCtx.Name, Input: normalizedToolInput(argumentsInJSON), StartedAt: start, DurationMS: toolAuditDurationMS(start)})
 		}

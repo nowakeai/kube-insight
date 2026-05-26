@@ -46,15 +46,15 @@ func PlanRetention(runs []Run, eventsByRunID map[string][]RunEvent, opts Retenti
 		plan.EventsScanned += len(events)
 	}
 	if opts.PruneSupersededRuns {
-		plan.SupersededRunIDs = supersededRetryRunIDs(runs)
+		plan.SupersededRunIDs = supersededRunIDsWithChildren(runs, supersededRetryRunIDs(runs))
 		for _, runID := range plan.SupersededRunIDs {
 			plan.SupersededRunEvents += len(eventsByRunID[runID])
 		}
 	}
 	if opts.PruneUnreferencedArtifacts {
 		skipRuns := stringSet(plan.SupersededRunIDs)
-		terminalRuns := terminalRunIDSet(runs)
-		plan.UnreferencedArtifactEventIDs = unreferencedArtifactEventIDs(eventsByRunID, skipRuns, terminalRuns)
+		pruneRuns := artifactPruneRunIDSet(runs)
+		plan.UnreferencedArtifactEventIDs = unreferencedArtifactEventIDs(eventsByRunID, skipRuns, pruneRuns)
 	}
 	return plan
 }
@@ -128,28 +128,103 @@ func sortRetrySessionRuns(runs []Run, runsByID map[string]Run) {
 	})
 }
 
-func unreferencedArtifactEventIDs(eventsByRunID map[string][]RunEvent, skipRuns map[string]struct{}, terminalRuns map[string]struct{}) []string {
+func supersededRunIDsWithChildren(runs []Run, rootIDs []string) []string {
+	deleteIDs := stringSet(rootIDs)
+	if len(deleteIDs) == 0 {
+		return nil
+	}
+	childrenByParentID := map[string][]string{}
+	for _, run := range runs {
+		parentID := parentRunID(run)
+		if parentID == "" {
+			continue
+		}
+		childrenByParentID[parentID] = append(childrenByParentID[parentID], run.ID)
+	}
+	queue := append([]string(nil), rootIDs...)
+	for len(queue) > 0 {
+		runID := queue[0]
+		queue = queue[1:]
+		for _, childID := range childrenByParentID[runID] {
+			if _, seen := deleteIDs[childID]; seen {
+				continue
+			}
+			deleteIDs[childID] = struct{}{}
+			queue = append(queue, childID)
+		}
+	}
+	return sortedSet(deleteIDs)
+}
+
+func artifactPruneRunIDSet(runs []Run) map[string]struct{} {
+	runByID := map[string]Run{}
+	for _, run := range runs {
+		runByID[run.ID] = run
+	}
+	out := map[string]struct{}{}
+	for _, run := range runs {
+		if !statusTerminal(run.Status) {
+			continue
+		}
+		if hasNonTerminalParent(run, runByID) {
+			continue
+		}
+		out[run.ID] = struct{}{}
+	}
+	return out
+}
+
+func hasNonTerminalParent(run Run, runByID map[string]Run) bool {
+	seen := map[string]struct{}{}
+	parentID := parentRunID(run)
+	for parentID != "" {
+		if _, ok := seen[parentID]; ok {
+			return false
+		}
+		seen[parentID] = struct{}{}
+		parent, ok := runByID[parentID]
+		if !ok {
+			return false
+		}
+		if !statusTerminal(parent.Status) {
+			return true
+		}
+		parentID = parentRunID(parent)
+	}
+	return false
+}
+
+func unreferencedArtifactEventIDs(eventsByRunID map[string][]RunEvent, skipRuns map[string]struct{}, pruneRuns map[string]struct{}) []string {
 	deleteIDs := map[string]struct{}{}
+	referencedArtifactIDs := map[string]struct{}{}
 	for runID, events := range eventsByRunID {
 		if _, skip := skipRuns[runID]; skip {
 			continue
 		}
-		if _, terminal := terminalRuns[runID]; !terminal {
+		for _, event := range events {
+			if event.Type != EventCitation {
+				continue
+			}
+			var data CitationEventData
+			if json.Unmarshal(event.Data, &data) == nil && data.Citation.ArtifactID != "" {
+				referencedArtifactIDs[data.Citation.ArtifactID] = struct{}{}
+			}
+		}
+	}
+	for runID, events := range eventsByRunID {
+		if _, skip := skipRuns[runID]; skip {
+			continue
+		}
+		if _, prune := pruneRuns[runID]; !prune {
 			continue
 		}
 		artifactEventByArtifactID := map[string]string{}
-		referencedArtifactIDs := map[string]struct{}{}
 		for _, event := range events {
 			switch event.Type {
 			case EventArtifact, EventArtifactUpdate:
 				var data ArtifactEventData
 				if json.Unmarshal(event.Data, &data) == nil && data.Artifact.ID != "" {
 					artifactEventByArtifactID[data.Artifact.ID] = event.ID
-				}
-			case EventCitation:
-				var data CitationEventData
-				if json.Unmarshal(event.Data, &data) == nil && data.Citation.ArtifactID != "" {
-					referencedArtifactIDs[data.Citation.ArtifactID] = struct{}{}
 				}
 			}
 		}
@@ -204,6 +279,14 @@ func (s *MemoryStore) ApplyAgentRetention(ctx context.Context, opts RetentionOpt
 }
 
 func retryOfRunID(run Run) string {
+	return runMetadataString(run, "retryOfRunId")
+}
+
+func parentRunID(run Run) string {
+	return runMetadataString(run, "parentRunId")
+}
+
+func runMetadataString(run Run, key string) string {
 	if len(run.Metadata) == 0 || !json.Valid(run.Metadata) {
 		return ""
 	}
@@ -211,7 +294,7 @@ func retryOfRunID(run Run) string {
 	if json.Unmarshal(run.Metadata, &metadata) != nil {
 		return ""
 	}
-	value, _ := metadata["retryOfRunId"].(string)
+	value, _ := metadata[key].(string)
 	return value
 }
 
@@ -239,25 +322,7 @@ func retryRootRunID(run Run, runsByID map[string]Run) string {
 }
 
 func retryRootRunIDMetadata(run Run) string {
-	if len(run.Metadata) == 0 || !json.Valid(run.Metadata) {
-		return ""
-	}
-	var metadata map[string]any
-	if json.Unmarshal(run.Metadata, &metadata) != nil {
-		return ""
-	}
-	value, _ := metadata["retryRootRunId"].(string)
-	return value
-}
-
-func terminalRunIDSet(runs []Run) map[string]struct{} {
-	out := map[string]struct{}{}
-	for _, run := range runs {
-		if statusTerminal(run.Status) {
-			out[run.ID] = struct{}{}
-		}
-	}
-	return out
+	return runMetadataString(run, "retryRootRunId")
 }
 
 func stringSet(values []string) map[string]struct{} {

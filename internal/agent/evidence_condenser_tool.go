@@ -2,30 +2,108 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 
-	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 )
 
 const evidenceCondenserToolName = "evidence_condenser"
+
+type EvidenceCondenserTool struct {
+	model model.BaseChatModel
+}
 
 // NewEvidenceCondenserTool exposes a small specialist agent as a normal tool.
 // The main agent decides when evidence is too large or noisy enough to justify
 // the extra model call.
 func NewEvidenceCondenserTool(ctx context.Context, mdl model.BaseChatModel) (tool.BaseTool, error) {
-	inner, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	if mdl == nil {
+		return nil, ErrEinoModelRequired
+	}
+	return EvidenceCondenserTool{model: mdl}, nil
+}
+
+func (t EvidenceCondenserTool) Info(context.Context) (*schema.ToolInfo, error) {
+	return &schema.ToolInfo{
+		Name: evidenceCondenserToolName,
+		Desc: "Condense large kube-insight evidence artifacts into compact cited findings. The request must include source artifact IDs/titles and relevant row or snippet excerpts.",
+		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
+			"request": {
+				Type:     schema.String,
+				Required: true,
+				Desc:     "Evidence condensation request with source artifact IDs/titles and relevant row or snippet excerpts.",
+			},
+		}),
+	}, nil
+}
+
+func (t EvidenceCondenserTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
+	var args struct {
+		Request string `json:"request"`
+	}
+	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
+		return "", fmt.Errorf("parse %s arguments: %w", evidenceCondenserToolName, err)
+	}
+	request := strings.TrimSpace(args.Request)
+	parentRun, hasParentRun := RunExecutionContextFromContext(ctx)
+	parentToolCall, _ := ToolCallExecutionContextFromContext(ctx)
+	runner, err := NewEinoRunner(ctx, EinoRunnerConfig{
 		Name:          evidenceCondenserToolName,
-		Description:   "Condense large kube-insight evidence artifacts into compact cited findings. The request must include source artifact IDs/titles and relevant row or snippet excerpts.",
+		Description:   "Condense large kube-insight evidence artifacts into compact cited findings.",
 		Instruction:   EvidenceCondenserInstruction(),
-		Model:         mdl,
+		Model:         t.model,
 		MaxIterations: 3,
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return adk.NewAgentTool(ctx, inner), nil
+	store := parentRun.Store
+	runID := ""
+	if hasParentRun {
+		child, err := t.createChildRun(ctx, parentRun, parentToolCall, request)
+		if err != nil {
+			return "", err
+		}
+		runID = child.ID
+		if err := appendChildRunCreatedEvent(ctx, store, runID, parentRun.RunID); err != nil {
+			return "", err
+		}
+	}
+	result, err := runner.Run(ctx, EinoRunInput{
+		Messages: []Message{{Role: RoleUser, Content: request}},
+		Store:    store,
+		RunID:    runID,
+		Provider: parentRun.Provider,
+		Model:    parentRun.Model,
+	})
+	if err != nil {
+		return "", err
+	}
+	return result.FinalAnswer, nil
+}
+
+func (t EvidenceCondenserTool) createChildRun(ctx context.Context, parent RunExecutionContext, parentToolCall ToolCallExecutionContext, input string) (Run, error) {
+	parentRun, err := parent.Store.GetRun(ctx, parent.RunID)
+	if err != nil {
+		return Run{}, err
+	}
+	return parent.Store.CreateRun(ctx, parentRun.SessionID, CreateRunInput{
+		Input:    input,
+		Provider: parent.Provider,
+		Model:    parent.Model,
+		Metadata: jsonRaw(map[string]any{
+			"parentRunId":       parent.RunID,
+			"parentToolCallId":  parentToolCall.CallID,
+			"parentToolName":    parentToolCall.Name,
+			"subagentName":      evidenceCondenserToolName,
+			"contextPolicy":     "child-full-parent-compact",
+			"modelContextScope": "subagent",
+		}),
+	})
 }
 
 func EvidenceCondenserInstruction() string {

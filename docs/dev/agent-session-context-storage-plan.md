@@ -295,6 +295,17 @@ Disallowed compaction:
 - dropping active-branch messages needed to replay the current conversation,
 - using hidden summaries as the only source for follow-up prompts.
 
+## Run Lifecycle Recovery
+
+Queued and running runs are process-owned execution state, not durable proof that
+work is still active after an API server restart. When the API server starts with
+an agent runner configured, it should mark any previously persisted queued or
+running run as failed unless that run is registered in the current process.
+
+Recovery must append normal `error` and `run.failed` events instead of silently
+changing only the row status. This keeps session projections, dashboards, event
+streams, and later context replay aligned with the stored lifecycle history.
+
 ## Migration Plan
 
 ### Phase 1: Stop Cumulative Snapshots

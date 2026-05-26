@@ -83,6 +83,10 @@ operational notes, and design details in `docs/`.
 - Agent retention is server-owned and should run periodically from the API
   server. Do not prune unreferenced artifact events from in-progress runs;
   citations can arrive after artifacts during a live agent loop.
+- Agent run lifecycle recovery is server-owned. Persisted `queued` or `running`
+  runs from a previous API process should be transitioned with normal lifecycle
+  events on startup; do not leave durable session state claiming work is active
+  when no current process owns that execution.
 - The built-in agent's private MCP client/server session must not idle-timeout
   under normal API server operation. The external `/mcp` HTTP surface may keep a
   bounded session timeout, but the in-process agent should not hold a stale MCP

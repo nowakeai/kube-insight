@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kube-insight/internal/agent"
 	"kube-insight/internal/storage/sqlite"
@@ -144,5 +145,74 @@ func TestRunDBAgentContextShowsLegacySummaryWithoutCompletionRequest(t *testing.
 		if !strings.Contains(out, want) {
 			t.Fatalf("stdout missing %q: %s", want, out)
 		}
+	}
+}
+
+func TestRunDBAgentContextCompatibilityReplayUsesActiveRetryBranch(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "kubeinsight.db")
+	store, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.CreateSession(context.Background(), agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := store.CreateRun(context.Background(), session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLegacyFinalAnswerForAgentContextTest(t, store, original.ID, "旧分支回答：发现 OOM。")
+	time.Sleep(time.Millisecond)
+	later, err := store.CreateRun(context.Background(), session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLegacyFinalAnswerForAgentContextTest(t, store, later.ID, "旧分支后续回答：1 小时内有 OOM。")
+	time.Sleep(time.Millisecond)
+	retry, err := store.CreateRun(context.Background(), session.ID, agent.CreateRunInput{
+		Input:    original.Input,
+		Metadata: []byte(`{"retryOfRunId":"` + original.ID + `","retryRootRunId":"` + original.ID + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLegacyFinalAnswerForAgentContextTest(t, store, retry.ID, "重试分支回答：没有发现 OOM。")
+	time.Sleep(time.Millisecond)
+	run, err := store.CreateRun(context.Background(), session.ID, agent.CreateRunInput{Input: "那最近10分钟呢？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"--db", dbPath, "db", "agent-context", run.ID, "--output", "json"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	out := stdout.String()
+	for _, want := range []string{`"compatibilityReplay"`, "最近有没有 OOM 现象？", "重试分支回答：没有发现 OOM。", "那最近10分钟呢？"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"旧分支回答", "最近1小时内呢", "旧分支后续回答"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("stdout contains superseded branch %q: %s", unwanted, out)
+		}
+	}
+}
+
+func appendLegacyFinalAnswerForAgentContextTest(t *testing.T, store agent.Store, runID string, answer string) {
+	t.Helper()
+	if _, err := store.AppendRunEvent(context.Background(), runID, agent.AppendEventInput{
+		Type: agent.EventFinalAnswer,
+		Data: []byte(`{"role":"assistant","content":"` + answer + `"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateRunStatus(context.Background(), runID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
 	}
 }

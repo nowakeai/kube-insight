@@ -13,6 +13,7 @@ PROVIDER="${KUBE_INSIGHT_AGENT_API_SMOKE_PROVIDER:-openai-compatible}"
 RUN_TIMEOUT_SECONDS="${KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS:-360}"
 QUESTIONS="${KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS:-Is the default/api Service healthy right now? Summarize endpoint pod evidence and cite the proof.;;Map topology for namespace default and cite the proof.}"
 RETRY_FIRST="${KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST:-0}"
+MAX_HISTORICAL_TOOL_REPLAY_CHARS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS:-4500}"
 
 if [[ ! -x "${BIN}" ]]; then
   echo "kube-insight binary not found or not executable: ${BIN}" >&2
@@ -195,6 +196,15 @@ for question in "${question_list[@]}"; do
   context_json="${WORK_DIR}/${slug}.context.json"
   "${BIN}" --db "${DB_PATH}" db agent-context "${run_id}" --all --output json >"${context_json}"
   validate_context_tool_order "${context_json}"
+  if [[ "${#completed_questions[@]}" -gt 0 ]]; then
+    if ! jq -e --argjson maxChars "${MAX_HISTORICAL_TOOL_REPLAY_CHARS}" '
+      all(.requests[0].messages[]? | select(.role=="tool"); (.contentChars // 0) <= $maxChars)
+    ' "${context_json}" >/dev/null; then
+      echo "Follow-up initial completion.request has oversized historical tool result: ${context_json}" >&2
+      jq --argjson maxChars "${MAX_HISTORICAL_TOOL_REPLAY_CHARS}" '.requests[0].messages[]? | select(.role=="tool" and ((.contentChars // 0) > $maxChars)) | {index, role, toolName, toolCallId, contentChars, contentPreview}' "${context_json}" >&2
+      exit 1
+    fi
+  fi
   if ! jq -e --arg question "${question}" '.requests[-1].messages[]? | select(.role=="user" and .content==$question)' "${context_json}" >/dev/null; then
     echo "Run ${run_id} latest completion.request is missing current user message: ${question}" >&2
     jq '.requests[-1].messages | map({index, role, contentPreview})' "${context_json}" >&2

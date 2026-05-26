@@ -3,12 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"kube-insight/internal/agent"
 )
+
+const maxHistoricalToolReplayContentRunes = 4000
 
 func (s *Server) agentMessagesForRun(ctx context.Context, run agent.Run) []agent.Message {
 	messages := agentConversationMessagesForRun(ctx, s.agentStore, run)
@@ -145,12 +148,13 @@ func visibleConversationFromLatestCompletionRequest(ctx context.Context, store a
 	if err != nil {
 		return nil
 	}
+	toolResults := historicalToolReplayResults(events)
 	var latest []agent.Message
 	for _, event := range events {
 		if event.Type != agent.EventCompletionRequest {
 			continue
 		}
-		messages := visibleConversationFromCompletionRequestData(event.Data)
+		messages := visibleConversationFromCompletionRequestData(event.Data, toolResults)
 		if len(messages) > 0 {
 			latest = messages
 		}
@@ -158,7 +162,48 @@ func visibleConversationFromLatestCompletionRequest(ctx context.Context, store a
 	return latest
 }
 
-func visibleConversationFromCompletionRequestData(raw json.RawMessage) []agent.Message {
+type historicalToolReplayResult struct {
+	ToolCallID       string
+	ToolName         string
+	Status           string
+	OutputSummary    string
+	OutputArtifactID string
+	Error            string
+	ContentBytes     float64
+	ContentOmitted   bool
+}
+
+func historicalToolReplayResults(events []agent.RunEvent) map[string]historicalToolReplayResult {
+	results := map[string]historicalToolReplayResult{}
+	for _, event := range events {
+		if event.Type != agent.EventCompletionToolResult {
+			continue
+		}
+		var record map[string]any
+		if json.Unmarshal(event.Data, &record) != nil {
+			continue
+		}
+		toolCallID := firstNonEmptyStringFromMap(record, "tool_call_id", "toolCallId")
+		if toolCallID == "" {
+			continue
+		}
+		contentBytes, _ := record["contentBytes"].(float64)
+		contentOmitted, _ := record["contentOmitted"].(bool)
+		results[toolCallID] = historicalToolReplayResult{
+			ToolCallID:       toolCallID,
+			ToolName:         firstNonEmptyStringFromMap(record, "name", "toolName"),
+			Status:           firstNonEmptyStringFromMap(record, "status"),
+			OutputSummary:    firstNonEmptyStringFromMap(record, "outputSummary"),
+			OutputArtifactID: firstNonEmptyStringFromMap(record, "outputArtifactId", "outputArtifactID"),
+			Error:            firstNonEmptyStringFromMap(record, "error"),
+			ContentBytes:     contentBytes,
+			ContentOmitted:   contentOmitted,
+		}
+	}
+	return results
+}
+
+func visibleConversationFromCompletionRequestData(raw json.RawMessage, toolResults map[string]historicalToolReplayResult) []agent.Message {
 	if len(raw) == 0 || !json.Valid(raw) {
 		return nil
 	}
@@ -179,6 +224,9 @@ func visibleConversationFromCompletionRequestData(raw json.RawMessage) []agent.M
 		}
 		switch message.Role {
 		case agent.RoleUser, agent.RoleTool:
+			if message.Role == agent.RoleTool {
+				message = compactHistoricalToolReplayMessage(message, toolResults)
+			}
 			messages = append(messages, message)
 		case agent.RoleAssistant:
 			if strings.TrimSpace(message.Content) != "" || len(message.ToolCalls) > 0 {
@@ -187,6 +235,76 @@ func visibleConversationFromCompletionRequestData(raw json.RawMessage) []agent.M
 		}
 	}
 	return messages
+}
+
+func compactHistoricalToolReplayMessage(message agent.Message, toolResults map[string]historicalToolReplayResult) agent.Message {
+	if len([]rune(message.Content)) <= maxHistoricalToolReplayContentRunes {
+		return message
+	}
+	result := toolResults[message.ToolCallID]
+	if result.ToolName == "" {
+		result.ToolName = message.ToolName
+	}
+	if result.ToolCallID == "" {
+		result.ToolCallID = message.ToolCallID
+	}
+	if result.Status == "" {
+		result.Status = "completed"
+	}
+	message.Content = historicalToolReplaySummaryContent(message, result)
+	return message
+}
+
+func historicalToolReplaySummaryContent(message agent.Message, result historicalToolReplayResult) string {
+	originalChars := len([]rune(message.Content))
+	preview := compactReplayText(message.Content, 1200)
+	payload := map[string]any{
+		"format":        "kube-insight.agent.compacted_tool_result.v1",
+		"toolCallId":    firstNonEmptyReplayString(result.ToolCallID, message.ToolCallID),
+		"name":          firstNonEmptyReplayString(result.ToolName, message.ToolName),
+		"status":        result.Status,
+		"originalChars": originalChars,
+		"summary":       firstNonEmptyReplayString(result.OutputSummary, compactReplayText(message.Content, 240)),
+		"preview":       preview,
+		"note":          "Large prior-run tool output was compacted for follow-up model context; use the cited final answer or rerun the tool if exact raw rows are needed.",
+	}
+	if result.OutputArtifactID != "" {
+		payload["outputArtifactId"] = result.OutputArtifactID
+	}
+	if result.Error != "" {
+		payload["error"] = result.Error
+	}
+	if result.ContentOmitted {
+		payload["contentOmitted"] = true
+	}
+	if result.ContentBytes > 0 {
+		payload["contentBytes"] = result.ContentBytes
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf("compacted prior tool result: name=%s summary=%s originalChars=%d", firstNonEmptyReplayString(result.ToolName, message.ToolName), payload["summary"], originalChars)
+	}
+	return string(encoded)
+}
+
+func compactReplayText(value string, maxRunes int) string {
+	runes := []rune(value)
+	if maxRunes <= 0 || len(runes) <= maxRunes {
+		return value
+	}
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-1]) + "…"
+}
+
+func firstNonEmptyReplayString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func conversationFromCompletionEvents(ctx context.Context, store agent.Store, runs []agent.Run) []agent.Message {

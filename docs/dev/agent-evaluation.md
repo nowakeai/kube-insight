@@ -126,7 +126,9 @@ For multi-question smoke runs, each completed run is also audited with
 `db agent-context`; follow-up runs must keep prior user turns and assistant
 context in the latest provider-facing `completion.request`. The smoke also
 checks provider message order so replayed tool results never appear before the
-assistant tool-call message that produced them.
+assistant tool-call message that produced them. Follow-up initial requests also
+enforce a historical tool-result size budget, so large prior outputs such as
+schema dumps must be replayed as compact summaries rather than raw content.
 Set `KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1` to retry the first completed
 run after later questions. The retry assertion checks that the replacement
 run's first provider request rewinds to the original user input and excludes
@@ -150,6 +152,8 @@ Useful overrides:
 - `KUBE_INSIGHT_AGENT_API_SMOKE_API_LISTEN` and
   `KUBE_INSIGHT_AGENT_API_SMOKE_MCP_LISTEN`: local service addresses.
 - `KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS`: max wait per run.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS`: max chars
+  for each historical tool result in a follow-up run's initial request.
 
 Use an OOM follow-up pair when validating session-context replay:
 

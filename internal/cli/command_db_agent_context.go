@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"kube-insight/internal/agent"
@@ -13,8 +14,12 @@ import (
 )
 
 type agentContextAuditOutput struct {
-	Run      agentContextAuditRun       `json:"run"`
-	Requests []agentContextAuditRequest `json:"requests"`
+	Run                 agentContextAuditRun       `json:"run"`
+	Requests            []agentContextAuditRequest `json:"requests"`
+	LegacyMessages      []agentContextAuditMessage `json:"legacyMessages,omitempty"`
+	CompatibilityReplay []agentContextAuditMessage `json:"compatibilityReplay,omitempty"`
+	EventTypes          map[string]int             `json:"eventTypes,omitempty"`
+	Warning             string                     `json:"warning,omitempty"`
 }
 
 type agentContextAuditRun struct {
@@ -116,7 +121,9 @@ func buildAgentContextAudit(ctx context.Context, store agent.Store, runID string
 		return agentContextAuditOutput{}, err
 	}
 	requests := make([]agentContextAuditRequest, 0)
+	eventTypes := map[string]int{}
 	for _, event := range events {
+		eventTypes[string(event.Type)]++
 		if event.Type != agent.EventCompletionRequest {
 			continue
 		}
@@ -125,10 +132,15 @@ func buildAgentContextAudit(ctx context.Context, store agent.Store, runID string
 			requests = append(requests, request)
 		}
 	}
+	var legacyMessages []agentContextAuditMessage
+	var compatibilityReplay []agentContextAuditMessage
+	warning := ""
 	if len(requests) == 0 {
-		return agentContextAuditOutput{}, fmt.Errorf("run %s has no completion.request events", runID)
+		warning = "no completion.request events recorded; exact provider request is unavailable for this run"
+		legacyMessages = legacyAgentContextAuditMessages(run, events)
+		compatibilityReplay = compatibilityAgentContextReplay(ctx, store, run)
 	}
-	if !all {
+	if !all && len(requests) > 0 {
 		requests = requests[len(requests)-1:]
 	}
 	return agentContextAuditOutput{
@@ -141,7 +153,11 @@ func buildAgentContextAudit(ctx context.Context, store agent.Store, runID string
 			Model:     run.Model,
 			CreatedAt: humanTime(run.CreatedAt),
 		},
-		Requests: requests,
+		Requests:            requests,
+		LegacyMessages:      legacyMessages,
+		CompatibilityReplay: compatibilityReplay,
+		EventTypes:          eventTypes,
+		Warning:             warning,
 	}, nil
 }
 
@@ -159,12 +175,12 @@ func agentContextAuditRequestFromEvent(event agent.RunEvent) (agentContextAuditR
 		EventID:      event.ID,
 		Sequence:     event.Sequence,
 		CreatedAt:    humanTime(event.CreatedAt),
-		Mode:         stringField(data, "mode"),
-		Provider:     stringField(data, "provider"),
-		Model:        stringField(data, "model"),
+		Mode:         auditStringField(data, "mode"),
+		Provider:     auditStringField(data, "provider"),
+		Model:        auditStringField(data, "model"),
 		MessageCount: len(messages),
 		ToolCount:    len(tools),
-		Options:      mapField(data, "options"),
+		Options:      auditMapField(data, "options"),
 		Messages:     make([]agentContextAuditMessage, 0, len(messages)),
 	}
 	for index, item := range messages {
@@ -181,14 +197,14 @@ func agentContextAuditMessageFromValue(index int, value any) (agentContextAuditM
 	if !ok {
 		return agentContextAuditMessage{}, false
 	}
-	content := stringField(data, "content")
+	content := auditStringField(data, "content")
 	message := agentContextAuditMessage{
 		Index:          index,
-		Role:           stringField(data, "role"),
+		Role:           auditStringField(data, "role"),
 		Content:        content,
 		ContentChars:   len([]rune(content)),
-		ToolCallID:     firstStringField(data, "tool_call_id", "toolCallId"),
-		ToolName:       firstStringField(data, "name", "toolName"),
+		ToolCallID:     firstAuditStringField(data, "tool_call_id", "toolCallId"),
+		ToolName:       firstAuditStringField(data, "name", "toolName"),
 		ToolCalls:      toolCallNames(data["tool_calls"]),
 		ContentPreview: shortText(content, 180),
 	}
@@ -201,9 +217,9 @@ func toolCallNames(value any) []string {
 	for _, item := range items {
 		call, _ := item.(map[string]any)
 		function, _ := call["function"].(map[string]any)
-		name := stringField(function, "name")
+		name := auditStringField(function, "name")
 		if name == "" {
-			name = stringField(call, "id")
+			name = auditStringField(call, "id")
 		}
 		if name != "" {
 			names = append(names, name)
@@ -219,47 +235,207 @@ func writeAgentContextAuditTable(stdout io.Writer, report agentContextAuditOutpu
 	if _, err := fmt.Fprintf(stdout, "Input: %s\n", report.Run.Input); err != nil {
 		return err
 	}
+	if report.Warning != "" {
+		if _, err := fmt.Fprintf(stdout, "Warning: %s\n", report.Warning); err != nil {
+			return err
+		}
+		if len(report.EventTypes) > 0 {
+			rows := make([][]string, 0, len(report.EventTypes))
+			for _, eventType := range sortedAuditEventTypes(report.EventTypes) {
+				rows = append(rows, []string{eventType, fmt.Sprintf("%d", report.EventTypes[eventType])})
+			}
+			if err := writeSection(stdout, "\nRecorded event types", []string{"type", "count"}, rows); err != nil {
+				return err
+			}
+		}
+		if len(report.LegacyMessages) > 0 {
+			if err := writeAgentContextMessagesTable(stdout, "\nLegacy visible messages", report.LegacyMessages, fullContent); err != nil {
+				return err
+			}
+		}
+		if len(report.CompatibilityReplay) > 0 {
+			if err := writeAgentContextMessagesTable(stdout, "\nCompatibility replay candidate", report.CompatibilityReplay, fullContent); err != nil {
+				return err
+			}
+		}
+	}
 	for _, request := range report.Requests {
 		if _, err := fmt.Fprintf(stdout, "\nRequest seq=%d event=%s mode=%s provider=%s model=%s messages=%d tools=%d created=%s\n", request.Sequence, request.EventID, request.Mode, request.Provider, request.Model, request.MessageCount, request.ToolCount, request.CreatedAt); err != nil {
 			return err
 		}
-		rows := make([][]string, 0, len(request.Messages))
-		for _, message := range request.Messages {
-			content := message.ContentPreview
-			if fullContent {
-				content = message.Content
-			}
-			rows = append(rows, []string{
-				fmt.Sprintf("%d", message.Index),
-				message.Role,
-				message.ToolName,
-				strings.Join(message.ToolCalls, ","),
-				fmt.Sprintf("%d", message.ContentChars),
-				content,
-			})
-		}
-		if err := writeTable(stdout, []string{"#", "role", "tool", "tool_calls", "chars", "content"}, rows); err != nil {
+		if err := writeAgentContextMessagesTable(stdout, "", request.Messages, fullContent); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func stringField(record map[string]any, key string) string {
+func legacyAgentContextAuditMessages(run agent.Run, events []agent.RunEvent) []agentContextAuditMessage {
+	messages := []agentContextAuditMessage{}
+	if run.Input != "" {
+		messages = append(messages, agentContextAuditMessage{
+			Index:          len(messages),
+			Role:           string(agent.RoleUser),
+			Content:        run.Input,
+			ContentChars:   len([]rune(run.Input)),
+			ContentPreview: shortText(run.Input, 180),
+		})
+	}
+	finalAnswer := ""
+	for _, event := range events {
+		if event.Type != agent.EventFinalAnswer && event.Type != agent.EventMessageDone {
+			continue
+		}
+		var data agent.MessageEventData
+		if json.Unmarshal(event.Data, &data) == nil && data.Role == agent.RoleAssistant && strings.TrimSpace(data.Content) != "" {
+			finalAnswer = data.Content
+		}
+	}
+	if finalAnswer != "" {
+		messages = append(messages, agentContextAuditMessage{
+			Index:          len(messages),
+			Role:           string(agent.RoleAssistant),
+			Content:        finalAnswer,
+			ContentChars:   len([]rune(finalAnswer)),
+			ContentPreview: shortText(finalAnswer, 180),
+		})
+	}
+	return messages
+}
+
+func compatibilityAgentContextReplay(ctx context.Context, store agent.Store, run agent.Run) []agentContextAuditMessage {
+	if run.SessionID == "" {
+		return legacyAgentContextAuditMessages(run, nil)
+	}
+	session, err := store.GetSession(ctx, run.SessionID)
+	if err != nil {
+		return legacyAgentContextAuditMessages(run, nil)
+	}
+	prior := compatibleVisiblePriorRuns(session.Runs, run)
+	messages := []agentContextAuditMessage{}
+	for _, candidate := range prior {
+		events, err := store.ListRunEvents(ctx, candidate.ID)
+		if err != nil {
+			continue
+		}
+		for _, message := range legacyAgentContextAuditMessages(candidate, events) {
+			message.Index = len(messages)
+			messages = append(messages, message)
+		}
+	}
+	if run.Input != "" {
+		messages = append(messages, agentContextAuditMessage{
+			Index:          len(messages),
+			Role:           string(agent.RoleUser),
+			Content:        run.Input,
+			ContentChars:   len([]rune(run.Input)),
+			ContentPreview: shortText(run.Input, 180),
+		})
+	}
+	return messages
+}
+
+func compatibleVisiblePriorRuns(runs []agent.Run, target agent.Run) []agent.Run {
+	sorted := append([]agent.Run(nil), runs...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].CreatedAt.Equal(sorted[j].CreatedAt) {
+			return sorted[i].ID < sorted[j].ID
+		}
+		return sorted[i].CreatedAt.Before(sorted[j].CreatedAt)
+	})
+	visible := []agent.Run{}
+	for _, candidate := range sorted {
+		if candidate.ID == target.ID || !candidate.CreatedAt.Before(target.CreatedAt) || !auditRunTerminal(candidate.Status) || auditMetadataString(candidate.Metadata, "parentRunId") != "" {
+			continue
+		}
+		retryOf := auditMetadataString(candidate.Metadata, "retryOfRunId")
+		if retryOf == "" {
+			visible = append(visible, candidate)
+			continue
+		}
+		replaceIndex := -1
+		retryRoot := auditMetadataString(candidate.Metadata, "retryRootRunId")
+		for index, existing := range visible {
+			if existing.ID == retryOf || (retryRoot != "" && (existing.ID == retryRoot || auditMetadataString(existing.Metadata, "retryRootRunId") == retryRoot)) {
+				replaceIndex = index
+				break
+			}
+		}
+		if replaceIndex >= 0 {
+			visible = append(visible[:replaceIndex], candidate)
+		} else {
+			visible = append(visible, candidate)
+		}
+	}
+	return visible
+}
+
+func auditRunTerminal(status agent.RunStatus) bool {
+	switch status {
+	case agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func auditMetadataString(raw json.RawMessage, key string) string {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return ""
+	}
+	var record map[string]any
+	if json.Unmarshal(raw, &record) != nil {
+		return ""
+	}
+	return auditStringField(record, key)
+}
+
+func writeAgentContextMessagesTable(stdout io.Writer, title string, messages []agentContextAuditMessage, fullContent bool) error {
+	rows := make([][]string, 0, len(messages))
+	for _, message := range messages {
+		content := message.ContentPreview
+		if fullContent {
+			content = message.Content
+		}
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", message.Index),
+			message.Role,
+			message.ToolName,
+			strings.Join(message.ToolCalls, ","),
+			fmt.Sprintf("%d", message.ContentChars),
+			content,
+		})
+	}
+	if title != "" {
+		return writeSection(stdout, title, []string{"#", "role", "tool", "tool_calls", "chars", "content"}, rows)
+	}
+	return writeTable(stdout, []string{"#", "role", "tool", "tool_calls", "chars", "content"}, rows)
+}
+
+func sortedAuditEventTypes(counts map[string]int) []string {
+	values := make([]string, 0, len(counts))
+	for eventType := range counts {
+		values = append(values, eventType)
+	}
+	sort.Strings(values)
+	return values
+}
+
+func auditStringField(record map[string]any, key string) string {
 	value, _ := record[key].(string)
 	return value
 }
 
-func firstStringField(record map[string]any, keys ...string) string {
+func firstAuditStringField(record map[string]any, keys ...string) string {
 	for _, key := range keys {
-		if value := stringField(record, key); value != "" {
+		if value := auditStringField(record, key); value != "" {
 			return value
 		}
 	}
 	return ""
 }
 
-func mapField(record map[string]any, key string) map[string]any {
+func auditMapField(record map[string]any, key string) map[string]any {
 	value, _ := record[key].(map[string]any)
 	return value
 }

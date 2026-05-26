@@ -183,13 +183,16 @@ Inspect storage and collector health:
 Inspect the exact provider-facing model context recorded for an agent run:
 
 ```bash
-./bin/kube-insight db agent-context run_abc123 --db kubeinsight.db
-./bin/kube-insight db agent-context run_abc123 --db kubeinsight.db --all --output json
+./bin/kube-insight --db kubeinsight.db db agent-context run_abc123
+./bin/kube-insight --db kubeinsight.db db agent-context run_abc123 --all --output json
 ```
 
 Use this when debugging follow-up drift, retry rewind behavior, or provider
 prompt-cache friendliness. The command reads `completion.request` events and
 shows the ordered messages actually sent to the model.
+Older runs may predate `completion.request`; in that case the command prints a
+warning plus the legacy visible user/final-answer events, but exact provider
+request reconstruction is unavailable.
 
 Run a long-lived local ClickHouse container for development:
 

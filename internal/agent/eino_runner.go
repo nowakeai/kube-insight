@@ -331,6 +331,53 @@ func normalizedToolInput(arguments string) json.RawMessage {
 	return jsonRaw(map[string]string{"arguments": arguments})
 }
 
+func completionMessageEventData(role MessageRole, msg *schema.Message) map[string]any {
+	data := map[string]any{
+		"format":  "kube-insight.agent.message.v1",
+		"role":    role,
+		"content": msg.Content,
+	}
+	if len(msg.ToolCalls) > 0 {
+		toolCalls := make([]map[string]any, 0, len(msg.ToolCalls))
+		for _, call := range msg.ToolCalls {
+			toolCalls = append(toolCalls, map[string]any{
+				"id":   call.ID,
+				"type": "function",
+				"function": map[string]any{
+					"name":      call.Function.Name,
+					"arguments": call.Function.Arguments,
+				},
+			})
+		}
+		data["tool_calls"] = toolCalls
+	}
+	return data
+}
+
+func completionToolResultEventData(msg *schema.Message, name, status, outputSummary, artifactID, errorMessage string) map[string]any {
+	data := map[string]any{
+		"format":        "kube-insight.agent.message.v1",
+		"role":          RoleTool,
+		"toolCallId":    msg.ToolCallID,
+		"name":          name,
+		"status":        status,
+		"outputSummary": outputSummary,
+	}
+	if artifactID != "" {
+		data["outputArtifactId"] = artifactID
+	}
+	if errorMessage != "" {
+		data["error"] = errorMessage
+	}
+	if len(msg.Content) <= 32768 {
+		data["content"] = msg.Content
+	} else {
+		data["contentOmitted"] = true
+		data["contentBytes"] = len(msg.Content)
+	}
+	return data
+}
+
 func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (einoRecordedMessage, error) {
 	if event == nil || event.Output == nil || event.Output.MessageOutput == nil {
 		return einoRecordedMessage{}, nil
@@ -353,6 +400,11 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (ein
 	}
 	if msg.Content != "" && role != RoleTool {
 		if err := r.append(ctx, EventMessageCreated, MessageEventData{MessageID: NewMessageID(), Role: role, Content: msg.Content}); err != nil {
+			return recorded, err
+		}
+	}
+	if role != RoleTool && (msg.Content != "" || len(msg.ToolCalls) > 0) {
+		if err := r.append(ctx, EventCompletionMessage, completionMessageEventData(role, msg)); err != nil {
 			return recorded, err
 		}
 	}
@@ -425,6 +477,9 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (ein
 		if err := r.append(ctx, eventType, ToolCallEventData{ToolCallID: msg.ToolCallID, Name: name, Status: status, OutputSummary: outputSummary, OutputArtifactID: artifactID, DurationMS: durationMS, Error: errorMessage}); err != nil {
 			return recorded, err
 		}
+		if err := r.append(ctx, EventCompletionToolResult, completionToolResultEventData(msg, name, status, outputSummary, artifactID, errorMessage)); err != nil {
+			return recorded, err
+		}
 		if err := r.append(ctx, EventToolAudit, ToolAuditEventData{RunID: r.runID, ToolCallID: msg.ToolCallID, Name: name, Status: status, Input: draft.Input, OutputSummary: outputSummary, OutputArtifactID: artifactID, DurationMS: durationMS, Error: errorMessage}); err != nil {
 			return recorded, err
 		}
@@ -471,6 +526,14 @@ func (r einoRunRecorder) recordStream(ctx context.Context, output *adk.MessageVa
 	content := builder.String()
 	if r.enabled() && content != "" {
 		if err := r.append(ctx, EventMessageDone, MessageEventData{MessageID: messageID, Role: role, Content: content}); err != nil {
+			return einoRecordedMessage{}, err
+		}
+		if err := r.append(ctx, EventCompletionMessage, map[string]any{
+			"format":    "kube-insight.agent.message.v1",
+			"messageId": messageID,
+			"role":      role,
+			"content":   content,
+		}); err != nil {
 			return einoRecordedMessage{}, err
 		}
 	}

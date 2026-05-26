@@ -27,15 +27,24 @@ func agentConversationMessagesForRun(ctx context.Context, store agent.Store, run
 	if err != nil {
 		return nil
 	}
+	contextRoot := run
+	if retryOfRunID := retryOfRunIDFromMetadata(run.Metadata); retryOfRunID != "" {
+		if retried, err := store.GetRun(ctx, retryOfRunID); err == nil {
+			contextRoot = retried
+		}
+	}
 	prior := make([]agent.Run, 0, len(session.Runs))
 	for _, candidate := range session.Runs {
-		if candidate.ID == run.ID || !candidate.CreatedAt.Before(run.CreatedAt) || !agentRunStatusTerminal(candidate.Status) {
+		if candidate.ID == run.ID || candidate.ID == contextRoot.ID || !candidate.CreatedAt.Before(contextRoot.CreatedAt) || !agentRunStatusTerminal(candidate.Status) {
 			continue
 		}
 		prior = append(prior, candidate)
 	}
 	if len(prior) == 0 {
 		return nil
+	}
+	if transcript := conversationFromCompletionEvents(ctx, store, prior); len(transcript) > 0 {
+		return transcript
 	}
 	latest := prior[len(prior)-1]
 	if transcript := visibleConversationFromRunCreatedTranscript(ctx, store, latest.ID); len(transcript) > 0 {
@@ -47,6 +56,84 @@ func agentConversationMessagesForRun(ctx context.Context, store agent.Store, run
 		if answer := finalAnswerForRunContext(ctx, store, candidate.ID); answer != "" {
 			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: candidate.ID})
 		}
+	}
+	return messages
+}
+
+func retryOfRunIDFromMetadata(metadata json.RawMessage) string {
+	if len(metadata) == 0 || !json.Valid(metadata) {
+		return ""
+	}
+	var record map[string]any
+	if json.Unmarshal(metadata, &record) != nil {
+		return ""
+	}
+	value, _ := record["retryOfRunId"].(string)
+	return value
+}
+
+func (s *Server) recordCompletionInput(ctx context.Context, run agent.Run, messages []agent.Message) error {
+	userMessage := agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt}
+	if _, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventCompletionMessage,
+		Data: mustJSON(completionMessageEventValue(userMessage)),
+	}); err != nil {
+		return err
+	}
+	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
+		Type: agent.EventCompletionRequest,
+		Data: mustJSON(map[string]any{
+			"format":   "kube-insight.agent.completion.v1",
+			"provider": run.Provider,
+			"model":    run.Model,
+			"messages": completionMessagesValue(messages),
+		}),
+	})
+	return err
+}
+
+func conversationFromCompletionEvents(ctx context.Context, store agent.Store, runs []agent.Run) []agent.Message {
+	messages := []agent.Message{}
+	sawCompletionEvents := false
+	for _, run := range runs {
+		events, err := store.ListRunEvents(ctx, run.ID)
+		if err != nil {
+			continue
+		}
+		runHadAssistant := false
+		for _, event := range events {
+			switch event.Type {
+			case agent.EventCompletionMessage:
+				message, ok := completionMessageFromEventData(event.Data)
+				if !ok {
+					continue
+				}
+				sawCompletionEvents = true
+				if message.Role != agent.RoleUser && message.Role != agent.RoleAssistant {
+					continue
+				}
+				if message.Role == agent.RoleAssistant && strings.TrimSpace(message.Content) == "" {
+					continue
+				}
+				if message.RunID == "" {
+					message.RunID = run.ID
+				}
+				messages = append(messages, message)
+				if message.Role == agent.RoleAssistant {
+					runHadAssistant = true
+				}
+			case agent.EventCompletionToolResult:
+				sawCompletionEvents = true
+			}
+		}
+		if sawCompletionEvents && !runHadAssistant {
+			if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
+				messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
+			}
+		}
+	}
+	if !sawCompletionEvents {
+		return nil
 	}
 	return messages
 }
@@ -86,31 +173,70 @@ func appendFinalAnswerIfMissing(ctx context.Context, store agent.Store, runID st
 	return append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: runID})
 }
 
-func agentTranscriptMessagesValue(messages []agent.Message) []map[string]any {
+func completionMessagesValue(messages []agent.Message) []map[string]any {
 	values := make([]map[string]any, 0, len(messages))
 	for _, message := range messages {
-		value := map[string]any{
-			"role":    message.Role,
-			"content": message.Content,
-		}
-		if message.ID != "" {
-			value["id"] = message.ID
-		}
-		if message.RunID != "" {
-			value["runId"] = message.RunID
-		}
-		if !message.CreatedAt.IsZero() {
-			value["createdAt"] = message.CreatedAt.Format(time.RFC3339Nano)
-		}
-		if len(message.Metadata) > 0 && json.Valid(message.Metadata) {
-			var metadata any
-			if json.Unmarshal(message.Metadata, &metadata) == nil {
-				value["metadata"] = metadata
-			}
-		}
-		values = append(values, value)
+		values = append(values, completionRequestMessageValue(message))
 	}
 	return values
+}
+
+func completionMessageEventValue(message agent.Message) map[string]any {
+	value := completionRequestMessageValue(message)
+	value["format"] = "kube-insight.agent.message.v1"
+	return value
+}
+
+func completionRequestMessageValue(message agent.Message) map[string]any {
+	value := map[string]any{
+		"role":    message.Role,
+		"content": message.Content,
+	}
+	if message.ID != "" {
+		value["id"] = message.ID
+	}
+	if message.RunID != "" {
+		value["runId"] = message.RunID
+	}
+	if !message.CreatedAt.IsZero() {
+		value["createdAt"] = message.CreatedAt.Format(time.RFC3339Nano)
+	}
+	if len(message.Metadata) > 0 && json.Valid(message.Metadata) {
+		var metadata any
+		if json.Unmarshal(message.Metadata, &metadata) == nil {
+			value["metadata"] = metadata
+		}
+	}
+	return value
+}
+
+func completionMessageFromEventData(raw json.RawMessage) (agent.Message, bool) {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return agent.Message{}, false
+	}
+	var object map[string]any
+	if json.Unmarshal(raw, &object) != nil {
+		return agent.Message{}, false
+	}
+	role, _ := object["role"].(string)
+	content, _ := object["content"].(string)
+	if role == "" {
+		return agent.Message{}, false
+	}
+	message := agent.Message{Role: agent.MessageRole(role), Content: content}
+	message.ID, _ = object["id"].(string)
+	message.RunID, _ = object["runId"].(string)
+	if createdAt, _ := object["createdAt"].(string); createdAt != "" {
+		if parsed, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
+			message.CreatedAt = parsed
+		}
+	}
+	if metadata, ok := object["metadata"]; ok {
+		if encoded, err := json.Marshal(metadata); err == nil {
+			message.Metadata = encoded
+		}
+	}
+	return message, true
 }
 
 func agentTranscriptMessagesFromRunCreatedData(raw json.RawMessage) []agent.Message {

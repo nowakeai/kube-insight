@@ -141,7 +141,7 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	messages := s.agentMessagesForRun(r.Context(), run)
-	if err := s.recordRunCreated(r.Context(), run, messages); err != nil {
+	if err := s.recordRunCreated(r.Context(), run); err != nil {
 		writeAgentStoreError(w, err)
 		return
 	}
@@ -175,7 +175,7 @@ func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	messages := s.agentMessagesForRun(r.Context(), run)
-	if err := s.recordRunCreated(r.Context(), run, messages); err != nil {
+	if err := s.recordRunCreated(r.Context(), run); err != nil {
 		writeAgentStoreError(w, err)
 		return
 	}
@@ -183,17 +183,13 @@ func (s *Server) handleRetryAgentRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, run)
 }
 
-func (s *Server) recordRunCreated(ctx context.Context, run agent.Run, messages []agent.Message) error {
+func (s *Server) recordRunCreated(ctx context.Context, run agent.Run) error {
 	_, err := s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
 		Type: agent.EventRunCreated,
-		Data: mustJSON(map[string]any{
-			"runId":     run.ID,
-			"sessionId": run.SessionID,
-			"status":    run.Status,
-			"transcript": map[string]any{
-				"format":   "kube-insight.agent.messages.v1",
-				"messages": agentTranscriptMessagesValue(messages),
-			},
+		Data: mustJSON(agent.RunStatusEventData{
+			RunID:     run.ID,
+			SessionID: run.SessionID,
+			Status:    run.Status,
 		}),
 	})
 	return err
@@ -344,6 +340,10 @@ func (s *Server) startAgentRun(run agent.Run, messages []agent.Message) {
 	go func() {
 		defer s.agentRunWG.Done()
 		defer s.unregisterAgentRunCancel(run.ID)
+		if err := s.recordCompletionInput(runCtx, run, messages); err != nil {
+			s.recordAgentRunFailure(context.Background(), run.ID, err)
+			return
+		}
 		_, err := s.agentRunner.Run(runCtx, agent.EinoRunInput{
 			Messages: messages,
 			Store:    s.agentStore,

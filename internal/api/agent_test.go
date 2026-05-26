@@ -125,10 +125,13 @@ func TestCreateAgentRunStartsRunnerAndFollowEvents(t *testing.T) {
 	}
 
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
-	for _, want := range []string{"event: run.created", "event: run.started", "event: answer.final", "event: run.completed", `"content":"checked cluster health"`, `"transcript"`, `"messages"`, `"is the api healthy?"`} {
+	for _, want := range []string{"event: run.created", "event: completion.message", "event: completion.request", "event: run.started", "event: answer.final", "event: run.completed", `"content":"checked cluster health"`, `"messages"`, `"is the api healthy?"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("events missing %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, `"transcript"`) {
+		t.Fatalf("run.created should not contain cumulative transcript: %s", body)
 	}
 }
 
@@ -165,10 +168,13 @@ func TestCreateAgentRunReplaysPriorConversationMessages(t *testing.T) {
 		t.Fatal("first runner input missing")
 	}
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+first.ID+"/events?follow=true", http.StatusOK)
-	for _, want := range []string{`"transcript"`, `"messages"`, "最近有没有 OOM 现象？"} {
+	for _, want := range []string{"event: completion.message", "event: completion.request", `"messages"`, "最近有没有 OOM 现象？"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("first run events missing %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, `"transcript"`) {
+		t.Fatalf("first run should not contain cumulative transcript: %s", body)
 	}
 
 	var second struct {
@@ -238,7 +244,7 @@ func TestCreateAgentRunStreamsArtifactAndCitationEvents(t *testing.T) {
 }
 
 func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
-	runner := &retryingAgentRunner{}
+	runner := &retryingAgentRunner{inputs: make(chan agent.EinoRunInput, 3)}
 	handler, err := NewServer(ServerOptions{
 		OpenStore: func(context.Context) (ReadStore, error) {
 			closed := false
@@ -261,6 +267,14 @@ func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 		ID string `json:"id"`
 	}
 	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"retry this","provider":"openai-compatible","model":"mimo-v2.5-pro","metadata":{"source":"test"}}`, http.StatusCreated, &run)
+	select {
+	case input := <-runner.inputs:
+		if len(input.Messages) != 1 || input.Messages[0].Content != "retry this" {
+			t.Fatalf("initial retry runner input = %#v", input.Messages)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial retry runner input missing")
+	}
 	body := getBody(t, server.URL+"/api/v1/agent/runs/"+run.ID+"/events?follow=true", http.StatusOK)
 	if !strings.Contains(body, "event: run.failed") || !strings.Contains(body, "provider temporarily unavailable") {
 		t.Fatalf("failed run events = %s", body)
@@ -286,6 +300,19 @@ func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 	clientContext, _ := metadata["clientContext"].(map[string]any)
 	if metadata["retryOfRunId"] != run.ID || metadata["retryRootRunId"] != run.ID || metadata["source"] != "test" || clientContext["sentAt"] != "2026-05-25T02:10:00.000Z" {
 		t.Fatalf("retry metadata = %#v", metadata)
+	}
+	select {
+	case input := <-runner.inputs:
+		if len(input.Messages) != 2 || input.Messages[0].Role != agent.RoleSystem || input.Messages[1].Content != "retry this" {
+			t.Fatalf("retried runner input = %#v", input.Messages)
+		}
+		for _, message := range input.Messages {
+			if message.Role == agent.RoleAssistant || strings.Contains(message.Content, "provider temporarily unavailable") {
+				t.Fatalf("retry should rewind before retried run, got messages %#v", input.Messages)
+			}
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried runner input missing")
 	}
 
 	body = getBody(t, server.URL+"/api/v1/agent/runs/"+retried.ID+"/events?follow=true", http.StatusOK)

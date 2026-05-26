@@ -20,13 +20,14 @@ Current storage shape:
 - `agent_run_events` stores append-only run events such as lifecycle status,
   messages, tool calls, artifacts, citations, and final answers.
 
-Current redundancy:
+Redundancy addressed by this plan:
 
 - `agent_runs.input` stores the user input for each run.
-- `run.created.data.transcript.messages` also stores the runner input message
-  snapshot. For follow-up runs, that snapshot includes prior visible
-  conversation messages plus the new user message, so long sessions become
-  cumulative and approach quadratic duplication.
+- Earlier development briefly stored `run.created.data.transcript.messages` as
+  the runner input snapshot. For follow-up runs, that snapshot included prior
+  visible conversation messages plus the new user message, so long sessions
+  became cumulative and approached quadratic duplication. New runs must keep
+  `run.created` lifecycle-only.
 - Streaming assistant output is represented as `message.delta` events and then
   again as a full `message.completed` event. The final answer is also emitted
   as `answer.final`.
@@ -35,9 +36,9 @@ Current redundancy:
   `artifact.created`, with `tool.completed` and `tool.audit` pointing at the
   artifact through `outputArtifactId`.
 
-The cumulative `run.created.transcript.messages` snapshot fixes short-term
-follow-up context, but it is not a clean raw transcript model. It should not be
-expanded into a permanent session-memory layer.
+The cumulative `run.created.transcript.messages` snapshot is not a clean raw
+transcript model. It must remain legacy-only compatibility input, not a
+permanent session-memory layer.
 
 ## Goals
 
@@ -239,21 +240,22 @@ Disallowed compaction:
 
 ### Phase 1: Stop Cumulative Snapshots
 
-- Remove `run.created.data.transcript.messages` from newly created runs.
-- Keep `run.created` lifecycle-only.
-- Add compatibility tests proving follow-up context still works without
+- [x] Remove `run.created.data.transcript.messages` from newly created runs.
+- [x] Keep `run.created` lifecycle-only.
+- [x] Add compatibility tests proving follow-up context still works without
   cumulative snapshots.
-- Keep legacy parsing only for existing data created before the change.
+- [x] Keep legacy parsing only for existing data created before the change.
 
 ### Phase 2: Add Raw Completion Events
 
-- Add event constants and data structs for `completion.request`,
+- [x] Add event constants for `completion.request`,
   `completion.message`, and `completion.tool_result`.
-- Record `completion.request` immediately before each model call.
-- Record assistant messages with tool calls in provider-shaped form.
-- Record model-visible tool result messages separately from UI/audit tool
+- [x] Record the initial `completion.request` immediately before each run's
+  Eino runner call. Per-tool-loop provider request capture remains future work.
+- [x] Record assistant messages with tool calls in provider-shaped form.
+- [x] Record model-visible tool result messages separately from UI/audit tool
   events.
-- Update replay to prefer completion events.
+- [x] Update replay to prefer completion events.
 
 ### Phase 3: Make Context Replay Transcript-First
 

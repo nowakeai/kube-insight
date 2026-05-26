@@ -25,6 +25,9 @@ export const agentKnownRunEventTypeSchema = z.enum([
   "message.delta",
   "message.completed",
   "answer.final",
+  "completion.request",
+  "completion.message",
+  "completion.tool_result",
   "usage.delta",
   "tool.started",
   "tool.completed",
@@ -87,6 +90,10 @@ export const messageEventDataSchema = z.object({
   delta: z.string().optional(),
   content: z.string().optional(),
 })
+
+export const completionEventDataSchema = z.object({
+  format: z.string().optional(),
+}).passthrough()
 
 export const usageEventDataSchema = z.object({
   phase: z.string().optional(),
@@ -190,6 +197,10 @@ export function parseAgentRunEventData(type: string, data: unknown) {
     case "message.completed":
     case "answer.final":
       return messageEventDataSchema.parse(data)
+    case "completion.request":
+    case "completion.message":
+    case "completion.tool_result":
+      return completionEventDataSchema.parse(data)
     case "usage.delta":
       return usageEventDataSchema.parse(data)
     case "tool.started":

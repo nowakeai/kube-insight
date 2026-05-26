@@ -223,14 +223,14 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   continue from last completed tool result, branch from an earlier run, and
   preserve tool evidence IDs.
 - [x] Replay prior visible conversation messages for follow-up runs.
-  - Server-started runs persist the actual runner input transcript in the
-    existing `run.created` event payload, then reconstruct follow-up prompts from
-    the latest prior raw transcript snapshot plus the prior final answer. This
-    keeps the database shape as an append-only run-event log instead of adding a
-    separate session-memory table. Do not replace the transcript with selective
-    summaries for normal follow-ups; keep token reduction in tool-output
-    reduction, subagent/evidence condensation, and future explicit compaction
-    layers.
+  - Server-started runs keep `run.created` lifecycle-only, persist the actual
+    model request as `completion.request`, and persist non-cumulative
+    model-visible turns as `completion.message` / `completion.tool_result`.
+    Follow-up prompts are reconstructed from completion events, with legacy
+    `run.created.transcript` parsing only for old data. Do not replace the
+    transcript with selective summaries for normal follow-ups; keep token
+    reduction in tool-output reduction, subagent/evidence condensation, and
+    future explicit compaction layers.
 - [ ] Add session memory compaction only as an explicit layer above the faithful
   transcript: pinned user facts, durable run summaries, artifact references, and
   exclusion of oversized raw tool outputs from future prompts unless resuming a

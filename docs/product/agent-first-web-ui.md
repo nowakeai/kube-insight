@@ -301,14 +301,15 @@ Optimization principles:
   MCP/API policy hooks before tool execution and in audit records after tool
   execution.
 - Transcript-first memory/context. Persist the session/run event log as the
-  replayable source of truth. Each server-started run stores the actual runner
-  input transcript inside the existing `run.created` event payload; normal
-  follow-up prompts are reconstructed from that ordered visible user/assistant
-  transcript instead of selective summaries. Keep stable product instructions in
-  repo docs. Use explicit compaction, selected artifact references, and
-  subagent/tool-output condensation only above that transcript layer, and do not
-  inject oversized raw tool outputs into future prompts unless checkpoint resume
-  requires the exact tool message.
+  replayable source of truth. `run.created` is lifecycle-only; each
+  server-started run stores its actual model request as `completion.request` and
+  non-cumulative model-visible turns as `completion.message` /
+  `completion.tool_result`. Normal follow-up prompts are reconstructed from that
+  ordered transcript instead of selective summaries. Keep stable product
+  instructions in repo docs. Use explicit compaction, selected artifact
+  references, and subagent/tool-output condensation only above that transcript
+  layer, and do not inject oversized raw tool outputs into future prompts unless
+  checkpoint resume requires the exact tool message.
 - Checkpoints and recovery. Long agent runs should be recoverable. Store every
   run event, tool call, error, and artifact so a user can inspect, retry,
   continue, or branch from a failed run.

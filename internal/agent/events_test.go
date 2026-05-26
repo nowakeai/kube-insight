@@ -18,6 +18,9 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		EventMessageDelta,
 		EventMessageDone,
 		EventFinalAnswer,
+		EventCompletionRequest,
+		EventCompletionMessage,
+		EventCompletionToolResult,
 		EventUsageDelta,
 		EventToolStarted,
 		EventToolCompleted,
@@ -38,8 +41,8 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		}
 		seen[value] = true
 	}
-	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventUsageDelta != "usage.delta" || EventToolAudit != "tool.audit" || EventArtifact != "artifact.created" {
-		t.Fatalf("unexpected event names: %q %q %q %q %q", EventRunCreated, EventFinalAnswer, EventUsageDelta, EventToolAudit, EventArtifact)
+	if EventRunCreated != "run.created" || EventFinalAnswer != "answer.final" || EventCompletionRequest != "completion.request" || EventCompletionMessage != "completion.message" || EventCompletionToolResult != "completion.tool_result" {
+		t.Fatalf("unexpected event names: %q %q %q %q %q", EventRunCreated, EventFinalAnswer, EventCompletionRequest, EventCompletionMessage, EventCompletionToolResult)
 	}
 }
 

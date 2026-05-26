@@ -178,11 +178,15 @@ func (r *blockingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput)
 }
 
 type retryingAgentRunner struct {
-	mu    sync.Mutex
-	calls int
+	mu     sync.Mutex
+	calls  int
+	inputs chan agent.EinoRunInput
 }
 
 func (r *retryingAgentRunner) Run(ctx context.Context, input agent.EinoRunInput) (agent.EinoRunResult, error) {
+	if r.inputs != nil {
+		r.inputs <- input
+	}
 	r.mu.Lock()
 	r.calls++
 	call := r.calls

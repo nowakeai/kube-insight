@@ -136,7 +136,7 @@ func TestEinoRunnerRecordsRunEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []RunEventType{EventRunStarted, EventMessageCreated, EventFinalAnswer, EventRunCompleted}
+	wantTypes := []RunEventType{EventRunStarted, EventMessageCreated, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
 	if len(events) != len(wantTypes) {
 		t.Fatalf("events = %#v", events)
 	}
@@ -181,32 +181,39 @@ func TestEinoRunRecorderMapsToolEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 6 || events[1].Type != EventMessageCreated || events[2].Type != EventToolStarted || events[3].Type != EventArtifact || events[4].Type != EventToolCompleted || events[5].Type != EventToolAudit {
+	if len(events) != 8 || events[1].Type != EventMessageCreated || events[2].Type != EventCompletionMessage || events[3].Type != EventToolStarted || events[4].Type != EventArtifact || events[5].Type != EventToolCompleted || events[6].Type != EventCompletionToolResult || events[7].Type != EventToolAudit {
 		t.Fatalf("events = %#v", events)
 	}
 	var started ToolCallEventData
-	if err := json.Unmarshal(events[2].Data, &started); err != nil {
+	if err := json.Unmarshal(events[3].Data, &started); err != nil {
 		t.Fatal(err)
 	}
 	if started.ToolCallID != "tool_1" || started.Name != "kube_insight_search" || string(started.Input) != `{"query":"api"}` {
 		t.Fatalf("started = %#v input=%s", started, string(started.Input))
 	}
 	var artifact ArtifactEventData
-	if err := json.Unmarshal(events[3].Data, &artifact); err != nil {
+	if err := json.Unmarshal(events[4].Data, &artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact.Artifact.Kind != ArtifactKindToolCall || artifact.Artifact.ID == "" || !strings.Contains(string(artifact.Artifact.Data), `"outputSummary":"summary={\"matches\":1}"`) {
 		t.Fatalf("artifact = %#v data=%s", artifact, string(artifact.Artifact.Data))
 	}
 	var completed ToolCallEventData
-	if err := json.Unmarshal(events[4].Data, &completed); err != nil {
+	if err := json.Unmarshal(events[5].Data, &completed); err != nil {
 		t.Fatal(err)
 	}
 	if completed.ToolCallID != "tool_1" || completed.Name != "kube_insight_search" || completed.OutputArtifactID != artifact.Artifact.ID || completed.OutputSummary != `summary={"matches":1}` || len(completed.Output) != 0 {
 		t.Fatalf("completed = %#v output=%s", completed, string(completed.Output))
 	}
+	var toolResult map[string]any
+	if err := json.Unmarshal(events[6].Data, &toolResult); err != nil {
+		t.Fatal(err)
+	}
+	if toolResult["toolCallId"] != "tool_1" || toolResult["outputArtifactId"] != artifact.Artifact.ID || toolResult["role"] != string(RoleTool) {
+		t.Fatalf("completion tool result = %#v", toolResult)
+	}
 	var audit ToolAuditEventData
-	if err := json.Unmarshal(events[5].Data, &audit); err != nil {
+	if err := json.Unmarshal(events[7].Data, &audit); err != nil {
 		t.Fatal(err)
 	}
 	if audit.RunID != run.ID || audit.ToolCallID != "tool_1" || audit.Name != "kube_insight_search" || audit.Status != "completed" || string(audit.Input) != `{"query":"api"}` || audit.OutputArtifactID != artifact.Artifact.ID || audit.OutputSummary == "" || len(audit.Output) != 0 {
@@ -304,11 +311,11 @@ func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 7 || events[6].Type != EventArtifact {
+	if len(events) != 9 || events[8].Type != EventArtifact {
 		t.Fatalf("events = %#v", events)
 	}
 	var artifact ArtifactEventData
-	if err := json.Unmarshal(events[6].Data, &artifact); err != nil {
+	if err := json.Unmarshal(events[8].Data, &artifact); err != nil {
 		t.Fatal(err)
 	}
 	if artifact.Artifact.Kind != ArtifactKindK8sResourceList || !strings.Contains(artifact.Artifact.Title, "Search evidence") || !strings.Contains(string(artifact.Artifact.Data), `"name":"api-0"`) {
@@ -458,7 +465,7 @@ func TestEinoRunnerConfiguresHandlersCheckpointAndStreaming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []RunEventType{EventRunStarted, EventMessageDelta, EventMessageDelta, EventMessageDone, EventFinalAnswer, EventRunCompleted}
+	wantTypes := []RunEventType{EventRunStarted, EventMessageDelta, EventMessageDelta, EventMessageDone, EventCompletionMessage, EventFinalAnswer, EventRunCompleted}
 	if len(events) != len(wantTypes) {
 		t.Fatalf("events = %#v", events)
 	}

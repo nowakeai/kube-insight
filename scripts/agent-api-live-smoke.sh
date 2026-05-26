@@ -179,6 +179,10 @@ for question in "${question_list[@]}"; do
   awk '/^data: /{sub(/^data: /,""); print}' "${sse_path}" | jq -s '.' >"${events_json}"
   status="$(jq -r 'map(select(.type=="run.completed" or .type=="run.failed" or .type=="run.cancelled")) | last | .type // empty' "${events_json}")"
   completion_requests="$(jq '[.[] | select(.type=="completion.request")] | length' "${events_json}")"
+  tool_calls="$(jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed")]' "${events_json}")"
+  tool_call_count="$(jq 'length' <<<"${tool_calls}")"
+  tool_call_names="$(jq '[.[].data.name // ""] | map(select(. != ""))' <<<"${tool_calls}")"
+  failed_tool_call_count="$(jq '[.[] | select(.type=="tool.failed" or .data.status=="failed")] | length' <<<"${tool_calls}")"
   artifacts="$(jq '[.[] | select(.type=="artifact.created")] | length' "${events_json}")"
   citations="$(jq '[.[] | select(.type=="citation.created")] | length' "${events_json}")"
   child_run_ids="$(jq '[.[] | select(.type=="artifact.created") | .data.artifact.data.output.branches[]? | select(.childRunId != null) | .childRunId] | unique | length' "${events_json}")"
@@ -195,6 +199,17 @@ for question in "${question_list[@]}"; do
   fi
   context_json="${WORK_DIR}/${slug}.context.json"
   "${BIN}" --db "${DB_PATH}" db agent-context "${run_id}" --all --output json >"${context_json}"
+  initial_context_metrics="$(jq '
+    ((.requests[0] // {messages: []}).messages // []) as $messages
+    | ($messages | map(select(.role == "tool"))) as $toolMessages
+    | {
+      messages: ($messages | length),
+      totalChars: (($messages | map(.contentChars // 0) | add) // 0),
+      toolChars: (($toolMessages | map(.contentChars // 0) | add) // 0),
+      maxToolChars: (($toolMessages | map(.contentChars // 0) | max) // 0),
+      compactedToolResults: ($toolMessages | map(select((.content // "") | contains("kube-insight.agent.compacted_tool_result.v1"))) | length)
+    }
+  ' "${context_json}")"
   validate_context_tool_order "${context_json}"
   if [[ "${#completed_questions[@]}" -gt 0 ]]; then
     if ! jq -e --argjson maxChars "${MAX_HISTORICAL_TOOL_REPLAY_CHARS}" '
@@ -244,12 +259,16 @@ for question in "${question_list[@]}"; do
     --arg status "${status}" \
     --argjson completionRequests "${completion_requests}" \
     --argjson contextMessages "$(jq '.requests[-1].messageCount' "${context_json}")" \
+    --argjson initialContext "${initial_context_metrics}" \
+    --argjson toolCalls "${tool_call_count}" \
+    --argjson failedToolCalls "${failed_tool_call_count}" \
+    --argjson toolNames "${tool_call_names}" \
     --argjson artifacts "${artifacts}" \
     --argjson citations "${citations}" \
     --argjson childRunIds "${child_run_ids}" \
     --arg eventsPath "${events_json}" \
     --arg contextPath "${context_json}" \
-    '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
+    '{question:$question, runId:$runId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, initialContext:$initialContext, toolCalls:$toolCalls, failedToolCalls:$failedToolCalls, toolNames:$toolNames, artifacts:$artifacts, citations:$citations, childRunIds:$childRunIds, eventsPath:$eventsPath, contextPath:$contextPath}' >>"${SUMMARY_PATH}"
   completed_questions+=("${question}")
   completed_run_ids+=("${run_id}")
 done

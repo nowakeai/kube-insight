@@ -155,6 +155,10 @@ Useful overrides:
 - `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS`: max chars
   for each historical tool result in a follow-up run's initial request.
 
+The summary JSON records `initialContext` size metrics plus `toolCalls`,
+`failedToolCalls`, and `toolNames` for each run. Use these to compare whether
+context compaction reduces prompt size without causing extra rediscovery calls.
+
 Use an OOM follow-up pair when validating session-context replay:
 
 ```bash

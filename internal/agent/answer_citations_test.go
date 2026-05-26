@@ -123,3 +123,66 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 		t.Fatalf("final = %q citation=%#v", final.Content, citation)
 	}
 }
+
+func TestVerifiedAnswerCitationsCanUseScriptedQueryArtifact(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "node capacity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := newEinoRunRecorder(store, run.ID)
+	if err := recorder.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{
+		ID:    "artifact_scripted",
+		Kind:  ArtifactKindToolCall,
+		Title: "Tool output: kube_insight_scripted_query",
+		Data: jsonRaw(map[string]any{
+			"toolCallId": "call_scripted",
+			"name":       scriptedQueryToolName,
+			"output": map[string]any{
+				"queries": []map[string]any{{
+					"sql":      "select fact_key, numeric_value from object_facts where fact_key in ('node_capacity.cpu','node_capacity.memory')",
+					"rowCount": 2,
+				}},
+				"result": map[string]any{
+					"node_count":         1,
+					"total_cpu_cores":    8,
+					"total_memory_bytes": 33658339328,
+				},
+			},
+		}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := recorder.Complete(ctx, "There is 1 node with 8 CPU cores. {{evidence: scripted SQL rollup}}"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var citation CitationEventData
+	var final MessageEventData
+	for _, event := range events {
+		switch event.Type {
+		case EventCitation:
+			if err := json.Unmarshal(event.Data, &citation); err != nil {
+				t.Fatal(err)
+			}
+		case EventFinalAnswer:
+			if err := json.Unmarshal(event.Data, &final); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if citation.Citation.ArtifactID != "artifact_scripted" || citation.Citation.Text != "scripted SQL rollup" {
+		t.Fatalf("citation = %#v", citation)
+	}
+	if !strings.Contains(final.Content, "[scripted SQL rollup](#citation:"+citation.Citation.ID+")") {
+		t.Fatalf("final = %q citation=%#v", final.Content, citation)
+	}
+}

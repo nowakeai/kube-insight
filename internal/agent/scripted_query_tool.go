@@ -21,8 +21,8 @@ const (
 	defaultScriptedQueryOutputSize = 128 * 1024
 	maxScriptedQueryOutputSize     = 512 * 1024
 	maxScriptedQueryScriptSize     = 24 * 1024
-	defaultScriptedQueryMaxQueries = 4
-	maxScriptedQueryMaxQueries     = 8
+	defaultScriptedQueryMaxQueries = 6
+	maxScriptedQueryMaxQueries     = 10
 	defaultScriptedQueryMaxRows    = 100
 	maxScriptedQueryMaxRows        = 1000
 )
@@ -62,7 +62,7 @@ func NewScriptedQueryTool(sqlTool tool.InvokableTool) tool.BaseTool {
 func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: scriptedQueryToolName,
-		Desc: "Run bounded JavaScript that can call kube_insight_sql through sql(query, maxRows) and sqlAll([{name, sql, maxRows}]) for dependent or parallel read-only SQL investigation. Use after kube_insight_schema when one tool call should perform a small query plan, such as profile -> proof, several independent aggregates, or SQL rows plus compact grouping. The script has no filesystem, network, process, or environment access. Prefer returning compact JSON and answer from one successful scripted query instead of calling repeated SQL plus artifact_transform_js.",
+		Desc: "Run bounded JavaScript that can call kube_insight_sql through sql(query, maxRows) and sqlAll([{name, sql, maxRows}]) for dependent or parallel read-only SQL investigation. Use after kube_insight_schema when one tool call should perform a small query plan, such as profile -> proof, several independent aggregates, or SQL rows plus compact grouping. The script has no filesystem, network, process, or environment access. Prefer returning compact JSON and answer from one successful scripted query instead of calling repeated SQL plus artifact_transform_js. When the final answer uses this result, add a nearby evidence label such as {{evidence: Node capacity facts}} so the server can verify citations.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"script": {
 				Type:     schema.String,
@@ -79,7 +79,7 @@ func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 			},
 			"maxQueries": {
 				Type: schema.Integer,
-				Desc: "Optional maximum SQL calls allowed from the script. Defaults to 4 and is capped at 8.",
+				Desc: "Optional maximum SQL calls allowed from the script. Defaults to 6 and is capped at 10.",
 			},
 			"defaultMaxRows": {
 				Type: schema.Integer,
@@ -153,16 +153,20 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		vm.Interrupt("timeout")
 	})
 	defer timer.Stop()
-	value, err := vm.RunString(wrapJSTransformScript(script))
+	value, err := vm.RunString(wrapScriptedQueryScript(script))
 	if err != nil {
 		return "", fmt.Errorf("%s failed: %w", scriptedQueryToolName, err)
+	}
+	value, err = resolveScriptedQueryValue(value)
+	if err != nil {
+		return "", err
 	}
 	select {
 	case <-runCtx.Done():
 		return "", runCtx.Err()
 	default:
 	}
-	resultData, err := json.Marshal(value.Export())
+	resultData, err := json.Marshal(sanitizeJSExportForJSON(value.Export()))
 	if err != nil {
 		return "", fmt.Errorf("%s result is not JSON serializable: %w", scriptedQueryToolName, err)
 	}
@@ -175,6 +179,24 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		return "", fmt.Errorf("%s output too large: %d bytes > %d", scriptedQueryToolName, len(encoded), outputLimit)
 	}
 	return string(encoded), nil
+}
+
+func wrapScriptedQueryScript(script string) string {
+	return "\"use strict\";\n(async () => {\n" + script + "\n})()"
+}
+
+func resolveScriptedQueryValue(value goja.Value) (goja.Value, error) {
+	if promise, ok := value.Export().(*goja.Promise); ok {
+		switch promise.State() {
+		case goja.PromiseStateFulfilled:
+			return promise.Result(), nil
+		case goja.PromiseStateRejected:
+			return nil, fmt.Errorf("%s rejected: %v", scriptedQueryToolName, promise.Result())
+		default:
+			return nil, fmt.Errorf("%s returned a pending promise; asynchronous timers or external async operations are not supported", scriptedQueryToolName)
+		}
+	}
+	return value, nil
 }
 
 type scriptedQueryState struct {

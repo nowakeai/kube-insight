@@ -1,6 +1,10 @@
 package agent
 
-import "github.com/dop251/goja"
+import (
+	"math"
+
+	"github.com/dop251/goja"
+)
 
 const jsDataHelpersSource = `
 const __kubeInsightDataHelpers = (() => {
@@ -65,4 +69,34 @@ func installJSDataHelpers(vm *goja.Runtime) error {
 		return err
 	}
 	return vm.Set("_", helpers)
+}
+
+func sanitizeJSExportForJSON(value any) any {
+	switch typed := value.(type) {
+	case float64:
+		if math.IsNaN(typed) || math.IsInf(typed, 0) {
+			return nil
+		}
+		return typed
+	case float32:
+		value := float64(typed)
+		if math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil
+		}
+		return typed
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = sanitizeJSExportForJSON(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = sanitizeJSExportForJSON(item)
+		}
+		return out
+	default:
+		return value
+	}
 }

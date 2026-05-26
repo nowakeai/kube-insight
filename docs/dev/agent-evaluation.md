@@ -38,6 +38,8 @@ The default case set currently covers:
 | `oom-restart` | OOMKilled or restart evidence | search + history tools, resource/history artifacts, citation |
 | `oom-aggregate` | OOMKilled ranking/counting | health + schema + bounded aggregate SQL, citation |
 | `allocation-followup` | User corrects intent from live usage to allocation/configuration | schema-guided SQL and readable allocation/config evidence, citation |
+| `node-capacity` | Node count and total capacity | health + schema + Node capacity facts SQL, citation |
+| `scripted-query-node-capacity` | Dependent/compact SQL plan | schema + `kube_insight_scripted_query`, tool artifact, citation |
 | `recent-changes` | recent object changes | search + history tools, history artifact, citation |
 | `exact-recent-changes` | exact object recent changes | health + schema + one rollup SQL, citation |
 | `topology-mapping` | namespace topology | search + topology tools, topology artifact, citation |
@@ -78,7 +80,8 @@ go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -timeout 25m -v
 ```
 
 Use `KUBE_INSIGHT_AGENT_LIVE_EVAL_CASES` with comma-separated case IDs for
-targeted reruns, for example `allocation-followup,exact-recent-changes`.
+targeted reruns, for example
+`allocation-followup,exact-recent-changes,scripted-query-node-capacity`.
 
 The test fails on clear product regressions: missing required tools, missing
 evidence artifacts, no citations, terminal run failure, failed tools, missing
@@ -90,9 +93,10 @@ summary. Minor wording differences should be scored through answer terms and
 evidence checks, not exact text matching.
 
 The fake SQL tool used by `TestLiveLLMEvaluation` is input-aware: it returns
-change rows for change-history SQL, allocation rows for requests/limits SQL, and
-OOM rows for OOM/fact SQL. This keeps synthetic eval useful for model behavior
-without requiring live ClickHouse access or exporting real cluster data.
+change rows for change-history SQL, allocation rows for requests/limits SQL,
+Node capacity fact rows for capacity SQL, and OOM rows for OOM/fact SQL. This
+keeps synthetic eval useful for model behavior without requiring live ClickHouse
+access or exporting real cluster data.
 
 Latest synthetic provider findings after adding `js-transform-aggregation`,
 fixing the fake SQL branch order, and wrapping the JS transform tool as
@@ -176,6 +180,20 @@ KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smok
 scripts/agent-api-live-smoke.sh
 ```
 
+Use a Node capacity plus scripted-query prompt when validating the capacity
+facts and one-tool SQL planning path:
+
+```bash
+make build
+KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
+KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
+KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='How many Nodes are there, and what are total capacity CPU and memory? Cite the proof.;;Use one bounded scripted SQL plan to summarize Node count plus total capacity CPU and memory, and cite the proof.' \
+KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS=4 \
+KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-node-capacity" \
+scripts/agent-api-live-smoke.sh
+```
+
 
 ## 2026-05-25 Server Flow Smoke
 
@@ -226,8 +244,9 @@ Add these after the first harness has settled:
 - `zero-result-pivot`: feed a transcript where one exact query returns zero rows
   and require the next action to profile available keys/types or report a
   coverage gap instead of repeating wildcard variants.
-- `js-transform-aggregation`: feed JSON rows that need grouping/sorting and
-  require `artifact_transform_js` before the final answer.
+- `real-db-scripted-query`: run the scripted query case against the local
+  ClickHouse dev database, then compare tool count and answer quality against
+  the plain schema+SQL capacity case.
 - `noisy-evidence-condenser`: feed a large SQL/search artifact and require
   `evidence_condenser` with source artifact IDs, titles, and snippets.
 - `recoverable-sql-error`: feed a transcript with one failed SQL call and a

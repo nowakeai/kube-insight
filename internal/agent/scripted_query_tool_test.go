@@ -85,6 +85,31 @@ func TestScriptedQueryToolRunsSQLAll(t *testing.T) {
 	}
 }
 
+func TestScriptedQueryToolAllowsAwaitForSynchronousSQL(t *testing.T) {
+	ctx := context.Background()
+	sqlTool := &fakeScriptedSQLTool{results: map[string]any{
+		"select 1": map[string]any{"rows": []map[string]any{{"n": 1}}, "rowCount": 1},
+	}}
+	scripted := NewScriptedQueryTool(sqlTool).(tool.InvokableTool)
+	out, err := scripted.InvokableRun(ctx, `{
+		"script": "const result = await sql('select 1', 1); return rows(result)[0];"
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result scriptedQueryResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	if err := json.Unmarshal(result.Result, &row); err != nil {
+		t.Fatal(err)
+	}
+	if row["n"] != float64(1) {
+		t.Fatalf("row = %#v", row)
+	}
+}
+
 func TestScriptedQueryToolEnforcesQueryLimit(t *testing.T) {
 	ctx := context.Background()
 	sqlTool := &fakeScriptedSQLTool{results: map[string]any{"select 1": map[string]any{"rows": []map[string]any{{"n": 1}}}}}
@@ -121,12 +146,33 @@ func TestScriptedQueryToolDoesNotExposeHostCapabilities(t *testing.T) {
 	}
 }
 
+func TestScriptedQueryToolSanitizesNonFiniteNumbers(t *testing.T) {
+	ctx := context.Background()
+	sqlTool := &fakeScriptedSQLTool{results: map[string]any{}}
+	scripted := NewScriptedQueryTool(sqlTool).(tool.InvokableTool)
+	out, err := scripted.InvokableRun(ctx, `{"script":"return {nan: Number.NaN, inf: Infinity, ok: 3};"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result scriptedQueryResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Result, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["nan"] != nil || payload["inf"] != nil || payload["ok"] != float64(3) {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func TestScriptedQueryToolInfoEncouragesQueryPlanning(t *testing.T) {
 	info, err := NewScriptedQueryTool(&fakeScriptedSQLTool{}).Info(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{scriptedQueryToolName, "sql(query, maxRows)", "sqlAll", "after kube_insight_schema", "dependent or parallel"} {
+	for _, want := range []string{scriptedQueryToolName, "sql(query, maxRows)", "sqlAll", "after kube_insight_schema", "dependent or parallel", "{{evidence: Node capacity facts}}"} {
 		if !strings.Contains(info.Name+" "+info.Desc, want) {
 			t.Fatalf("info missing %q: %#v", want, info)
 		}

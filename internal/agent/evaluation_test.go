@@ -11,14 +11,16 @@ func TestDefaultEvaluationCasesCoverRepresentativeAgentQuestions(t *testing.T) {
 		t.Fatalf("default evaluation cases = %d, want at least 5", len(cases))
 	}
 	wantIDs := map[string]bool{
-		"service-health":           false,
-		"oom-restart":              false,
-		"oom-aggregate":            false,
-		"allocation-followup":      false,
-		"recent-changes":           false,
-		"exact-recent-changes":     false,
-		"topology-mapping":         false,
-		"js-transform-aggregation": false,
+		"service-health":               false,
+		"oom-restart":                  false,
+		"oom-aggregate":                false,
+		"allocation-followup":          false,
+		"node-capacity":                false,
+		"scripted-query-node-capacity": false,
+		"recent-changes":               false,
+		"exact-recent-changes":         false,
+		"topology-mapping":             false,
+		"js-transform-aggregation":     false,
 	}
 	for _, tc := range cases {
 		if tc.ID == "" || tc.Question == "" {
@@ -56,6 +58,33 @@ func TestEvaluateRunEventsPassesServiceHealthTranscript(t *testing.T) {
 	}
 	if report.TotalToolDurationMS != 430 {
 		t.Fatalf("total tool duration = %d", report.TotalToolDurationMS)
+	}
+}
+
+func TestEvaluateRunEventsPassesScriptedQueryTranscript(t *testing.T) {
+	var tc EvaluationCase
+	for _, candidate := range DefaultEvaluationCases() {
+		if candidate.ID == "scripted-query-node-capacity" {
+			tc = candidate
+			break
+		}
+	}
+	if tc.ID == "" {
+		t.Fatal("scripted-query-node-capacity case missing")
+	}
+	events := evaluationTranscript(
+		[]EvaluationToolCall{
+			{ID: "tool_schema", Name: "kube_insight_schema", Status: "completed", DurationMS: 80},
+			{ID: "tool_script", Name: scriptedQueryToolName, Status: "completed", DurationMS: 320},
+		},
+		[]string{ArtifactKindToolCall},
+		1,
+		"The cluster has 18 Node objects with 144 CPU cores and 576 GiB memory capacity.",
+	)
+
+	report := EvaluateRunEvents(tc, events)
+	if !report.Passed {
+		t.Fatalf("report should pass: %#v", report)
 	}
 }
 

@@ -94,6 +94,16 @@ cat >"${FIXTURE_PATH}" <<'JSON'
       }
     },
     {
+      "apiVersion": "v1",
+      "kind": "Node",
+      "metadata": {"name": "node-a", "uid": "node-a-uid", "labels": {"cloud.google.com/gke-nodepool": "default-pool"}},
+      "status": {
+        "capacity": {"cpu": "8", "memory": "32869472Ki", "pods": "110"},
+        "allocatable": {"cpu": "7900m", "memory": "31820896Ki", "pods": "110"},
+        "conditions": [{"type": "Ready", "status": "True"}]
+      }
+    },
+    {
       "apiVersion": "discovery.k8s.io/v1",
       "kind": "EndpointSlice",
       "metadata": {"name": "api-abc", "namespace": "default", "uid": "eps-api-abc-uid", "labels": {"kubernetes.io/service-name": "api"}},

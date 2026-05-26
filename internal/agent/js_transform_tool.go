@@ -131,7 +131,7 @@ func (JSTransformTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		return "", ctx.Err()
 	default:
 	}
-	outputData, err := json.Marshal(result.Export())
+	outputData, err := json.Marshal(sanitizeJSExportForJSON(result.Export()))
 	if err != nil {
 		return "", fmt.Errorf("%s result is not JSON serializable: %w", jsTransformToolName, err)
 	}

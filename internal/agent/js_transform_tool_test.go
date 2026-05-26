@@ -97,6 +97,26 @@ func TestJSTransformToolDoesNotExposeHostCapabilities(t *testing.T) {
 	}
 }
 
+func TestJSTransformToolSanitizesNonFiniteNumbers(t *testing.T) {
+	ctx := context.Background()
+	transform := NewJSTransformTool().(tool.InvokableTool)
+	out, err := transform.InvokableRun(ctx, `{"script":"return {nan: Number.NaN, inf: Infinity, ok: 3};"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result jsTransformResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Result, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["nan"] != nil || payload["inf"] != nil || payload["ok"] != float64(3) {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func TestJSTransformToolRejectsLargeInput(t *testing.T) {
 	ctx := context.Background()
 	transform := NewJSTransformTool().(tool.InvokableTool)

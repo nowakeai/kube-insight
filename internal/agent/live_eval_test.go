@@ -241,6 +241,7 @@ func liveEvalTools() []tool.BaseTool {
 				"resources": []any{
 					map[string]any{"kind": "Service", "resource": "services", "status": "watching", "clusterId": "eval-cluster"},
 					map[string]any{"kind": "Pod", "resource": "pods", "status": "watching", "clusterId": "eval-cluster"},
+					map[string]any{"kind": "Node", "resource": "nodes", "status": "watching", "clusterId": "eval-cluster"},
 					map[string]any{"kind": "EndpointSlice", "resource": "endpointslices", "status": "watching", "clusterId": "eval-cluster"},
 				},
 			},
@@ -316,7 +317,7 @@ func liveEvalTools() []tool.BaseTool {
 			output: map[string]any{
 				"backend": "sqlite",
 				"tables":  []any{"objects", "facts", "edges", "changes", "versions", "latest_index"},
-				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows."},
+				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows.", "For Node capacity, query node_capacity.cpu and node_capacity.memory facts, first taking the latest numeric_value per cluster_id/name/fact_key before summing."},
 			},
 		},
 		sqlTool,
@@ -345,6 +346,25 @@ func (t liveEvalSQLTool) InvokableRun(_ context.Context, argumentsInJSON string,
 	_ = json.Unmarshal([]byte(argumentsInJSON), &args)
 	query := strings.ToLower(args.SQL)
 	switch {
+	case strings.Contains(query, "node_capacity") || (strings.Contains(query, "node") && strings.Contains(query, "capacity")):
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"cluster_id", "node_count", "total_capacity_cpu_cores", "total_capacity_memory_bytes", "last_seen"},
+			"rows": []any{
+				map[string]any{"cluster_id": "eval-cluster", "node_count": 3, "total_capacity_cpu_cores": 24, "total_capacity_memory_bytes": 103079215104, "last_seen": "2026-05-24T10:10:00Z"},
+			},
+			"rowIds": []any{"sqlrow-node-capacity"},
+		})), nil
+	case strings.Contains(query, "fact_key") && strings.Contains(query, "node"):
+		return string(jsonRaw(map[string]any{
+			"columns": []any{"kind", "fact_key", "sample_value"},
+			"rows": []any{
+				map[string]any{"kind": "Node", "fact_key": "node_capacity.cpu", "sample_value": "8"},
+				map[string]any{"kind": "Node", "fact_key": "node_capacity.memory", "sample_value": "34359738368"},
+				map[string]any{"kind": "Node", "fact_key": "node_allocatable.cpu", "sample_value": "7900m"},
+				map[string]any{"kind": "Node", "fact_key": "node_allocatable.memory", "sample_value": "31820896Ki"},
+			},
+			"rowIds": []any{"sqlrow-node-key-profile"},
+		})), nil
 	case strings.Contains(query, "oom") || strings.Contains(query, "oomkilled") || strings.Contains(query, "last_reason"):
 		return string(jsonRaw(map[string]any{
 			"columns": []any{"kind", "namespace", "name", "fact_key", "fact_value", "fact_count", "last_seen"},

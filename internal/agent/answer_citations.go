@@ -99,11 +99,15 @@ func answerCitationCandidates(events []RunEvent) []answerCitationCandidate {
 		}
 		seenArtifacts[artifact.ID] = true
 		meta := citationMetadataFromArtifact(artifact)
+		source := citationTargetSource(meta.Target)
+		if source == "" && artifact.Kind == ArtifactKindToolCall {
+			source = toolCallArtifactName(artifact)
+		}
 		candidates = append(candidates, answerCitationCandidate{
 			Artifact: artifact,
 			Meta:     meta,
 			Tokens:   evidenceCitationTokens(artifact),
-			Source:   citationTargetSource(meta.Target),
+			Source:   source,
 			Text:     strings.ToLower(artifact.Title + " " + string(artifact.Data)),
 		})
 	}
@@ -159,7 +163,7 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	if strings.Contains(label, "oom") || strings.Contains(label, "restart") || strings.Contains(label, "facts") || strings.Contains(label, "事实") {
-		if candidate.Source == "kube_insight_sql" {
+		if candidate.Source == "kube_insight_sql" || candidate.Source == scriptedQueryToolName {
 			score += 55
 		}
 		if strings.Contains(text, "oomkilled") || strings.Contains(text, "oom") {
@@ -178,7 +182,7 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	if strings.Contains(label, "change") || strings.Contains(label, "changes") || strings.Contains(label, "recent") || strings.Contains(label, "变更") {
-		if candidate.Source == "kube_insight_sql" {
+		if candidate.Source == "kube_insight_sql" || candidate.Source == scriptedQueryToolName {
 			score += 45
 		}
 		if strings.Contains(text, "change") || strings.Contains(text, "changes") || strings.Contains(text, "change_family") {
@@ -198,6 +202,17 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 			score += 60
 		}
 	}
+	if strings.Contains(label, "scripted") || strings.Contains(label, "sql") || strings.Contains(label, "rollup") || strings.Contains(label, "capacity") || strings.Contains(label, "容量") {
+		if candidate.Source == scriptedQueryToolName {
+			score += 65
+		}
+		if candidate.Source == "kube_insight_sql" {
+			score += 45
+		}
+		if strings.Contains(text, "node_capacity") || strings.Contains(text, "numeric_value") || strings.Contains(text, "rowcount") {
+			score += 25
+		}
+	}
 	for _, word := range strings.Fields(label) {
 		word = strings.Trim(word, "`*_[](){}<>#.,;:")
 		if len(word) >= 3 && strings.Contains(text, word) {
@@ -213,11 +228,19 @@ func toolCallArtifactCanSupportCitation(artifact Artifact) bool {
 		return false
 	}
 	name := textField(record, "name")
-	if name == parallelInvestigationToolName || name == evidenceCondenserToolName {
+	if name == parallelInvestigationToolName || name == evidenceCondenserToolName || name == scriptedQueryToolName {
 		return true
 	}
 	output := valueRecord(record["output"])
 	return output != nil && textField(output, "tool") == parallelInvestigationToolName
+}
+
+func toolCallArtifactName(artifact Artifact) string {
+	var record map[string]any
+	if len(artifact.Data) == 0 || json.Unmarshal(artifact.Data, &record) != nil {
+		return ""
+	}
+	return textField(record, "name")
 }
 
 func citationTargetSource(target json.RawMessage) string {

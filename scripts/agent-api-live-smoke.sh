@@ -47,6 +47,8 @@ FIXTURE_PATH="${WORK_DIR}/fixture.json"
 CONFIG_PATH="${WORK_DIR}/kube-insight.yaml"
 SERVER_LOG="${WORK_DIR}/serve.log"
 SUMMARY_PATH="${WORK_DIR}/summary.json"
+REPORT_JSON_PATH="${WORK_DIR}/report.json"
+REPORT_MD_PATH="${WORK_DIR}/report.md"
 SERVER_PID=""
 
 cleanup() {
@@ -71,6 +73,100 @@ validate_context_tool_order() {
     jq '.requests[] | {sequence, messages: [.messages[] | {index, role, toolCalls, toolCallId, toolName, contentPreview}]}' "${context_json}" >&2
     exit 1
   fi
+}
+
+write_smoke_report() {
+  local generated_at
+  generated_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+  jq -n \
+    --arg generatedAt "${generated_at}" \
+    --arg provider "${PROVIDER}" \
+    --arg model "${MODEL}" \
+    --arg sessionId "${session_id}" \
+    --arg workDir "${WORK_DIR}" \
+    --arg summaryPath "${SUMMARY_PATH}" \
+    --slurpfile runs "${SUMMARY_PATH}" '
+      ($runs[0] // []) as $items
+      | {
+          generatedAt: $generatedAt,
+          provider: $provider,
+          model: $model,
+          sessionId: $sessionId,
+          workDir: $workDir,
+          summaryPath: $summaryPath,
+          totals: {
+            runs: ($items | length),
+            completedRuns: ($items | map(select(.status == "run.completed")) | length),
+            toolCalls: (($items | map(.toolCalls // 0) | add) // 0),
+            failedToolCalls: (($items | map(.failedToolCalls // 0) | add) // 0),
+            completionRequests: (($items | map(.completionRequests // 0) | add) // 0),
+            artifacts: (($items | map(.artifacts // 0) | add) // 0),
+            citations: (($items | map(.citations // 0) | add) // 0),
+            runsWithCitations: ($items | map(select((.citations // 0) > 0)) | length),
+            childRunIds: (($items | map(.childRunIds // 0) | add) // 0),
+            maxContextMessages: (($items | map(.contextMessages // 0) | max) // 0),
+            maxInitialContextTotalChars: (($items | map(.initialContext.totalChars // 0) | max) // 0),
+            maxInitialContextToolChars: (($items | map(.initialContext.toolChars // 0) | max) // 0),
+            maxInitialContextMaxToolChars: (($items | map(.initialContext.maxToolChars // 0) | max) // 0),
+            compactedToolResults: (($items | map(.initialContext.compactedToolResults // 0) | add) // 0)
+          },
+          toolFrequency: (
+            [$items[]? | .toolNames[]?]
+            | sort
+            | group_by(.)
+            | map({name: .[0], count: length})
+            | sort_by(-.count, .name)
+          ),
+          runs: (
+            $items
+            | to_entries
+            | map(.value + {
+                index: (.key + 1),
+                shortQuestion: ((.value.question // "") | gsub("[\\r\\n]+"; " ") | if length > 96 then .[0:95] + "…" else . end)
+              })
+          )
+        }
+    ' >"${REPORT_JSON_PATH}"
+  jq -r '
+    def cell: tostring | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
+    [
+      "# Agent API Live Smoke Report",
+      "",
+      "- Generated: \(.generatedAt)",
+      "- Provider/model: \(.provider)/\(.model)",
+      "- Session: \(.sessionId)",
+      "- Work dir: `\(.workDir)`",
+      "",
+      "## Totals",
+      "",
+      "| Metric | Value |",
+      "| --- | ---: |",
+      "| Runs | \(.totals.runs) |",
+      "| Completed runs | \(.totals.completedRuns) |",
+      "| Tool calls | \(.totals.toolCalls) |",
+      "| Failed tool calls | \(.totals.failedToolCalls) |",
+      "| Completion requests | \(.totals.completionRequests) |",
+      "| Artifacts | \(.totals.artifacts) |",
+      "| Citations | \(.totals.citations) |",
+      "| Runs with citations | \(.totals.runsWithCitations) |",
+      "| Max context messages | \(.totals.maxContextMessages) |",
+      "| Max initial context chars | \(.totals.maxInitialContextTotalChars) |",
+      "| Max initial tool chars | \(.totals.maxInitialContextToolChars) |",
+      "| Compacted tool results | \(.totals.compactedToolResults) |",
+      "",
+      "## Runs",
+      "",
+      "| # | Status | Tools | Failed | Citations | Context msgs | Initial chars | Question |",
+      "| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |"
+    ][],
+    (.runs[]? | "| \(.index) | \(.status | cell) | \(.toolCalls // 0) | \(.failedToolCalls // 0) | \(.citations // 0) | \(.contextMessages // 0) | \(.initialContext.totalChars // 0) | \(.shortQuestion | cell) |"),
+    "",
+    "## Tool Frequency",
+    "",
+    "| Tool | Count |",
+    "| --- | ---: |",
+    (.toolFrequency[]? | "| \(.name | cell) | \(.count) |")
+  ' "${REPORT_JSON_PATH}" >"${REPORT_MD_PATH}"
 }
 
 cat >"${FIXTURE_PATH}" <<'JSON'
@@ -384,5 +480,7 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
     '{question:$question, runId:$runId, retryOfRunId:$retryOfRunId, status:$status, completionRequests:$completionRequests, contextMessages:$contextMessages, sessionRunCount:$sessionRunCount, eventsPath:$eventsPath, contextPath:$contextPath, sessionPath:$sessionPath}' >>"${SUMMARY_PATH}"
 fi
 printf ']\n' >>"${SUMMARY_PATH}"
+write_smoke_report
 
 echo "API live smoke passed. Summary: ${SUMMARY_PATH}"
+echo "API live smoke report: ${REPORT_MD_PATH}"

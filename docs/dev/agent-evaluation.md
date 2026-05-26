@@ -165,9 +165,17 @@ Useful overrides:
 - `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FAILED_TOOL_CALLS`: max failed tool calls
   per run. Default: `0`.
 
-The summary JSON records `initialContext` size metrics plus `toolCalls`,
-`failedToolCalls`, and `toolNames` for each run. Use these to compare whether
-context compaction reduces prompt size without causing extra rediscovery calls.
+The script writes three report files under the per-run output directory:
+
+- `summary.json`: per-run raw smoke summary with paths to SSE/events/context
+  captures.
+- `report.json`: normalized totals, per-run metrics, and tool-frequency data
+  for comparing prompt/tool changes across runs.
+- `report.md`: a readable table version for quick review.
+
+Use `toolCalls`, `failedToolCalls`, `toolNames`, `initialContext`, and
+`toolFrequency` to compare whether context compaction reduces prompt size
+without causing extra rediscovery calls.
 
 Use an OOM follow-up pair when validating session-context replay:
 

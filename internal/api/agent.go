@@ -524,6 +524,30 @@ func (s *Server) cancelAgentRunExecution(runID string) bool {
 	return true
 }
 
+func (s *Server) recoverInterruptedAgentRuns(ctx context.Context) {
+	if s.agentRunner == nil {
+		return
+	}
+	for _, status := range []agent.RunStatus{agent.RunQueued, agent.RunRunning} {
+		runs, err := s.agentStore.ListRuns(ctx, agent.ListRunsOptions{Status: status})
+		if err != nil {
+			continue
+		}
+		for _, run := range runs.Runs {
+			if s.agentRunExecutionActive(run.ID) {
+				continue
+			}
+			s.recordAgentRunFailure(ctx, run.ID, errors.New("agent run interrupted before this API server started"))
+		}
+	}
+}
+
+func (s *Server) agentRunExecutionActive(runID string) bool {
+	s.agentRunMu.Lock()
+	defer s.agentRunMu.Unlock()
+	return s.agentRunCancels[runID] != nil
+}
+
 func (s *Server) recordAgentRunFailure(ctx context.Context, runID string, runErr error) {
 	run, err := s.agentStore.GetRun(ctx, runID)
 	if err != nil || agentRunStatusTerminal(run.Status) {

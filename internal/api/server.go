@@ -89,6 +89,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	}
 	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, agentRunCancels: map[string]context.CancelFunc{}, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
+	s.recoverInterruptedAgentRuns(context.Background())
 	s.startAgentRetentionLoop(opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
 	return s, nil
 }

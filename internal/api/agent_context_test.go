@@ -76,6 +76,81 @@ func TestAgentConversationReplayPreservesToolCallsAndResults(t *testing.T) {
 	}
 }
 
+func TestAgentConversationReplayBackfillsStreamingToolCallsFromLatestRequest(t *testing.T) {
+	ctx := context.Background()
+	store := agent.NewMemoryStore()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近有没有 OOM 现象？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendRunEvent(ctx, first.ID, agent.AppendEventInput{
+		Type: agent.EventCompletionRequest,
+		Data: mustJSON(map[string]any{
+			"format": "kube-insight.agent.completion.v1",
+			"messages": []map[string]any{
+				{"role": "system", "content": "Stable instruction."},
+				{"role": "user", "content": first.Input},
+				{"role": "assistant", "tool_calls": []map[string]any{{
+					"id":   "call_oom",
+					"type": "function",
+					"function": map[string]any{
+						"name":      "kube_insight_search",
+						"arguments": `{"query":"OOMKilled","kind":"Pod"}`,
+					},
+				}}},
+				{"role": "tool", "tool_call_id": "call_oom", "name": "kube_insight_search", "content": `{"matches":1}`},
+			},
+		}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range []agent.AppendEventInput{
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleUser, Content: first.Input, RunID: first.ID}))},
+		{Type: agent.EventCompletionToolResult, Data: mustJSON(map[string]any{
+			"format":     "kube-insight.agent.message.v1",
+			"role":       agent.RoleTool,
+			"toolCallId": "call_oom",
+			"name":       "kube_insight_search",
+			"content":    `{"matches":1}`,
+			"runId":      first.ID,
+		})},
+		{Type: agent.EventCompletionMessage, Data: mustJSON(completionMessageEventValue(agent.Message{Role: agent.RoleAssistant, Content: "发现 1 个 OOMKilled Pod。", RunID: first.ID}))},
+		{Type: agent.EventFinalAnswer, Data: mustJSON(agent.MessageEventData{Role: agent.RoleAssistant, Content: "发现 1 个 OOMKilled Pod。"})},
+	} {
+		if _, err := store.AppendRunEvent(ctx, first.ID, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpdateRunStatus(ctx, first.ID, agent.RunCompleted, ""); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "最近1小时内呢"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	messages := agentConversationMessagesForRun(ctx, store, second)
+	if len(messages) != 4 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if messages[0].Role != agent.RoleUser || messages[0].Content != first.Input {
+		t.Fatalf("first replay message = %#v", messages[0])
+	}
+	if messages[1].Role != agent.RoleAssistant || len(messages[1].ToolCalls) != 1 || messages[1].ToolCalls[0].ID != "call_oom" {
+		t.Fatalf("assistant tool call was not backfilled from request: %#v", messages[1])
+	}
+	if messages[2].Role != agent.RoleTool || messages[2].ToolCallID != "call_oom" || messages[2].Content != `{"matches":1}` {
+		t.Fatalf("tool result order changed: %#v", messages[2])
+	}
+	if messages[3].Role != agent.RoleAssistant || messages[3].Content != "发现 1 个 OOMKilled Pod。" {
+		t.Fatalf("final answer missing: %#v", messages[3])
+	}
+}
+
 func TestAgentMessagesPlaceVolatileClientContextAfterStableHistory(t *testing.T) {
 	ctx := context.Background()
 	store := agent.NewMemoryStore()

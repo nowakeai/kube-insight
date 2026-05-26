@@ -53,6 +53,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
+validate_context_tool_order() {
+  local context_json="$1"
+  if ! jq -e '
+    all(.requests[]?; .messages as $messages |
+      [range(0; ($messages | length))] | all(. as $i |
+        ($messages[$i].role != "tool") or
+        ([range(0; $i)] | any(. as $j | $messages[$j].role == "assistant" and (($messages[$j].toolCalls // []) | length) > 0))
+      )
+    )
+  ' "${context_json}" >/dev/null; then
+    echo "Completion request has a tool result before any assistant tool-call: ${context_json}" >&2
+    jq '.requests[] | {sequence, messages: [.messages[] | {index, role, toolCalls, toolCallId, toolName, contentPreview}]}' "${context_json}" >&2
+    exit 1
+  fi
+}
+
 cat >"${FIXTURE_PATH}" <<'JSON'
 {
   "items": [
@@ -120,16 +136,21 @@ export KUBE_INSIGHT_SERVER_CHAT_MODEL="${MODEL}"
 SERVER_PID="$!"
 
 for _ in $(seq 1 60); do
-  if curl -fsS "http://${API_LISTEN}/healthz" >/dev/null 2>&1; then
-    break
-  fi
   if ! kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
     echo "serve exited before becoming ready. Log:" >&2
     cat "${SERVER_LOG}" >&2
     exit 1
   fi
+  if curl -fsS "http://${API_LISTEN}/healthz" >/dev/null 2>&1; then
+    break
+  fi
   sleep 1
 done
+if ! kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
+  echo "serve exited before becoming ready. Log:" >&2
+  cat "${SERVER_LOG}" >&2
+  exit 1
+fi
 curl -fsS "http://${API_LISTEN}/healthz" >/dev/null
 
 session_json="$(curl -fsS -X POST "http://${API_LISTEN}/api/v1/agent/sessions" \
@@ -173,6 +194,7 @@ for question in "${question_list[@]}"; do
   fi
   context_json="${WORK_DIR}/${slug}.context.json"
   "${BIN}" --db "${DB_PATH}" db agent-context "${run_id}" --all --output json >"${context_json}"
+  validate_context_tool_order "${context_json}"
   if ! jq -e --arg question "${question}" '.requests[-1].messages[]? | select(.role=="user" and .content==$question)' "${context_json}" >/dev/null; then
     echo "Run ${run_id} latest completion.request is missing current user message: ${question}" >&2
     jq '.requests[-1].messages | map({index, role, contentPreview})' "${context_json}" >&2
@@ -250,6 +272,7 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
   fi
   retry_context_json="${WORK_DIR}/retry-first.context.json"
   "${BIN}" --db "${DB_PATH}" db agent-context "${retry_run_id}" --all --output json >"${retry_context_json}"
+  validate_context_tool_order "${retry_context_json}"
   if ! jq -e --arg question "${original_question}" '.requests[0].messages[]? | select(.role=="user" and .content==$question)' "${retry_context_json}" >/dev/null; then
     echo "Retry run ${retry_run_id} first completion.request is missing original user message: ${original_question}" >&2
     jq '.requests[0].messages | map({index, role, contentPreview})' "${retry_context_json}" >&2

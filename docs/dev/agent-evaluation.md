@@ -124,7 +124,9 @@ runs do not emit a replayable `completion.request`, final answer, candidate
 artifact, and verified citation.
 For multi-question smoke runs, each completed run is also audited with
 `db agent-context`; follow-up runs must keep prior user turns and assistant
-context in the latest provider-facing `completion.request`.
+context in the latest provider-facing `completion.request`. The smoke also
+checks provider message order so replayed tool results never appear before the
+assistant tool-call message that produced them.
 Set `KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1` to retry the first completed
 run after later questions. The retry assertion checks that the replacement
 run's first provider request rewinds to the original user input and excludes

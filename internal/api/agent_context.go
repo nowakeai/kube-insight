@@ -37,6 +37,9 @@ func (b agentContextReplayBuilder) Build(run agent.Run) []agent.Message {
 	if len(prior) == 0 {
 		return nil
 	}
+	if transcript := conversationFromLatestCompletionRequests(b.ctx, b.store, prior); len(transcript) > 0 {
+		return transcript
+	}
 	if transcript := conversationFromCompletionEvents(b.ctx, b.store, prior); len(transcript) > 0 {
 		return transcript
 	}
@@ -109,6 +112,81 @@ func (s *Server) recordCompletionInput(ctx context.Context, run agent.Run) error
 		Data: mustJSON(completionMessageEventValue(userMessage)),
 	})
 	return err
+}
+
+func conversationFromLatestCompletionRequests(ctx context.Context, store agent.Store, runs []agent.Run) []agent.Message {
+	messages := []agent.Message{}
+	sawRequest := false
+	for _, run := range runs {
+		transcript := visibleConversationFromLatestCompletionRequest(ctx, store, run.ID)
+		if len(transcript) > 0 {
+			sawRequest = true
+			messages = appendFinalAnswerIfMissing(ctx, store, run.ID, transcript)
+			continue
+		}
+		if !sawRequest {
+			continue
+		}
+		if run.Input != "" {
+			messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input, RunID: run.ID, CreatedAt: run.CreatedAt})
+		}
+		if answer := finalAnswerForRunContext(ctx, store, run.ID); answer != "" {
+			messages = append(messages, agent.Message{Role: agent.RoleAssistant, Content: answer, RunID: run.ID})
+		}
+	}
+	if !sawRequest {
+		return nil
+	}
+	return messages
+}
+
+func visibleConversationFromLatestCompletionRequest(ctx context.Context, store agent.Store, runID string) []agent.Message {
+	events, err := store.ListRunEvents(ctx, runID)
+	if err != nil {
+		return nil
+	}
+	var latest []agent.Message
+	for _, event := range events {
+		if event.Type != agent.EventCompletionRequest {
+			continue
+		}
+		messages := visibleConversationFromCompletionRequestData(event.Data)
+		if len(messages) > 0 {
+			latest = messages
+		}
+	}
+	return latest
+}
+
+func visibleConversationFromCompletionRequestData(raw json.RawMessage) []agent.Message {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	var data map[string]any
+	if json.Unmarshal(raw, &data) != nil {
+		return nil
+	}
+	items, _ := data["messages"].([]any)
+	messages := make([]agent.Message, 0, len(items))
+	for _, item := range items {
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		message, ok := completionMessageFromEventData(encoded)
+		if !ok {
+			continue
+		}
+		switch message.Role {
+		case agent.RoleUser, agent.RoleTool:
+			messages = append(messages, message)
+		case agent.RoleAssistant:
+			if strings.TrimSpace(message.Content) != "" || len(message.ToolCalls) > 0 {
+				messages = append(messages, message)
+			}
+		}
+	}
+	return messages
 }
 
 func conversationFromCompletionEvents(ctx context.Context, store agent.Store, runs []agent.Run) []agent.Message {

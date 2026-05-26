@@ -1,11 +1,12 @@
 import { Activity, ChevronDown, Copy, FileText, LoaderCircle, Pin, RotateCcw, UserRound } from "lucide-react"
-import { useEffect, useState } from "react"
+import { memo, useEffect, useMemo, useState } from "react"
 import type { ThreadMessage } from "@assistant-ui/react"
 
 import { EvidenceList } from "@/components/evidence-list"
 import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import type { AgentArtifact, AgentRun, AgentRunEvent } from "@/lib/agent-store"
+import { useElementVisibility } from "@/lib/use-element-visibility"
 import {
   conversationSegments,
   estimateTokenCount,
@@ -462,7 +463,7 @@ function InlineArtifactPreviews({
   )
 }
 
-function InlineArtifactPreviewCard({
+const InlineArtifactPreviewCard = memo(function InlineArtifactPreviewCard({
   artifact,
   onSelectArtifact,
 }: {
@@ -470,8 +471,10 @@ function InlineArtifactPreviewCard({
   onSelectArtifact?: (artifactId?: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [cardRef, visible] = useElementVisibility<HTMLDivElement>({ rootMargin: "160px 0px" })
+  const summary = useMemo(() => artifactPreviewSummary(artifact), [artifact])
   return (
-    <div className="group min-w-0 rounded-md border border-border bg-card transition hover:border-primary/40 hover:bg-muted/60">
+    <div ref={cardRef} className="group min-w-0 rounded-md border border-border bg-card transition hover:border-primary/40 hover:bg-muted/60">
       <div className="flex min-w-0 items-start gap-2 px-3 py-2">
         <button type="button" className="flex min-w-0 flex-1 items-start gap-2 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
           <FileText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden="true" />
@@ -480,7 +483,7 @@ function InlineArtifactPreviewCard({
               <span className="truncate text-xs font-medium text-foreground">{artifact.title || "Artifact"}</span>
               <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground">{artifact.kind}</span>
             </span>
-            <span className="mt-1 line-clamp-2 block text-[0.72rem] leading-5 text-muted-foreground">{artifactPreviewSummary(artifact)}</span>
+            <span className="mt-1 line-clamp-2 block text-[0.72rem] leading-5 text-muted-foreground">{summary}</span>
           </span>
           <ChevronDown className={expanded ? "mt-0.5 size-3.5 shrink-0 rotate-180 text-muted-foreground transition" : "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition"} aria-hidden="true" />
         </button>
@@ -496,14 +499,19 @@ function InlineArtifactPreviewCard({
           <Pin className="size-3.5" aria-hidden="true" />
         </Button>
       </div>
-      {expanded ? (
+      {expanded && visible ? (
         <div className="border-t border-border px-3 py-2">
           <ArtifactPreviewDetail artifact={artifact} />
         </div>
       ) : null}
+      {expanded && !visible ? (
+        <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+          Preview paused while offscreen.
+        </div>
+      ) : null}
     </div>
   )
-}
+})
 
 function ArtifactPreviewDetail({ artifact }: { artifact: AgentArtifact }) {
   const data = recordValue(artifact.data)

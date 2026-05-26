@@ -7,6 +7,7 @@ import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import { type AgentArtifact, useAgentProjectionStore } from "@/lib/agent-store"
 import { isWatchableArtifactKind, refreshArtifact, watchableArtifactTarget } from "@/lib/artifact-watch"
+import { useElementVisibility } from "@/lib/use-element-visibility"
 
 
 const LazyK8sDiffArtifact = lazy(() =>
@@ -46,14 +47,19 @@ export function ArtifactDock({
 }) {
   const [documentVisible, setDocumentVisible] = useState(() => isDocumentVisible())
   const [watchStates, setWatchStates] = useState<Record<string, ArtifactWatchState>>({})
+  const [visibleArtifactIds, setVisibleArtifactIds] = useState<Record<string, boolean>>({})
   const watchableArtifacts = useMemo(
     () => artifacts.filter((artifact) => isWatchableArtifactKind(artifact.kind) && watchableArtifactTarget(artifact)),
     [artifacts],
   )
+  const visibleWatchableArtifacts = useMemo(
+    () => watchableArtifacts.filter((artifact) => visibleArtifactIds[artifact.id] ?? true),
+    [visibleArtifactIds, watchableArtifacts],
+  )
   const watchableArtifactsRef = useRef(watchableArtifacts)
   const watchEnabled = Boolean(watchIntervalSeconds && watchIntervalSeconds > 0)
   const watchPaused = watchEnabled && (collapsed || !documentVisible)
-  const canWatch = Boolean(sessionId && watchableArtifacts.length > 0)
+  const canWatch = Boolean(sessionId && visibleWatchableArtifacts.length > 0)
   const refreshWatchableArtifacts = useCallback(async (signal?: AbortSignal) => {
     for (const artifact of watchableArtifactsRef.current) {
       if (signal?.aborted) return
@@ -84,8 +90,24 @@ export function ArtifactDock({
   }, [onUpdateArtifact])
 
   useEffect(() => {
-    watchableArtifactsRef.current = watchableArtifacts
-  }, [watchableArtifacts])
+    watchableArtifactsRef.current = visibleWatchableArtifacts
+  }, [visibleWatchableArtifacts])
+
+  useEffect(() => {
+    const artifactIds = new Set(artifacts.map((artifact) => artifact.id))
+    setVisibleArtifactIds((current) => {
+      let changed = false
+      const next: Record<string, boolean> = {}
+      for (const [artifactId, visible] of Object.entries(current)) {
+        if (!artifactIds.has(artifactId)) {
+          changed = true
+          continue
+        }
+        next[artifactId] = visible
+      }
+      return changed ? next : current
+    })
+  }, [artifacts])
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined
@@ -125,6 +147,10 @@ export function ArtifactDock({
     void refreshWatchableArtifacts()
   }, [refreshWatchableArtifacts])
 
+  const handlePanelVisibilityChange = useCallback((artifactId: string, visible: boolean) => {
+    setVisibleArtifactIds((current) => current[artifactId] === visible ? current : { ...current, [artifactId]: visible })
+  }, [])
+
   if (collapsed) {
     return (
       <aside className="pointer-events-none absolute right-3 top-4 z-20 hidden lg:block" aria-label="Panel dock collapsed">
@@ -153,7 +179,7 @@ export function ArtifactDock({
             <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold text-foreground">Panel dock</h2>
-              <p className="truncate text-[0.7rem] text-muted-foreground">{watchStatusText(artifacts.length, watchableArtifacts.length, watchEnabled, watchPaused, watchIntervalSeconds)}</p>
+              <p className="truncate text-[0.7rem] text-muted-foreground">{watchStatusText(artifacts.length, watchableArtifacts.length, visibleWatchableArtifacts.length, watchEnabled, watchPaused, watchIntervalSeconds)}</p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
@@ -200,6 +226,7 @@ export function ArtifactDock({
                 selected={artifact.id === selectedArtifactId}
                 watchState={watchStates[artifact.id]}
                 watchable={Boolean(watchableArtifactTarget(artifact))}
+                onVisibilityChange={handlePanelVisibilityChange}
                 onClose={() => onCloseArtifact(artifact.id)}
               />
             ))
@@ -215,17 +242,23 @@ function DockPanel({
   selected,
   watchState,
   watchable,
+  onVisibilityChange,
   onClose,
 }: {
   artifact: AgentArtifact
   selected: boolean
   watchState?: ArtifactWatchState
   watchable: boolean
+  onVisibilityChange: (artifactId: string, visible: boolean) => void
   onClose: () => void
 }) {
   const selectArtifact = useAgentProjectionStore((state) => state.selectArtifact)
+  const [panelRef, visible] = useElementVisibility<HTMLElement>({ rootMargin: "96px 0px" })
+  useEffect(() => {
+    onVisibilityChange(artifact.id, visible)
+  }, [artifact.id, onVisibilityChange, visible])
   return (
-    <section className={selected ? "overflow-hidden rounded-md border border-primary/50 bg-background" : "overflow-hidden rounded-md border border-border bg-background"}>
+    <section ref={panelRef} className={selected ? "overflow-hidden rounded-md border border-primary/50 bg-background" : "overflow-hidden rounded-md border border-border bg-background"}>
       <div className="flex items-start justify-between gap-2 border-b border-border px-3 py-2">
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectArtifact(artifact.id)}>
           <div className="truncate text-[0.7rem] text-muted-foreground">{artifact.kind}</div>
@@ -359,6 +392,7 @@ function isDocumentVisible() {
 function watchStatusText(
   pinnedCount: number,
   watchableCount: number,
+  visibleWatchableCount: number,
   watchEnabled: boolean,
   watchPaused: boolean,
   intervalSeconds?: number,
@@ -366,7 +400,7 @@ function watchStatusText(
   if (!watchEnabled) return `${pinnedCount} pinned`
   if (watchableCount === 0) return "No watchable panels"
   if (watchPaused) return `Watch paused - ${watchableCount} panels`
-  return `Watching ${watchableCount} panels - ${intervalSeconds ?? 15}s`
+  return `Watching ${visibleWatchableCount}/${watchableCount} panels - ${intervalSeconds ?? 15}s`
 }
 
 function panelWatchStateText(watchable: boolean, state?: ArtifactWatchState) {

@@ -88,6 +88,7 @@ export type ToolSegment = {
 
 export type ToolChildRunSummary = {
   id: string
+  sessionId?: string
   status?: string
   subagentName?: string
   branchName?: string
@@ -354,7 +355,16 @@ export function toolSegmentDetail(segment: ToolSegment) {
     name: segment.name,
     status: segment.status,
     childRunIds: segment.childRunIds,
-    childRuns: segment.childRuns,
+    childRuns: segment.childRuns?.map((run) => ({
+      id: run.id,
+      sessionId: run.sessionId,
+      status: run.status,
+      subagentName: run.subagentName,
+      branchName: run.branchName,
+      eventCount: run.eventCount,
+      artifactCount: run.artifactCount,
+      hasFinalAnswer: Boolean(run.finalAnswer),
+    })),
     durationMs: segment.durationMs,
     input: segment.input,
     outputSummary: segment.outputSummary,

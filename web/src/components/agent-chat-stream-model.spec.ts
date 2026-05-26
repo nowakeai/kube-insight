@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { conversationSegments, type ToolSegment } from "./agent-chat-stream-model"
+import { conversationSegments, toolSegmentDetail, type ToolSegment } from "./agent-chat-stream-model"
 
 const createdAt = "2026-05-25T00:00:00.000Z"
 
@@ -60,3 +60,28 @@ test("tool artifact child run ids are projected onto the tool segment", () => {
   expect(tool?.childRunIds).toEqual(["run_child_a", "run_child_b"])
 })
 
+test("tool segment detail keeps child run payloads concise", () => {
+  const detail = toolSegmentDetail({
+    type: "tool",
+    id: "tool_call_parallel",
+    toolCallId: "call_parallel",
+    name: "parallel_investigation",
+    status: "completed",
+    childRunIds: ["run_child_a"],
+    childRuns: [{
+      id: "run_child_a",
+      sessionId: "sess_1",
+      status: "completed",
+      branchName: "oom_restarts",
+      input: "large prompt body",
+      finalAnswer: "large final answer body",
+      eventCount: 12,
+      artifactCount: 3,
+    }],
+  })
+
+  expect(detail).toContain("\"branchName\": \"oom_restarts\"")
+  expect(detail).toContain("\"hasFinalAnswer\": true")
+  expect(detail).not.toContain("large prompt body")
+  expect(detail).not.toContain("large final answer body")
+})

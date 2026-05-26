@@ -18,7 +18,7 @@ import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, getA
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
 import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentRunEvent } from "@/lib/agent-store"
-import { displayRunIdsForRetryBranches } from "@/lib/agent-retry-branches"
+import { displayRunIdsForRetryBranches, parentRunId } from "@/lib/agent-retry-branches"
 import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 
@@ -84,6 +84,8 @@ export function AgentChat() {
   const visibleRuns = visibleRunIds
     .map((runID) => runsById[runID])
     .filter((run): run is AgentRun => Boolean(run))
+  const routedChildRun = activeRun && parentRunId(activeRun) ? activeRun : undefined
+  const conversationRuns = routedChildRun ? [routedChildRun] : visibleRuns
   const visiblePanelArtifacts = (visiblePanelWorkspace?.pinnedArtifactIds ?? [])
     .map((artifactID) => artifactsById[artifactID])
     .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
@@ -303,7 +305,7 @@ export function AgentChat() {
     onCancel,
     unstable_capabilities: { copy: true },
   })
-  const showHome = !routeHydrating && visibleRuns.length === 0 && messages.length === 0
+  const showHome = !routeHydrating && conversationRuns.length === 0 && messages.length === 0
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -364,14 +366,14 @@ export function AgentChat() {
                   <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-5 py-5">
                     {routeHydrating ? (
                       <RouteRunLoading />
-                    ) : visibleRuns.length > 0 ? (
+                    ) : conversationRuns.length > 0 ? (
                       <SessionConversation
                         activeRun={activeRun}
                         artifactsById={artifactsById}
                         isRunning={effectiveIsRunning}
                         onRetryRun={handleRetryRun}
                         onSelectArtifact={handleSelectArtifact}
-                        runs={visibleRuns}
+                        runs={conversationRuns}
                         runsById={runsById}
                         eventsById={eventsById}
                         status={activeRun?.status ?? (effectiveIsRunning ? "running" : "completed")}

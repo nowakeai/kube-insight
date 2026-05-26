@@ -332,6 +332,7 @@ function childRunsByToolCallId(parentRunId: string, runsById: Record<string, Age
     if (metadata.parentRunId !== parentRunId || !metadata.parentToolCallId) continue
     const summary: ToolChildRunSummary = {
       id: run.id,
+      sessionId: run.sessionId,
       status: run.status,
       subagentName: metadata.subagentName,
       branchName: metadata.branchName,
@@ -540,14 +541,24 @@ function ChildRunBadges({ compact, segment }: { compact?: boolean; segment: Tool
   const childRunIds = segment.childRunIds ?? []
   if (childRunIds.length === 0) return null
   const childRunsById = new Map((segment.childRuns ?? []).map((run) => [run.id, run]))
-  const visibleIds = childRunIds.slice(0, compact ? 2 : 3)
+  const visibleIds = compact ? childRunIds.slice(0, 2) : childRunIds
   return (
     <span className={compact ? "mt-2 flex min-w-0 flex-wrap gap-1" : "flex min-w-0 flex-wrap gap-1"}>
       {visibleIds.map((runID) => {
         const childRun = childRunsById.get(runID)
         const label = childRunLabel(runID, childRun)
+        const href = childRun?.sessionId ? `/sessions/${childRun.sessionId}/runs/${runID}` : undefined
+        const title = childRun?.branchName ? `${childRun.branchName} child run ${runID}` : `Child run ${runID}`
+        const className = "max-w-44 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground hover:bg-secondary hover:text-foreground"
+        if (href) {
+          return (
+            <a key={runID} className={className} href={href} title={title}>
+              {label}
+            </a>
+          )
+        }
         return (
-          <span key={runID} className="max-w-36 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground" title={`Child run ${runID}`}>
+          <span key={runID} className={className} title={title}>
             {label}
           </span>
         )

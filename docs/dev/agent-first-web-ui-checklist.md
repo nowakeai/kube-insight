@@ -168,7 +168,7 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   `NewAgentTool` for noisy evidence summaries; the main agent must pass
   source artifact IDs/titles and row/snippet excerpts, not only prose.
 - [x] Add `parallel_investigation` as a first-pass parallel-subagent wrapper.
-  - The main agent can proactively fan out broad triage prompts into 2-3
+  - The main agent can proactively fan out broad triage prompts into 2-4
     bounded specialist branches that run concurrently, while exact Service and
     exact object-change prompts still use the narrow terminal paths.
 - [ ] Pre-wire the run event model for subagent start/completion/error events,

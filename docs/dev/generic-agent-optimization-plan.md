@@ -133,7 +133,7 @@ surface and does not solve query-planning failures.
 
 Current implementation status: the specialist `evidence_condenser` exists
 as an `AgentAsTool` subagent, and `parallel_investigation` can fan out one
-main-agent tool call into 2-3 bounded specialist investigation subagents that
+main-agent tool call into 2-4 bounded specialist investigation subagents that
 run concurrently. Full `SetSubAgents` supervisor/deep-agent transfer remains
 deferred broader incident-triage work.
 

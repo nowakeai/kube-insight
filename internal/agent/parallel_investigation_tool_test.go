@@ -47,10 +47,33 @@ func TestParallelInvestigationToolInfoEncouragesBroadTriage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{parallelInvestigationToolName, "Run 2-3 independent", "Use proactively", "broad incidents", "Do not use for exact Service health"} {
+	for _, want := range []string{parallelInvestigationToolName, "Run 2-4 independent", "Use proactively", "broad incidents", "Do not use for exact Service health"} {
 		if !strings.Contains(info.Name+" "+info.Desc, want) {
 			t.Fatalf("tool info missing %q: %#v", want, info)
 		}
+	}
+}
+
+func TestParallelInvestigationToolAcceptsFourBranches(t *testing.T) {
+	tool := NewParallelInvestigationTool(&parallelTestModel{}, nil)
+	out, err := tool.(ParallelInvestigationTool).InvokableRun(context.Background(), `{
+		"question":"broad namespace triage",
+		"branches":[
+			{"name":"oom_restarts","objective":"Check OOMKilled and restart evidence."},
+			{"name":"recent_changes","objective":"Check recent changes."},
+			{"name":"topology_impact","objective":"Check topology impact."},
+			{"name":"collector_coverage","objective":"Check collector coverage."}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result parallelInvestigationResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v: %s", err, out)
+	}
+	if len(result.Branches) != 4 {
+		t.Fatalf("branches = %#v", result.Branches)
 	}
 }
 
@@ -108,6 +131,54 @@ func TestParallelInvestigationToolCreatesChildRunsWhenParentContextExists(t *tes
 		if !runEventsContainTypes(events, EventRunCreated, EventRunStarted, EventCompletionRequest, EventCompletionMessage, EventFinalAnswer, EventRunCompleted) {
 			t.Fatalf("child events = %#v", events)
 		}
+	}
+}
+
+func TestParallelInvestigationToolMarksTimedOutChildRunFailed(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "triage slow issue", Provider: "openai-compatible", Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = withRunExecutionContext(ctx, RunExecutionContext{Store: store, RunID: parent.ID, Provider: parent.Provider, Model: parent.Model})
+	ctx = context.WithValue(ctx, toolCallExecutionContextKey{}, ToolCallExecutionContext{Name: parallelInvestigationToolName, CallID: "call_parallel"})
+	tool := NewParallelInvestigationTool(&parallelTestModel{delay: 50 * time.Millisecond}, nil).(ParallelInvestigationTool)
+
+	out, err := tool.InvokableRun(ctx, `{
+		"question":"slow branch",
+		"timeoutMillis":1,
+		"branches":[
+			{"name":"topology_impact","objective":"Check topology impact."}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result parallelInvestigationResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode output: %v: %s", err, out)
+	}
+	if len(result.Branches) != 1 || result.Branches[0].Status != "failed" || result.Branches[0].ChildRunID == "" {
+		t.Fatalf("result = %#v", result)
+	}
+	child, err := store.GetRun(ctx, result.Branches[0].ChildRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != RunFailed || !strings.Contains(child.Error, "deadline") {
+		t.Fatalf("child = %#v", child)
+	}
+	events, err := store.ListRunEvents(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runEventsContainTypes(events, EventError, EventRunFailed) {
+		t.Fatalf("child events = %#v", events)
 	}
 }
 

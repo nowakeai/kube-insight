@@ -309,7 +309,7 @@ same backend:
 | OOM ranking | `过去 24 小时哪些 Pod 有 OOMKilled，按次数排序。` | health + schema + one facts SQL | <=3 tools |
 | Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
 | Service health | exact Service health question | health + service investigation | <=2 tools |
-| Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-3 independent branches | avoid for exact Service or exact object-change prompts |
+| Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-4 independent branches | avoid for exact Service or exact object-change prompts |
 | JS transform | aggregate or reshape returned JSON rows | SQL/search result + `artifact_transform_js` | only bounded current-run JSON, no data fetch |
 | Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
 

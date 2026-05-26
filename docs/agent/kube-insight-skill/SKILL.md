@@ -151,7 +151,7 @@ them only as bounded helpers, not as permission to run broad blind searches.
 - Use `parallel_investigation` proactively for broad, multi-branch prompts such
   as incident triage, cluster health overview, namespace triage, or mixed
   symptoms that split cleanly into health/coverage, OOM/restarts, recent
-  changes, and topology/impact. Give it 2-3 concrete independent branches with
+  changes, and topology/impact. Give it 2-4 concrete independent branches with
   absolute time bounds and known cluster/namespace scope. Do not use it for
   exact Service health or exact kind/namespace/name recent-change prompts where
   the narrow terminal path is sufficient.

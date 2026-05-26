@@ -16,7 +16,7 @@ import (
 
 const (
 	parallelInvestigationToolName       = "parallel_investigation"
-	maxParallelInvestigationBranches    = 3
+	maxParallelInvestigationBranches    = 4
 	defaultParallelInvestigationTimeout = 90 * time.Second
 	maxParallelInvestigationTimeout     = 3 * time.Minute
 	maxParallelInvestigationAnswerRunes = 2400
@@ -63,7 +63,7 @@ func NewParallelInvestigationTool(mdl model.BaseChatModel, evidenceTools []tool.
 func (t ParallelInvestigationTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: parallelInvestigationToolName,
-		Desc: "Run 2-3 independent kube-insight investigation subagents concurrently and return compact branch findings. Use proactively for broad incidents, mixed symptom questions, cluster health overviews, namespace triage, or prompts that naturally split into independent branches such as OOM/restarts, recent changes, topology/impact, and collector coverage. Do not use for exact Service health or exact kind/namespace/name recent-change questions where a narrow typed tool path is sufficient.",
+		Desc: "Run 2-4 independent kube-insight investigation subagents concurrently and return compact branch findings. Use proactively for broad incidents, mixed symptom questions, cluster health overviews, namespace triage, or prompts that naturally split into independent branches such as OOM/restarts, recent changes, topology/impact, and collector coverage. Do not use for exact Service health or exact kind/namespace/name recent-change questions where a narrow typed tool path is sufficient.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"question": {
 				Type:     schema.String,
@@ -208,8 +208,39 @@ func (t ParallelInvestigationTool) runBranch(ctx context.Context, question strin
 	} else {
 		result.Answer = compactText(runResult.FinalAnswer, maxParallelInvestigationAnswerRunes)
 	}
+	if hasParentRun && result.Status == "failed" {
+		_ = markChildRunFailed(context.WithoutCancel(ctx), childStore, childRunID, result.Error)
+	}
 	result.DurationMS = toolAuditDurationMS(start)
 	return result
+}
+
+func markChildRunFailed(ctx context.Context, store Store, runID string, message string) error {
+	if store == nil || runID == "" {
+		return nil
+	}
+	run, err := store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if statusTerminal(run.Status) {
+		return nil
+	}
+	run, err = store.UpdateRunStatus(ctx, runID, RunFailed, message)
+	if err != nil {
+		return err
+	}
+	if _, err := store.AppendRunEvent(ctx, runID, AppendEventInput{
+		Type: EventError,
+		Data: jsonRaw(ErrorEventData{Message: message}),
+	}); err != nil {
+		return err
+	}
+	_, err = store.AppendRunEvent(ctx, runID, AppendEventInput{
+		Type: EventRunFailed,
+		Data: jsonRaw(RunStatusEventData{RunID: run.ID, SessionID: run.SessionID, Status: run.Status, Error: message}),
+	})
+	return err
 }
 
 func (t ParallelInvestigationTool) createChildRun(ctx context.Context, parent RunExecutionContext, parentToolCall ToolCallExecutionContext, branch parallelInvestigationBranch, input string) (Run, error) {

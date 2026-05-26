@@ -154,6 +154,10 @@ Useful overrides:
 - `KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS`: max wait per run.
 - `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS`: max chars
   for each historical tool result in a follow-up run's initial request.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS`: max tool calls for
+  each follow-up run. Default: `3`.
+- `KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FAILED_TOOL_CALLS`: max failed tool calls
+  per run. Default: `0`.
 
 The summary JSON records `initialContext` size metrics plus `toolCalls`,
 `failedToolCalls`, and `toolNames` for each run. Use these to compare whether

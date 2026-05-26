@@ -14,6 +14,8 @@ RUN_TIMEOUT_SECONDS="${KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS:-360}"
 QUESTIONS="${KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS:-Is the default/api Service healthy right now? Summarize endpoint pod evidence and cite the proof.;;Map topology for namespace default and cite the proof.}"
 RETRY_FIRST="${KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST:-0}"
 MAX_HISTORICAL_TOOL_REPLAY_CHARS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS:-4500}"
+MAX_FOLLOWUP_TOOL_CALLS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS:-3}"
+MAX_FAILED_TOOL_CALLS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FAILED_TOOL_CALLS:-0}"
 
 if [[ ! -x "${BIN}" ]]; then
   echo "kube-insight binary not found or not executable: ${BIN}" >&2
@@ -190,6 +192,16 @@ for question in "${question_list[@]}"; do
   if [[ "${status}" != "run.completed" ]]; then
     echo "Run ${run_id} did not complete successfully: ${status}" >&2
     cat "${sse_path}" >&2
+    exit 1
+  fi
+  if (( failed_tool_call_count > MAX_FAILED_TOOL_CALLS )); then
+    echo "Run ${run_id} exceeded failed tool-call budget: failed=${failed_tool_call_count} max=${MAX_FAILED_TOOL_CALLS}" >&2
+    jq '[.[] | select(.type=="tool.failed" or .data.status=="failed") | {type, sequence, data}]' "${events_json}" >&2
+    exit 1
+  fi
+  if [[ "${#completed_questions[@]}" -gt 0 ]] && (( tool_call_count > MAX_FOLLOWUP_TOOL_CALLS )); then
+    echo "Follow-up run ${run_id} exceeded tool-call budget: tools=${tool_call_count} max=${MAX_FOLLOWUP_TOOL_CALLS}" >&2
+    jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed") | {type, sequence, name:.data.name, status:.data.status, summary:.data.outputSummary}]' "${events_json}" >&2
     exit 1
   fi
   if [[ "${completion_requests}" -lt 1 ]]; then

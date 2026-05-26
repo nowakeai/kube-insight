@@ -39,7 +39,7 @@ Use the path that matches the question:
 | Exact Service health, endpoints, readiness, or impact | `kube_insight_health` + `kube_insight_service_investigation` | The bundle contains the Service plus related EndpointSlice/Pod/Event evidence. Do not add search/schema/SQL unless evidence is missing. |
 | Exact recent changes for known kind/namespace/name | `kube_insight_health` + `kube_insight_schema` + one bounded `kube_insight_sql` rollup over `changes` | The changes query returns rows for the requested window. Answer only observed changes and coverage unless the user asks for impact/root cause. |
 | Broad symptom/status discovery | `kube_insight_health` + targeted `kube_insight_search`, or `kube_insight_schema` + one aggregate facts/changes SQL when ranking/counting is needed | Search returns enough candidate proof, or aggregate SQL returns counts/timestamps. |
-| OOM/restart existence | `kube_insight_health` + `kube_insight_search` with likely kind `Pod`, bounded filters, and `includeBundles=true` only for top targets | Bundles show enough facts/history proof. |
+| OOM/restart existence | `kube_insight_health` + exactly one `kube_insight_search` for Pod `OOMKilled`/restart evidence, bounded filters, and `includeBundles=true` | Bundles show enough facts/history proof. Do not parallelize OOM synonyms such as Evicted, memory, CrashLoopBackOff, or restart searches unless the user explicitly asks about those separate symptoms. |
 | OOM/restart ranking or top-N | `kube_insight_health` + `kube_insight_schema` + one facts aggregate SQL | Aggregate confirms counts and first/last seen. Do not call history for every row. |
 | Allocation/configuration such as requests/limits | `kube_insight_health` + `kube_insight_schema`, then schema recipe `container_resource_allocation_rollup` or one scoped proof query | SQL returns request/limit rows or snippets. Do not pivot to live usage, node capacity, OOM, or root cause unless asked. |
 | Namespace or object topology | `kube_insight_health` + candidate discovery through search or schema-guided SQL, then one `kube_insight_topology` around the best root | One graph explains the relevant relationship set. Do not call topology for every node. |
@@ -138,6 +138,16 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   gap.
 - Do not run wildcard or fuzzy search variants after an exact kind/namespace/name
   target is known.
+- For broad OOM/restart existence prompts, use exactly one Pod
+  `OOMKilled`/restart search with bundles after health. If it returns zero rows
+  and collector coverage is incomplete, answer with that data gap; if coverage
+  is healthy but aggregation is needed, pivot to one schema-guided facts
+  aggregate instead of trying synonym searches.
+- For follow-up prompts that only narrow the prior OOM/restart question by time
+  or scope, inherit the prior symptom. One bounded Pod `OOMKilled`/restart
+  search is terminal whether it returns matches or zero; answer from that result
+  plus current/prior health coverage instead of switching to schema or SQL
+  unless the user asks for ranking, counts, or raw proof.
 - Do not call history/topology for related objects unless the user asked for
   impact, relationships, raw proof, or root cause and the first result is
   insufficient.

@@ -14,6 +14,7 @@ RUN_TIMEOUT_SECONDS="${KUBE_INSIGHT_AGENT_API_SMOKE_TIMEOUT_SECONDS:-360}"
 QUESTIONS="${KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS:-Is the default/api Service healthy right now? Summarize endpoint pod evidence and cite the proof.;;Map topology for namespace default and cite the proof.}"
 RETRY_FIRST="${KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST:-0}"
 MAX_HISTORICAL_TOOL_REPLAY_CHARS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_HISTORICAL_TOOL_REPLAY_CHARS:-4500}"
+MAX_INITIAL_TOOL_CALLS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_INITIAL_TOOL_CALLS:-0}"
 MAX_FOLLOWUP_TOOL_CALLS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS:-3}"
 MAX_FAILED_TOOL_CALLS="${KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FAILED_TOOL_CALLS:-0}"
 
@@ -171,9 +172,15 @@ for question in "${question_list[@]}"; do
   [[ -z "${question}" ]] && continue
   slug="$(tr '[:upper:]' '[:lower:]' <<<"${question}" | tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//' | cut -c1-72)"
   [[ -z "${slug}" ]] && slug="question"
+  client_sent_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
   run_json="$(curl -fsS -X POST "http://${API_LISTEN}/api/v1/agent/sessions/${session_id}/runs" \
     -H 'content-type: application/json' \
-    -d "$(jq -n --arg input "${question}" --arg provider "${PROVIDER}" --arg model "${MODEL}" '{input:$input, provider:$provider, model:$model}')")"
+    -d "$(jq -n \
+      --arg input "${question}" \
+      --arg provider "${PROVIDER}" \
+      --arg model "${MODEL}" \
+      --arg sentAt "${client_sent_at}" \
+      '{input:$input, provider:$provider, model:$model, metadata:{clientContext:{sentAt:$sentAt, localTime:$sentAt, timeZone:"UTC", timezoneOffsetMinutes:0, locale:"en-US"}}}')")"
   run_id="$(jq -r '.id' <<<"${run_json}")"
   sse_path="${WORK_DIR}/${slug}.sse"
   events_json="${WORK_DIR}/${slug}.events.json"
@@ -197,6 +204,11 @@ for question in "${question_list[@]}"; do
   if (( failed_tool_call_count > MAX_FAILED_TOOL_CALLS )); then
     echo "Run ${run_id} exceeded failed tool-call budget: failed=${failed_tool_call_count} max=${MAX_FAILED_TOOL_CALLS}" >&2
     jq '[.[] | select(.type=="tool.failed" or .data.status=="failed") | {type, sequence, data}]' "${events_json}" >&2
+    exit 1
+  fi
+  if [[ "${#completed_questions[@]}" -eq 0 ]] && (( MAX_INITIAL_TOOL_CALLS > 0 )) && (( tool_call_count > MAX_INITIAL_TOOL_CALLS )); then
+    echo "Initial run ${run_id} exceeded tool-call budget: tools=${tool_call_count} max=${MAX_INITIAL_TOOL_CALLS}" >&2
+    jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed") | {type, sequence, name:.data.name, status:.data.status, summary:.data.outputSummary}]' "${events_json}" >&2
     exit 1
   fi
   if [[ "${#completed_questions[@]}" -gt 0 ]] && (( tool_call_count > MAX_FOLLOWUP_TOOL_CALLS )); then
@@ -293,7 +305,9 @@ if [[ "${RETRY_FIRST}" == "1" || "${RETRY_FIRST}" == "true" ]]; then
   original_question="${completed_questions[0]}"
   retry_json="$(curl -fsS -X POST "http://${API_LISTEN}/api/v1/agent/runs/${original_run_id}/retry" \
     -H 'content-type: application/json' \
-    -d "$(jq -n '{metadata:{clientContext:{sentAt:"2026-05-26T00:00:00.000Z", timeZone:"UTC", locale:"en-US"}}}')")"
+    -d "$(jq -n \
+      --arg sentAt "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
+      '{metadata:{clientContext:{sentAt:$sentAt, localTime:$sentAt, timeZone:"UTC", timezoneOffsetMinutes:0, locale:"en-US"}}}')")"
   retry_run_id="$(jq -r '.id' <<<"${retry_json}")"
   if ! jq -e --arg retryOf "${original_run_id}" '.metadata.retryOfRunId == $retryOf and .metadata.retryRootRunId == $retryOf' <<<"${retry_json}" >/dev/null; then
     echo "Retry run ${retry_run_id} metadata does not point at original run ${original_run_id}." >&2

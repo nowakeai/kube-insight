@@ -319,7 +319,7 @@ same backend:
 
 | Case | Example user prompt | Expected path | Budget |
 | --- | --- | --- | --- |
-| OOM existence | `最近有没有 oom 现象？` | health + one Pod search with bundles | <=2 tools |
+| OOM existence | `最近有没有 oom 现象？` | health + exactly one Pod OOMKilled/restart search with bundles; no parallel synonym searches | <=2 tools |
 | OOM ranking | `过去 24 小时哪些 Pod 有 OOMKilled，按次数排序。` | health + schema + one facts SQL | <=3 tools |
 | Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
 | Service health | exact Service health question | health + service investigation | <=2 tools |
@@ -389,6 +389,24 @@ representative SQL/profile cases:
 
 ```bash
 KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
+```
+
+Run the isolated API live smoke when changing session replay, retry behavior, or
+prompt/tool budgets. It builds a temporary SQLite fixture DB, starts a temporary
+API/MCP server, sends UTC client context for relative-time prompts, records
+`completion.request` context, and can enforce both initial and follow-up tool
+budgets:
+
+```bash
+KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
+KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
+KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='最近有没有 OOM 现象？;;最近1小时内呢' \
+KUBE_INSIGHT_AGENT_API_SMOKE_MAX_INITIAL_TOOL_CALLS=2 \
+KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS=3 \
+KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1 \
+KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-oom-tight" \
+scripts/agent-api-live-smoke.sh
 ```
 
 Run the local agent-vs-kubectl benchmark. Refresh the evidence database first

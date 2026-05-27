@@ -135,6 +135,7 @@ function RunConversation({
       {response.workSegments.length > 0 ? (
         <WorkStreamMessage
           activity={activity}
+          artifactsById={artifactsById}
           events={events}
           onSelectArtifact={onSelectArtifact}
           running={isRunning}
@@ -226,8 +227,8 @@ function renderResponseSegment({
       />
     )
   }
-  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
-  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={false} segment={segment} />
+  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} artifactsById={artifactsById} segment={segment} />
+  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} artifactsById={artifactsById} defaultExpanded={false} segment={segment} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
@@ -235,6 +236,7 @@ function renderResponseSegment({
 function renderWorkSegment(
   segment: ResponseSegment,
   activity: RunActivitySummary,
+  artifactsById: Record<string, AgentArtifact>,
   onSelectArtifact: (artifactId?: string) => void,
   toolGroupDefaultExpanded: boolean,
 ) {
@@ -249,14 +251,15 @@ function renderWorkSegment(
       />
     )
   }
-  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} onSelectArtifact={onSelectArtifact} segment={segment} />
-  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={toolGroupDefaultExpanded} onSelectArtifact={onSelectArtifact} segment={segment} />
+  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} artifactsById={artifactsById} onSelectArtifact={onSelectArtifact} segment={segment} />
+  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} artifactsById={artifactsById} defaultExpanded={toolGroupDefaultExpanded} onSelectArtifact={onSelectArtifact} segment={segment} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
 
 function WorkStreamMessage({
   activity,
+  artifactsById,
   events,
   nowMs,
   onSelectArtifact,
@@ -266,6 +269,7 @@ function WorkStreamMessage({
   run,
 }: {
   activity: RunActivitySummary
+  artifactsById: Record<string, AgentArtifact>
   events: AgentRunEvent[]
   nowMs: number
   onSelectArtifact: (artifactId?: string) => void
@@ -294,7 +298,7 @@ function WorkStreamMessage({
         </button>
         {expanded ? (
           <div className="mt-3 space-y-4">
-            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, expanded))}
+            {segments.map((segment) => renderWorkSegment(segment, activity, artifactsById, onSelectArtifact, expanded))}
           </div>
         ) : null}
       </div>
@@ -445,14 +449,16 @@ function toolInputPreview(value: unknown) {
 
 
 function ToolStreamMessage({
+  artifactsById = {},
   onSelectArtifact,
   segment,
 }: {
+  artifactsById?: Record<string, AgentArtifact>
   onSelectArtifact?: (artifactId?: string) => void
   segment: ToolSegment
 }) {
   const [expanded, setExpanded] = useState(false)
-  const detail = toolSegmentDetail(segment)
+  const detail = toolSegmentDetailWithArtifact(segment, artifactsById)
   return (
     <div className="w-full text-sm">
       <div className="min-w-0 border-l border-border/80 pl-3">
@@ -465,7 +471,7 @@ function ToolStreamMessage({
         </button>
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="min-w-0 truncate">{toolSegmentSummary(segment)}</span>
-          <ToolMetaBadges onSelectArtifact={onSelectArtifact} segment={segment} />
+          <ToolMetaBadges artifactsById={artifactsById} onSelectArtifact={onSelectArtifact} segment={segment} />
         </div>
         {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{detail}</pre> : null}
       </div>
@@ -474,10 +480,12 @@ function ToolStreamMessage({
 }
 
 function ToolGroupStreamMessage({
+  artifactsById = {},
   defaultExpanded,
   onSelectArtifact,
   segment,
 }: {
+  artifactsById?: Record<string, AgentArtifact>
   defaultExpanded: boolean
   onSelectArtifact?: (artifactId?: string) => void
   segment: ToolGroupSegment
@@ -504,7 +512,7 @@ function ToolGroupStreamMessage({
         </div>
         {expanded ? (
           <div className="mt-2 flex flex-col gap-1.5">
-            {segment.tools.map((tool) => <ToolGroupRow key={tool.id} onSelectArtifact={onSelectArtifact} segment={tool} />)}
+            {segment.tools.map((tool) => <ToolGroupRow key={tool.id} artifactsById={artifactsById} onSelectArtifact={onSelectArtifact} segment={tool} />)}
           </div>
         ) : null}
       </div>
@@ -534,7 +542,15 @@ function DurationBadge({
   )
 }
 
-function ToolGroupRow({ onSelectArtifact, segment }: { onSelectArtifact?: (artifactId?: string) => void; segment: ToolSegment }) {
+function ToolGroupRow({
+  artifactsById = {},
+  onSelectArtifact,
+  segment,
+}: {
+  artifactsById?: Record<string, AgentArtifact>
+  onSelectArtifact?: (artifactId?: string) => void
+  segment: ToolSegment
+}) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="rounded-md border border-border/80 bg-background/60 px-3 py-2">
@@ -546,18 +562,31 @@ function ToolGroupRow({ onSelectArtifact, segment }: { onSelectArtifact?: (artif
         <ChevronDown className={expanded ? "size-3.5 rotate-180 text-muted-foreground transition" : "size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       <div className="mt-1 truncate text-xs text-muted-foreground">{toolSegmentSummary(segment)}</div>
-      <ToolMetaBadges compact onSelectArtifact={onSelectArtifact} segment={segment} />
-      {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{toolSegmentDetail(segment)}</pre> : null}
+      <ToolMetaBadges artifactsById={artifactsById} compact onSelectArtifact={onSelectArtifact} segment={segment} />
+      {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{toolSegmentDetailWithArtifact(segment, artifactsById)}</pre> : null}
     </div>
   )
 }
 
-function ToolMetaBadges({ compact, onSelectArtifact, segment }: { compact?: boolean; onSelectArtifact?: (artifactId?: string) => void; segment: ToolSegment }) {
+function ToolMetaBadges({
+  artifactsById = {},
+  compact,
+  onSelectArtifact,
+  segment,
+}: {
+  artifactsById?: Record<string, AgentArtifact>
+  compact?: boolean
+  onSelectArtifact?: (artifactId?: string) => void
+  segment: ToolSegment
+}) {
   const input = toolInputPreview(segment.input)
   const childCount = segment.childRunIds?.length ?? 0
+  const outputInfo = toolOutputInfo(segment, artifactsById)
   return (
     <span className={compact ? "mt-2 flex min-w-0 flex-wrap gap-1" : "flex min-w-0 flex-wrap gap-1"}>
       {input ? <span className="max-w-80 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground" title={input}>args {input}</span> : null}
+      {typeof outputInfo.queryCount === "number" ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">queries {outputInfo.queryCount}</span> : null}
+      {typeof outputInfo.rowCount === "number" ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">rows {outputInfo.rowCount}</span> : null}
       {segment.outputArtifactId ? (
         <button
           type="button"
@@ -572,6 +601,53 @@ function ToolMetaBadges({ compact, onSelectArtifact, segment }: { compact?: bool
       <ChildRunBadges compact={compact} segment={segment} />
     </span>
   )
+}
+
+function toolSegmentDetailWithArtifact(segment: ToolSegment, artifactsById: Record<string, AgentArtifact>) {
+  const artifact = segment.outputArtifactId ? artifactsById[segment.outputArtifactId] : undefined
+  if (!artifact) return toolSegmentDetail(segment)
+  return JSON.stringify({
+    ...JSON.parse(toolSegmentDetail(segment)) as Record<string, unknown>,
+    output: toolArtifactOutput(artifact),
+  }, null, 2)
+}
+
+function toolOutputInfo(segment: ToolSegment, artifactsById: Record<string, AgentArtifact>) {
+  const artifact = segment.outputArtifactId ? artifactsById[segment.outputArtifactId] : undefined
+  const output = artifact ? toolArtifactOutput(artifact) : undefined
+  const outputRecord = asRecord(output)
+  const queries = Array.isArray(outputRecord?.queries) ? outputRecord.queries : undefined
+  const rowCount = queryRowCount(queries)
+  return {
+    queryCount: queries?.length,
+    rowCount,
+  }
+}
+
+function queryRowCount(queries: unknown[] | undefined) {
+  if (!queries || queries.length === 0) return undefined
+  return queries
+    .map((query) => asRecord(query)?.rowCount)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+    .reduce((sum, value) => sum + value, 0)
+}
+
+function toolArtifactOutput(artifact: AgentArtifact) {
+  const data = asRecord(artifact.data)
+  return parseMaybeJSON(data?.output)
+}
+
+function parseMaybeJSON(value: unknown): unknown {
+  if (typeof value !== "string") return value
+  try {
+    return JSON.parse(value) as unknown
+  } catch {
+    return value
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined
 }
 
 function ChildRunBadges({ compact, segment }: { compact?: boolean; segment: ToolSegment }) {

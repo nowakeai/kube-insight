@@ -1,7 +1,6 @@
-import { Braces, ChevronDown, FileText, Pin, Table2 } from "lucide-react"
+import { ChevronDown, FileText, Pin } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
-import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import type { EvidenceSegment } from "@/components/agent-chat-stream-model"
 import type { AgentArtifact } from "@/lib/agent-store"
@@ -13,15 +12,10 @@ type EvidenceListProps = {
   onSelectArtifact?: (artifactId?: string) => void
 }
 
-type EvidenceView = "summary" | "table" | "markdown" | "json"
-
 type EvidenceItem = {
   artifact?: AgentArtifact
   citation: EvidenceSegment
-  detailLines: string[]
-  jsonValue: unknown
   marker: string
-  markdown?: string
   summary: string
   tableRows: Record<string, unknown>[]
   title: string
@@ -63,9 +57,9 @@ export function EvidenceList({ artifactsById, citations, onSelectArtifact }: Evi
         <ChevronDown className={expanded ? "ml-auto size-3.5 rotate-180 text-muted-foreground transition" : "ml-auto size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       {expanded ? (
-        <div className="space-y-2 border-t border-border p-2">
+        <div className="divide-y divide-border border-t border-border">
           {items.map((item) => (
-            <EvidenceCard key={item.citation.id} item={item} onSelectArtifact={onSelectArtifact} />
+            <EvidenceRow key={item.citation.id} item={item} onSelectArtifact={onSelectArtifact} />
           ))}
         </div>
       ) : null}
@@ -79,102 +73,33 @@ function evidenceItemsForCitations(citations: EvidenceSegment[], artifactsById: 
     .map((citation, index) => evidenceItem(citation, artifactsById[citation.artifactId ?? ""], index))
 }
 
-function EvidenceCard({ item, onSelectArtifact }: { item: EvidenceItem; onSelectArtifact?: (artifactId?: string) => void }) {
-  const [expanded, setExpanded] = useState(false)
-  const [view, setView] = useState<EvidenceView>(item.tableRows.length > 0 ? "table" : "summary")
-  const views: EvidenceView[] = ["summary", ...(item.tableRows.length > 0 ? ["table" as const] : []), ...(item.markdown ? ["markdown" as const] : []), "json"]
+function EvidenceRow({ item, onSelectArtifact }: { item: EvidenceItem; onSelectArtifact?: (artifactId?: string) => void }) {
   const canPin = Boolean(item.artifact?.id && onSelectArtifact)
-
   return (
-    <div id={`evidence-${item.citation.id}`} className="scroll-mt-24 rounded-md border border-border bg-background">
-      <div className="flex items-start gap-2 px-3 py-2">
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
-          <div className="flex min-w-0 items-center gap-2">
-            <ChevronDown className={expanded ? "size-3.5 shrink-0 rotate-180 text-muted-foreground transition" : "size-3.5 shrink-0 text-muted-foreground transition"} aria-hidden="true" />
-            <span className="shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[0.68rem] font-semibold text-foreground">{item.marker}</span>
-            <span className="truncate font-medium text-foreground">{item.title}</span>
-            {item.artifact?.kind ? <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">{item.artifact.kind}</span> : null}
-          </div>
-          <div className="mt-1 line-clamp-2 pl-12 text-xs leading-5 text-muted-foreground">{item.summary}</div>
-        </button>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          className="mt-0.5 shrink-0"
-          disabled={!canPin}
-          title={canPin ? "Pin evidence to dock" : "No panel artifact available"}
-          aria-label={`Pin ${item.marker} to dock`}
-          onClick={() => item.artifact?.id ? onSelectArtifact?.(item.artifact.id) : undefined}
-        >
-          <Pin className="size-3.5" aria-hidden="true" />
-        </Button>
-      </div>
-      {expanded ? (
-        <div className="border-t border-border px-3 py-3">
-          <div className="mb-3 flex flex-wrap items-center gap-1">
-            {views.map((candidate) => (
-              <Button key={candidate} type="button" size="sm" variant={view === candidate ? "secondary" : "ghost"} onClick={() => setView(candidate)}>
-                {viewIcon(candidate)}
-                {viewLabel(candidate)}
-              </Button>
-            ))}
-          </div>
-          {view === "summary" ? <EvidenceSummary item={item} /> : null}
-          {view === "table" ? <EvidenceTable rows={item.tableRows} /> : null}
-          {view === "markdown" && item.markdown ? <MarkdownContent text={item.markdown} /> : null}
-          {view === "json" ? <EvidenceJSON value={item.jsonValue} /> : null}
+    <div id={`evidence-${item.citation.id}`} className="flex scroll-mt-24 items-start gap-2 px-3 py-2.5">
+      <span className="mt-0.5 shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[0.68rem] font-semibold text-foreground">{item.marker}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 truncate text-xs font-medium text-foreground">{item.title}</span>
+          {item.artifact?.kind ? <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">{item.artifact.kind}</span> : null}
+          {item.tableRows.length > 0 ? <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">{item.tableRows.length} rows</span> : null}
         </div>
-      ) : null}
+        <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.summary}</div>
+      </div>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        className="mt-0.5 shrink-0"
+        disabled={!canPin}
+        title={canPin ? "Pin evidence to dock" : "No panel artifact available"}
+        aria-label={`Pin ${item.marker} to dock`}
+        onClick={() => item.artifact?.id ? onSelectArtifact?.(item.artifact.id) : undefined}
+      >
+        <Pin className="size-3.5" aria-hidden="true" />
+      </Button>
     </div>
   )
-}
-
-function EvidenceSummary({ item }: { item: EvidenceItem }) {
-  return (
-    <div className="space-y-2 text-sm">
-      <p className="text-muted-foreground">{item.summary}</p>
-      {item.detailLines.length > 0 ? (
-        <dl className="grid gap-2 sm:grid-cols-2">
-          {item.detailLines.slice(0, 8).map((line) => {
-            const [key, ...rest] = line.split(": ")
-            return (
-              <div key={line} className="min-w-0 rounded-md bg-muted px-2.5 py-2">
-                <dt className="truncate text-[0.68rem] uppercase text-muted-foreground">{key}</dt>
-                <dd className="mt-0.5 truncate text-xs text-foreground">{rest.join(": ") || line}</dd>
-              </div>
-            )
-          })}
-        </dl>
-      ) : null}
-    </div>
-  )
-}
-
-function EvidenceTable({ rows }: { rows: Record<string, unknown>[] }) {
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No tabular rows available for this evidence.</p>
-  const columns = tableColumns(rows).slice(0, 6)
-  return (
-    <div className="max-h-80 overflow-auto rounded-md border border-border">
-      <table className="w-full min-w-[32rem] text-left text-xs">
-        <thead className="sticky top-0 bg-muted text-muted-foreground">
-          <tr>{columns.map((column) => <th key={column} className="px-2 py-2 font-medium">{column}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.slice(0, 25).map((row, index) => (
-            <tr key={index} className="border-t border-border">
-              {columns.map((column) => <td key={column} className="max-w-52 truncate px-2 py-2 text-foreground">{compactValue(row[column])}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {rows.length > 25 ? <div className="border-t border-border px-2 py-1 text-xs text-muted-foreground">Showing 25 of {rows.length} rows.</div> : null}
-    </div>
-  )
-}
-
-function EvidenceJSON({ value }: { value: unknown }) {
-  return <pre className="max-h-96 overflow-auto rounded-md border border-border bg-muted p-3 text-xs leading-5 text-muted-foreground">{JSON.stringify(value, null, 2)}</pre>
 }
 
 function evidenceItem(citation: EvidenceSegment, artifact: AgentArtifact | undefined, index: number): EvidenceItem {
@@ -189,10 +114,7 @@ function evidenceItem(citation: EvidenceSegment, artifact: AgentArtifact | undef
   return {
     artifact,
     citation,
-    detailLines,
-    jsonValue,
     marker,
-    markdown,
     summary: readableSummary(artifact, rows, jsonValue, detailLines, markdown),
     tableRows: rows,
     title,
@@ -408,17 +330,4 @@ function containsText(values: string[], needle: string) {
 
 function truncate(value: string, max: number) {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
-}
-
-function viewLabel(view: EvidenceView) {
-  if (view === "summary") return "Summary"
-  if (view === "table") return "Table"
-  if (view === "markdown") return "Markdown"
-  return "JSON"
-}
-
-function viewIcon(view: EvidenceView) {
-  if (view === "table") return <Table2 className="size-3.5" aria-hidden="true" />
-  if (view === "json") return <Braces className="size-3.5" aria-hidden="true" />
-  return <FileText className="size-3.5" aria-hidden="true" />
 }

@@ -133,13 +133,17 @@ Use the path that matches the question:
 - Dependent or parallel SQL plans:
   after `kube_insight_schema`, use `kube_insight_scripted_query` when one small
   plan needs profile -> proof SQL, several independent aggregates, or SQL rows
-  plus JavaScript grouping. Prefer this over serial repeated SQL plus a separate
-  transform when the tool is available; keep query count and `maxRows` bounded.
+  plus JavaScript grouping. Also use it for latest-per-object selection, JSON
+  field extraction, Kubernetes CPU/memory unit normalization, and other
+  code-shaped aggregation that SQL is easy to get subtly wrong. Prefer this
+  over serial repeated SQL plus a separate transform when the tool is
+  available; keep query count and `maxRows` bounded.
 - Node inventory/capacity/allocatable totals:
-  `kube_insight_health` + `kube_insight_schema`, then one bounded scripted SQL
-  plan using `current_node_capacity_snapshot`; add `recent_node_lifecycle` only
-  when the user asks whether nodes changed in a time window. Current node count
-  and capacity must come from the latest non-deleted Node snapshot per
+  `kube_insight_health` + `kube_insight_schema`, then one bounded
+  `kube_insight_scripted_query` as the first data query. Use
+  `current_node_capacity_snapshot`; add `recent_node_lifecycle` in the same
+  script when the user asks whether nodes changed in a time window. Current node
+  count and capacity must come from the latest non-deleted Node snapshot per
   cluster/name/UID, not from counting or summing all fact rows in the time
   window. Instance type usually comes from Node labels in the latest doc; CPU
   and memory come from `status.capacity/status.allocatable`, not `spec`. If older
@@ -206,8 +210,9 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   user scoped the cluster or a prior tool identified the exact cluster. Instead
   select or group by `cluster_id`.
 - When the user gives a natural-language cluster name such as "gcp cluster 2",
-  do not normalize it into a guessed ID. First call health without a cluster
-  filter, or use schema/health cluster display maps to match the exact display
+  or a short fragment such as `gcp2`, proactively list available clusters before
+  scoped analysis. First call health without a cluster filter, or use
+  schema/health cluster display maps to match the exact display/source/context
   name and stable `cluster_id`.
 - MCP typed tools may accept a known cluster display/context/source alias, but
   SQL still needs the stable `cluster_id` from health/schema/evidence rows. If a
@@ -216,7 +221,9 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   unambiguous abbreviation; if the tool reports ambiguity, ask the user to pick
   the displayed stable ID. Do not put the display name or abbreviation into a
   `cluster_id = ...` SQL predicate unless the schema rows prove that it is the
-  stored ID.
+  stored ID. If an exact short alias exists but has no objects while a fuzzy
+  display/source match has data, prefer the dataful fuzzy match and state the
+  stable ID used.
 - For relative time words such as "recent", "today", "yesterday", or "last 24
   hours", compute absolute UTC `from`/`to` bounds from the client context before
   calling search/history/service tools or SQL.

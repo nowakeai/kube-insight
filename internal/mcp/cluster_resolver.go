@@ -30,8 +30,23 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 		return value, nil
 	}
 	matches := matchingClusters(clusters, value, clusterAliasMatches)
+	if len(matches) == 1 && clusterHasEvidence(matches[0]) {
+		return matches[0].Name, nil
+	}
+	fuzzyMatches := matchingClusters(clusters, value, clusterAliasFuzzyMatches)
+	if len(matches) == 1 && !clusterHasEvidence(matches[0]) {
+		datafulFuzzy := make([]storage.ClusterRecord, 0, len(fuzzyMatches))
+		for _, match := range fuzzyMatches {
+			if match.Name != matches[0].Name && clusterHasEvidence(match) {
+				datafulFuzzy = append(datafulFuzzy, match)
+			}
+		}
+		if len(datafulFuzzy) == 1 {
+			return datafulFuzzy[0].Name, nil
+		}
+	}
 	if len(matches) == 0 {
-		matches = matchingClusters(clusters, value, clusterAliasFuzzyMatches)
+		matches = fuzzyMatches
 	}
 	if len(matches) == 1 {
 		return matches[0].Name, nil
@@ -53,6 +68,10 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 		available = append(available, cluster.Name)
 	}
 	return "", fmt.Errorf("cluster %q was not found; available clusters: %s", value, strings.Join(available, ", "))
+}
+
+func clusterHasEvidence(cluster storage.ClusterRecord) bool {
+	return cluster.Objects > 0 || cluster.Versions > 0 || cluster.Latest > 0
 }
 
 func matchingClusters(clusters []storage.ClusterRecord, input string, match func(storage.ClusterRecord, string) bool) []storage.ClusterRecord {

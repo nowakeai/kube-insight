@@ -61,6 +61,12 @@ operational notes, and design details in `docs/`.
   before adding large precomputed context caches. If a subagent such as the
   evidence condenser is used, pass artifact IDs/titles and concrete row or
   snippet excerpts so the secondary model remains evidence-bound.
+- For built-in agent behavior fixes, prefer improving the prompt harness, tool
+  descriptions, evaluation cases, and documented tool-use contracts before
+  adding code-side hacks or hidden rewrites. Code guardrails are acceptable for
+  safety, validation, or deterministic product semantics, but they should not
+  teach the model the wrong workflow or silently compensate for avoidable prompt
+  failures.
 - When tuning built-in agent prompts, tool budgets, context replay, retry
   semantics, subagent behavior, or discovering generic agent usage lessons,
   carry durable guidance into `kube-insight-skill/SKILL.md` or

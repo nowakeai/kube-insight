@@ -1,8 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import type { AgentArtifact, AgentRun } from "@/lib/agent-store"
-
-import { conversationSegments, runInlineArtifacts, toolSegmentDetail, type ToolSegment } from "./agent-chat-stream-model"
+import { conversationSegments, toolSegmentDetail, type ToolSegment } from "./agent-chat-stream-model"
 
 const createdAt = "2026-05-25T00:00:00.000Z"
 
@@ -115,48 +113,3 @@ test("tool segment detail keeps child run payloads concise", () => {
   expect(detail).not.toContain("large prompt body")
   expect(detail).not.toContain("large final answer body")
 })
-
-test("runInlineArtifacts keeps dockable artifacts and drops audit-only artifacts", () => {
-  const run: AgentRun = {
-    id: "run_1",
-    sessionId: "sess_1",
-    status: "completed",
-    input: "show proof",
-    createdAt,
-    updatedAt: createdAt,
-    eventIds: [],
-    artifactIds: ["artifact_tool", "artifact_markdown", "artifact_resource", "artifact_topology"],
-    citationIds: [],
-  }
-  const artifactsById: Record<string, AgentArtifact> = {
-    artifact_tool: artifact("artifact_tool", "tool_call"),
-    artifact_markdown: artifact("artifact_markdown", "markdown"),
-    artifact_resource: artifact("artifact_resource", "k8s.resource"),
-    artifact_topology: artifact("artifact_topology", "k8s.topology"),
-  }
-
-  expect(runInlineArtifacts(run, artifactsById).map((item) => item.id)).toEqual([
-    "artifact_markdown",
-    "artifact_resource",
-    "artifact_topology",
-  ])
-  expect(runInlineArtifacts(run, artifactsById, { limit: 2 }).map((item) => item.id)).toEqual([
-    "artifact_resource",
-    "artifact_topology",
-  ])
-  expect(runInlineArtifacts(run, artifactsById, { excludeArtifactIds: ["artifact_resource"] }).map((item) => item.id)).toEqual([
-    "artifact_markdown",
-    "artifact_topology",
-  ])
-})
-
-function artifact(id: string, kind: AgentArtifact["kind"]): AgentArtifact {
-  return {
-    id,
-    runId: "run_1",
-    kind,
-    title: id,
-    createdAt,
-    updatedAt: createdAt,
-  }
-}

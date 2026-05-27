@@ -53,6 +53,14 @@ semantics as rewind rather than append. The API live smoke now enforces
 tool-order, retry, session-projection, historical tool-size, failed-tool, and
 follow-up tool-count budgets.
 
+MCP `kube_insight_health` is a high-frequency orientation tool, so the MCP
+server keeps a short in-memory cache for health reports keyed by normalized tool
+arguments. The first call registers that argument set; subsequent identical
+calls reuse the report within the TTL, and a single MCP-server-owned refresh
+loop periodically refreshes registered health reports. Storage backends still
+own the authoritative `ResourceHealth` read semantics, including any pending
+flush needed before a direct read.
+
 ### 1. Schema-Guided Query Planning
 
 Improve the default agent instruction and schema notes so the model does not

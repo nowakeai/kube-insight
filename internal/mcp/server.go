@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -36,6 +37,8 @@ type Server struct {
 	closeStoreOnRequest bool
 	closeFunc           func() error
 	sdkServer           *sdkmcp.Server
+	healthCache         *healthCache
+	healthRefresh       *healthRefreshLoop
 }
 
 type sqlArguments struct {
@@ -71,6 +74,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		openStore:           openStore,
 		closeStoreOnRequest: !opts.KeepStoreOpen,
 		closeFunc:           opts.Close,
+		healthCache:         newHealthCache(defaultHealthCacheTTL),
 	}
 	server.sdkServer = sdkmcp.NewServer(&sdkmcp.Implementation{
 		Name:    name,
@@ -159,6 +163,9 @@ func (s *Server) StreamableHTTPHandler(sessionTimeout time.Duration) http.Handle
 }
 
 func (s *Server) Close() error {
+	if s.healthRefresh != nil {
+		s.healthRefresh.stop()
+	}
 	if s.closeFunc == nil {
 		return nil
 	}
@@ -272,6 +279,16 @@ func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
 }
 
 func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, error) {
+	opts, err := resourceHealthOptionsFromArguments(args)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(args.ClusterID) == "" {
+		key := healthCacheKey(opts)
+		if report, ok := s.healthCache.get(key, time.Now()); ok {
+			return formatResourceHealthDSL(report, 10), nil
+		}
+	}
 	store, err := s.openReadStore(ctx)
 	if err != nil {
 		return nil, err
@@ -281,20 +298,10 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 	if err != nil {
 		return nil, err
 	}
-	opts := storage.ResourceHealthOptions{
-		ClusterID:        clusterID,
-		Status:           args.Status,
-		ErrorsOnly:       args.ErrorsOnly,
-		Limit:            args.Limit,
-		ExcludeResources: args.ExcludeResources,
-		IncludeExcluded:  args.IncludeSkipped,
-	}
-	if args.StaleAfter != "" {
-		value, err := time.ParseDuration(args.StaleAfter)
-		if err != nil {
-			return nil, fmt.Errorf("staleAfter: %w", err)
-		}
-		opts.StaleAfter = value
+	opts.ClusterID = clusterID
+	key := healthCacheKey(opts)
+	if report, ok := s.healthCache.get(key, time.Now()); ok {
+		return formatResourceHealthDSL(report, 10), nil
 	}
 	healthStore, ok := store.(storage.ResourceHealthStore)
 	if !ok {
@@ -304,7 +311,28 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 	if err != nil {
 		return nil, err
 	}
+	s.healthCache.set(key, opts, report, time.Now())
+	s.ensureHealthRefreshLoop()
 	return formatResourceHealthDSL(report, 10), nil
+}
+
+func resourceHealthOptionsFromArguments(args healthArguments) (storage.ResourceHealthOptions, error) {
+	opts := storage.ResourceHealthOptions{
+		ClusterID:        strings.TrimSpace(args.ClusterID),
+		Status:           strings.TrimSpace(args.Status),
+		ErrorsOnly:       args.ErrorsOnly,
+		Limit:            args.Limit,
+		ExcludeResources: args.ExcludeResources,
+		IncludeExcluded:  args.IncludeSkipped,
+	}
+	if args.StaleAfter != "" {
+		value, err := time.ParseDuration(args.StaleAfter)
+		if err != nil {
+			return opts, fmt.Errorf("staleAfter: %w", err)
+		}
+		opts.StaleAfter = value
+	}
+	return opts, nil
 }
 
 func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, error) {
@@ -394,7 +422,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. When a bounded SQL query returns rows that answer a ranking, allocation, or exact recent-change question, that result is terminal evidence: answer from it instead of calling search, history, topology, or more SQL unless rows are empty or the user explicitly asks for impact, root cause, or raw proof. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. Keep maxRows bounded. For recent/today questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. When a bounded SQL query returns rows that answer a ranking, allocation, or exact recent-change question, that result is terminal evidence: answer from it instead of calling search, history, topology, or more SQL unless rows are empty or the user explicitly asks for impact, root cause, or raw proof. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. If the user provided a cluster display name or fragment such as gcp2, first inspect kube_insight_health without a cluster filter or a typed tool alias resolution result and use the returned stable cluster_id; do not put a guessed display alias into SQL. Keep maxRows bounded. For recent/today questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -412,7 +440,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_health",
-			Description: "Summarize collector coverage, staleness, and resource stream health before making current-state claims. The optional cluster argument accepts the stable cluster_id, a known display/context/source alias, or an unambiguous abbreviated fragment such as gcp2, and resolves it to the stored cluster_id. Returns a compact DSL summary plus a bounded list of problematic resources by default; the HTTP /api/v1/health endpoint is much larger and intended for dashboards.",
+			Description: "Summarize collector coverage, staleness, and resource stream health before making current-state claims. Call without a cluster filter at the start of a scoped investigation when the user gives a cluster display/context name or fragment, so the returned clusters map shows available display names and stable cluster_ids. The optional cluster argument accepts the stable cluster_id, a known display/context/source alias, or an unambiguous abbreviated fragment such as gcp2, and resolves it to the stored cluster_id. Returns a compact DSL summary plus a bounded list of problematic resources by default; the HTTP /api/v1/health endpoint is much larger and intended for dashboards.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -577,12 +605,13 @@ Default to SQL after schema detection. Typed tools such as kube_insight_health a
 
 Use this order:
 1. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
-2. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
-3. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
-4. Pick the relevant cluster id and keep cluster_id in follow-up SQL.
-5. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search. For Service exposure issues, start with service.load_balancer.pending and service.load_balancer.ingress_ip facts before opening retained Service versions.
-6. Query edges with src_id or dst_id around candidates to expand topology.
-7. Query observations and versions for retained proof. Use kube_insight_history only for final candidate objects or when packaged diffs are clearer than raw SQL.
+2. If the user supplied a cluster name or fragment such as gcp2, first call kube_insight_health without a cluster filter or use a typed tool alias resolver to list available cluster display/source names and stable cluster_ids. Do not put the user fragment into a cluster_id SQL predicate until it has been matched to a stable cluster_id.
+3. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
+4. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
+5. Pick the relevant stable cluster id and keep cluster_id in follow-up SQL.
+6. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search. For Service exposure issues, start with service.load_balancer.pending and service.load_balancer.ingress_ip facts before opening retained Service versions.
+7. Query edges with src_id or dst_id around candidates to expand topology.
+8. Query observations and versions for retained proof. Use kube_insight_history only for final candidate objects or when packaged diffs are clearer than raw SQL.
 
 Do not claim absence unless collector coverage is healthy for the resource types involved.`, symptom, cluster), "Coverage-first kube-insight investigation", nil
 	case "kube_insight_event_history":

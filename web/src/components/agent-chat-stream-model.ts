@@ -1,4 +1,4 @@
-import type { AgentArtifact, AgentRun, AgentRunEvent } from "@/lib/agent-store"
+import type { AgentRun, AgentRunEvent } from "@/lib/agent-store"
 
 export type ConversationSegment =
   | { type: "user"; id: string; content: string }
@@ -283,19 +283,6 @@ export function runCitations(events: AgentRunEvent[]): EvidenceSegment[] {
     citations.push(citation)
   }
   return citations
-}
-
-export function runInlineArtifacts(
-  run: AgentRun,
-  artifactsById: Record<string, AgentArtifact>,
-  options: { excludeArtifactIds?: Iterable<string>; limit?: number } = {},
-) {
-  const limit = Math.max(1, options.limit ?? 4)
-  const excludeArtifactIds = new Set(options.excludeArtifactIds ?? [])
-  const artifacts = run.artifactIds
-    .map((artifactId) => artifactsById[artifactId])
-    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind) && !excludeArtifactIds.has(artifact.id))
-  return artifacts.slice(Math.max(0, artifacts.length - limit))
 }
 
 function groupConsecutiveToolSegments(segments: ConversationSegment[]): ConversationSegment[] {

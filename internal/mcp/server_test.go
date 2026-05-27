@@ -216,6 +216,97 @@ func (f *fakeMCPReadStore) InvestigateServiceWithOptions(context.Context, storag
 	}, nil
 }
 
+type countingHealthReadStore struct {
+	healthCalls int
+	closeCalls  int
+}
+
+func (f *countingHealthReadStore) Close() error {
+	f.closeCalls++
+	return nil
+}
+
+func (f *countingHealthReadStore) ResourceHealth(context.Context, storage.ResourceHealthOptions) (storage.ResourceHealthReport, error) {
+	f.healthCalls++
+	return storage.ResourceHealthReport{
+		Summary:   storage.ResourceHealthSummary{Resources: 1, Healthy: f.healthCalls, Complete: true},
+		ByStatus:  map[string]int{"watching": f.healthCalls},
+		Resources: []storage.ResourceHealthRecord{{ClusterID: "c1", Version: "v1", Resource: "pods", Kind: "Pod", Status: "watching"}},
+	}, nil
+}
+
+func TestQueryHealthCachesDefaultHealthReport(t *testing.T) {
+	var opened int
+	store := &countingHealthReadStore{}
+	server, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			opened++
+			return store, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	textValue, err := server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textValue.(string)
+	if !strings.Contains(text, "healthy=1") {
+		t.Fatalf("first health output missing healthy=1: %s", text)
+	}
+	if opened != 1 || store.healthCalls != 1 || store.closeCalls != 1 {
+		t.Fatalf("after first query opened=%d healthCalls=%d closeCalls=%d", opened, store.healthCalls, store.closeCalls)
+	}
+
+	textValue, err = server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = textValue.(string)
+	if !strings.Contains(text, "healthy=1") {
+		t.Fatalf("cached health output missing healthy=1: %s", text)
+	}
+	if opened != 1 || store.healthCalls != 1 || store.closeCalls != 1 {
+		t.Fatalf("cache miss: opened=%d healthCalls=%d closeCalls=%d", opened, store.healthCalls, store.closeCalls)
+	}
+}
+
+func TestRefreshHealthCacheUpdatesRegisteredReports(t *testing.T) {
+	store := &countingHealthReadStore{}
+	server, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			return store, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	if _, err := server.queryHealth(context.Background(), healthArguments{}); err != nil {
+		t.Fatal(err)
+	}
+	server.refreshHealthCache(context.Background())
+	if store.healthCalls != 2 {
+		t.Fatalf("healthCalls after refresh = %d, want 2", store.healthCalls)
+	}
+
+	textValue, err := server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textValue.(string)
+	if !strings.Contains(text, "healthy=2") {
+		t.Fatalf("refreshed health output missing healthy=2: %s", text)
+	}
+	if store.healthCalls != 2 {
+		t.Fatalf("refreshed cache was not reused, healthCalls=%d", store.healthCalls)
+	}
+}
+
 func TestStreamableHTTPMCPTransport(t *testing.T) {
 	handler, err := NewServer(ServerOptions{DBPath: seedMCPDB(t)})
 	if err != nil {

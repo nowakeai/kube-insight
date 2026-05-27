@@ -103,24 +103,50 @@ order by instance_type
 limit 50;
 ```
 
-For recent node lifecycle changes, query ADDED/DELETED observations separately:
+For recent node lifecycle changes, locate ADDED/DELETED observations first and
+then enrich each event from following observations of the same Node. Some
+Kubernetes watchers observe an initial ADDED document before labels such as
+`node.kubernetes.io/instance-type` are complete.
 
 ```sql
+with lifecycle as (
+  select cluster_id, observation_type, name, uid,
+         min(observed_at) as first_seen,
+         max(observed_at) as last_seen
+  from observations
+  where cluster_id = 'CLUSTER_ID'
+    and kind = 'Node'
+    and observation_type in ('ADDED', 'DELETED')
+    and observed_at >= toDateTime64('2026-05-26 04:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-26 16:00:00', 3, 'UTC')
+  group by cluster_id, observation_type, name, uid
+), enriched as (
+  select l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen,
+         argMax(o.doc, o.observed_at) as doc
+  from lifecycle as l
+  left join observations as o
+    on o.cluster_id = l.cluster_id
+   and o.kind = 'Node'
+   and o.name = l.name
+   and o.uid = l.uid
+   and o.observed_at >= l.first_seen
+   and o.observed_at <= l.first_seen + interval 15 minute
+  group by l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen
+)
 select observation_type, name, uid,
-       any(JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type')) as instance_type,
-       any(JSONExtractString(doc, 'metadata', 'creationTimestamp')) as creation_timestamp,
-       min(observed_at) as first_seen,
-       max(observed_at) as last_seen
-from observations
-where cluster_id = 'CLUSTER_ID'
-  and kind = 'Node'
-  and observation_type in ('ADDED', 'DELETED')
-  and observed_at >= toDateTime64('2026-05-26 04:00:00', 3, 'UTC')
-  and observed_at < toDateTime64('2026-05-26 16:00:00', 3, 'UTC')
-group by observation_type, name, uid
+       JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type') as instance_type,
+       JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool') as nodepool,
+       JSONExtractString(doc, 'metadata', 'creationTimestamp') as creation_timestamp,
+       first_seen,
+       last_seen
+from enriched
 order by first_seen
 limit 100;
 ```
+
+When summarizing the lifecycle rows, compute `added_count`, `deleted_count`,
+and `net_delta = added_count - deleted_count`. Do not say the node count was
+stable unless the counts match or a separate before/after snapshot proves it.
 
 If using facts instead, first take latest values per node and fact key, then
 aggregate. Never sum all fact rows in a time window:

@@ -269,20 +269,38 @@ limit 50`,
 		},
 		{
 			Name:        "recent_node_lifecycle",
-			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals.",
-			SQL: `select observation_type, name, uid,
-       any(JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type')) as instance_type,
-       any(JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool')) as nodepool,
-       any(JSONExtractString(doc, 'metadata', 'creationTimestamp')) as creation_timestamp,
-       min(observed_at) as first_seen,
-       max(observed_at) as last_seen
-from observations
-where cluster_id = 'CLUSTER_ID'
-  and kind = 'Node'
-  and observation_type in ('ADDED', 'DELETED')
-  and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
-  and observed_at < toDateTime64('2026-05-26 00:00:00', 3, 'UTC')
-group by observation_type, name, uid
+			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals. The event row is enriched from the same Node's following observations because ADDED docs can arrive before labels such as instance type are complete.",
+			SQL: `with lifecycle as (
+  select cluster_id, observation_type, name, uid,
+         min(observed_at) as first_seen,
+         max(observed_at) as last_seen
+  from observations
+  where cluster_id = 'CLUSTER_ID'
+    and kind = 'Node'
+    and observation_type in ('ADDED', 'DELETED')
+    and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-26 00:00:00', 3, 'UTC')
+  group by cluster_id, observation_type, name, uid
+), enriched as (
+  select l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen,
+         argMax(o.doc, o.observed_at) as doc
+  from lifecycle as l
+  left join observations as o
+    on o.cluster_id = l.cluster_id
+   and o.kind = 'Node'
+   and o.name = l.name
+   and o.uid = l.uid
+   and o.observed_at >= l.first_seen
+   and o.observed_at <= l.first_seen + interval 15 minute
+  group by l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen
+)
+select observation_type, name, uid,
+       JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type') as instance_type,
+       JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool') as nodepool,
+       JSONExtractString(doc, 'metadata', 'creationTimestamp') as creation_timestamp,
+       first_seen,
+       last_seen
+from enriched
 order by first_seen
 limit 100`,
 		},

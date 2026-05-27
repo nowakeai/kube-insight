@@ -11,6 +11,7 @@ AGENT_CASE_FORBIDDEN_TOOLS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_TOOLS:-artifact_t
 AGENT_CASE_EXPECTED_TOOL_SEQUENCE=${KUBE_INSIGHT_AGENT_CASE_EXPECTED_TOOL_SEQUENCE:-kube_insight_health,kube_insight_schema,kube_insight_js;kube_insight_schema,kube_insight_health,kube_insight_js}
 AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT:-gcp2}
 AGENT_CASE_REQUIRED_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS:-节点,CPU,内存}
+AGENT_CASE_FORBIDDEN_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_ANSWER_TERMS:-—,没有净增减}
 mkdir -p "$OUT_DIR"
 
 request_json() {
@@ -127,6 +128,13 @@ agent_case() {
       exit 1
     fi
   done < <(csv_each "$AGENT_CASE_REQUIRED_ANSWER_TERMS")
+  while IFS= read -r term; do
+    if grep -Fqi "$term" <<<"$final_answer"; then
+      echo "Agent run $run_id final answer contains forbidden term: $term" >&2
+      printf '%s\n' "$final_answer" >&2
+      exit 1
+    fi
+  done < <(csv_each "$AGENT_CASE_FORBIDDEN_ANSWER_TERMS")
 
   jq -n \
     --arg sessionId "$session_id" \

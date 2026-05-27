@@ -139,7 +139,9 @@ Use the path that matches the question:
   transform bounded JSON passed as `input`, so do not split the work into a
   separate transform tool. Keep query count and `maxRows` bounded. Return
   answer-ready JSON from the script, with grouping, totals, sorting, and unit
-  normalization already done.
+  normalization already done. ClickHouse integer columns may arrive in JS as
+  strings; use `Number(value)` or `ki.sumBy(rows, key)` for totals instead of
+  raw `+` addition.
 - Node inventory/capacity/allocatable totals:
   `kube_insight_health` + `kube_insight_schema`, then one bounded
   `kube_insight_js` as the first data query. Use
@@ -150,7 +152,13 @@ Use the path that matches the question:
   window. Instance type usually comes from Node labels in the latest doc; CPU
   and memory come from `status.capacity/status.allocatable`, not `spec`. If older
   data lacks these facts, run one scoped raw-doc proof query against Node
-  `observations` or `versions`; do not infer CPU or memory from node names.
+  `observations` or `versions`; do not infer CPU or memory from node names. For
+  recent ADDED/DELETED lifecycle rows, enrich ADDED events from the same Node's
+  following observations in a short window because initial ADDED documents can
+  arrive before labels such as `node.kubernetes.io/instance-type` are complete.
+  Compute `added_count`, `deleted_count`, and `net_delta`; do not claim the node
+  count stayed stable unless added and deleted counts match or you have separate
+  before/after snapshots that prove it.
 - Namespace or object topology:
   `kube_insight_health` + candidate discovery, then one
   `kube_insight_topology` around the best root. Do not call topology for every

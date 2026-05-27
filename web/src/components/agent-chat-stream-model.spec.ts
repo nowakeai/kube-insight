@@ -144,6 +144,10 @@ test("runInlineArtifacts keeps dockable artifacts and drops audit-only artifacts
     "artifact_resource",
     "artifact_topology",
   ])
+  expect(runInlineArtifacts(run, artifactsById, { excludeArtifactIds: ["artifact_resource"] }).map((item) => item.id)).toEqual([
+    "artifact_markdown",
+    "artifact_topology",
+  ])
 })
 
 function artifact(id: string, kind: AgentArtifact["kind"]): AgentArtifact {

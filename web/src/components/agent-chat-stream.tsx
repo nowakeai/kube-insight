@@ -130,7 +130,8 @@ function RunConversation({
   const activity = runActivitySummary(run, events, segments, status)
   const response = splitRunResponse(segments, isRunning, status)
   const citations = runCitations(events)
-  const inlineArtifacts = runInlineArtifacts(run, artifactsById)
+  const citedArtifactIds = citations.map((citation) => citation.artifactId).filter((artifactId): artifactId is string => Boolean(artifactId))
+  const inlineArtifacts = runInlineArtifacts(run, artifactsById, { excludeArtifactIds: citedArtifactIds })
   const citationAnchorIndex = lastIndexOf(response.finalSegments, (segment) => segment.type === "assistant" && Boolean(segment.content.trim()))
   return (
     <div className={isActive ? "space-y-4" : "space-y-4 opacity-95"}>

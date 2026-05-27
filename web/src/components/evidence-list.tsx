@@ -58,7 +58,7 @@ export function EvidenceList({ artifactsById, citations, onSelectArtifact }: Evi
         <FileText className="size-3.5 text-muted-foreground" aria-hidden="true" />
         <span className="font-medium text-foreground">Evidence</span>
         <span className="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums text-muted-foreground">{items.length}</span>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">{items.map((item) => `${item.marker} ${item.title}`).slice(0, 2).join(" · ")}</span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground">{expanded ? "Hide cited evidence" : "Show cited evidence"}</span>
         <ChevronDown className={expanded ? "ml-auto size-3.5 rotate-180 text-muted-foreground transition" : "ml-auto size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       {expanded ? (

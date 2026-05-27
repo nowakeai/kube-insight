@@ -288,12 +288,13 @@ export function runCitations(events: AgentRunEvent[]): EvidenceSegment[] {
 export function runInlineArtifacts(
   run: AgentRun,
   artifactsById: Record<string, AgentArtifact>,
-  options: { limit?: number } = {},
+  options: { excludeArtifactIds?: Iterable<string>; limit?: number } = {},
 ) {
   const limit = Math.max(1, options.limit ?? 4)
+  const excludeArtifactIds = new Set(options.excludeArtifactIds ?? [])
   const artifacts = run.artifactIds
     .map((artifactId) => artifactsById[artifactId])
-    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind))
+    .filter((artifact): artifact is AgentArtifact => Boolean(artifact) && isPanelDockArtifact(artifact.kind) && !excludeArtifactIds.has(artifact.id))
   return artifacts.slice(Math.max(0, artifacts.length - limit))
 }
 

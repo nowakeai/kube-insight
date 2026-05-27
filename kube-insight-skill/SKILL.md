@@ -233,10 +233,12 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   display/source match has data, prefer the dataful fuzzy match and state the
   stable ID used.
 - For relative time words such as "recent", "today", "yesterday", "last 24
-  hours", "half day", or `半天`, compute absolute UTC `from`/`to` bounds from
-  the client context before calling search/history/service tools or SQL. Treat
-  "half day" and `半天` as the last 12 hours unless the user clearly means a
-  calendar half-day.
+  hours", "half day", or `半天`, treat the client `sentAt`, `localTime`,
+  `timeZone`, and UTC offset as the current time base. Do not use server time,
+  model training time, or tool `checked_at` timestamps as `now`. Compute
+  absolute UTC `from`/`to` bounds from the client context before calling
+  search/history/service tools or SQL. Treat "half day" and `半天` as the last
+  12 hours unless the user clearly means a calendar half-day.
 - SQL arguments stay in UTC. Final user-facing timestamps should use the
   browser/client time zone when known, with the IANA zone or numeric offset; add
   UTC as secondary context only when useful.

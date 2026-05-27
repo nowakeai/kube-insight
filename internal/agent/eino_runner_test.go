@@ -64,28 +64,6 @@ func TestToolBudgetMiddlewareAddsWarningAfterRepeatedTool(t *testing.T) {
 	}
 }
 
-func TestToolBudgetMiddlewareGuardsFourthRepeatedTool(t *testing.T) {
-	mw := toolBudgetMiddleware{maxIterations: 12}
-	if mw.shouldReturnBudgetGuard("kube_insight_search", 5, 3) {
-		t.Fatal("third same-tool call should still execute")
-	}
-	if !mw.shouldReturnBudgetGuard("kube_insight_search", 6, 4) {
-		t.Fatal("fourth same-tool call should return budget guard")
-	}
-}
-
-func TestToolBudgetMiddlewareAllowsSQLProofChain(t *testing.T) {
-	mw := toolBudgetMiddleware{maxIterations: 12}
-	for repeated := 1; repeated <= 5; repeated++ {
-		if mw.shouldReturnBudgetGuard("kube_insight_sql", repeated, repeated) {
-			t.Fatalf("sql call %d should still execute", repeated)
-		}
-	}
-	if !mw.shouldReturnBudgetGuard("kube_insight_sql", 6, 6) {
-		t.Fatal("sixth SQL call should return budget guard")
-	}
-}
-
 func TestToolBudgetMiddlewareDoesNotDuplicateWarning(t *testing.T) {
 	mw := toolBudgetMiddleware{maxIterations: 12}
 	state := &adk.ChatModelAgentState{Messages: []adk.Message{

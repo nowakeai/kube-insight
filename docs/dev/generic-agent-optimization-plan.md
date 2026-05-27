@@ -252,12 +252,12 @@ over-verifying models. Prefer prompt/schema recipes, terminal SQL-result rules,
 and runtime budget feedback that nudges the model to answer from existing
 evidence. A lightweight runtime budget middleware now injects a model-visible
 warning when a run has already used several tools or repeats the same tool,
-asking the model to answer from collected evidence or make one targeted query
-only if a proof gap remains. The same middleware also has a generic repeated-tool
-guard: the fourth same-tool call, or excessive total calls, returns a
-recoverable, model-visible budget result instead of executing another equivalent
-query. This is intentionally tool-agnostic and does not add symptom-specific
-storage.
+asking the model to audit whether existing evidence is enough before calling
+another tool. It no longer hard-blocks the Nth SQL/search call with a synthetic
+tool result; the model remains responsible for deciding whether another
+materially different query is justified. This keeps the product generic while
+still making over-investigation visible in the transcript and evaluation
+metrics.
 
 The API smoke adds an outer regression gate for this behavior: follow-up runs
 default to at most three tool calls, failed tool calls default to zero, and the

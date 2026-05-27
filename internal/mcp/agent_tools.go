@@ -75,9 +75,18 @@ func (s *Server) querySearch(ctx context.Context, args searchArguments) (any, er
 	if strings.TrimSpace(args.Query) == "" {
 		return nil, fmt.Errorf("kube_insight_search requires a query argument")
 	}
+	store, err := s.openReadStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.closeReadStore(store)
+	clusterID, err := resolveClusterID(ctx, store, args.ClusterID)
+	if err != nil {
+		return nil, err
+	}
 	opts := storage.EvidenceSearchOptions{
 		Query:                args.Query,
-		ClusterID:            args.ClusterID,
+		ClusterID:            clusterID,
 		Kind:                 args.Kind,
 		Namespace:            args.Namespace,
 		Limit:                boundedLimit(args.Limit, defaultSearchLimit, maxSearchLimit),
@@ -114,11 +123,6 @@ func (s *Server) querySearch(ctx context.Context, args searchArguments) (any, er
 		}
 		opts.HealthStaleAfter = parsed
 	}
-	store, err := s.openReadStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer s.closeReadStore(store)
 	searchStore, ok := store.(storage.EvidenceSearchStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support evidence search")
@@ -139,11 +143,15 @@ func (s *Server) queryTopology(ctx context.Context, args topologyArguments) (any
 		return nil, err
 	}
 	defer s.closeReadStore(store)
+	clusterID, err := resolveClusterID(ctx, store, args.ClusterID)
+	if err != nil {
+		return nil, err
+	}
 	topologyStore, ok := store.(storage.TopologyStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support topology")
 	}
-	graph, err := topologyStore.Topology(ctx, storage.ObjectTarget{ClusterID: args.ClusterID, Kind: args.Kind, Namespace: args.Namespace, Name: args.Name, UID: args.UID})
+	graph, err := topologyStore.Topology(ctx, storage.ObjectTarget{ClusterID: clusterID, Kind: args.Kind, Namespace: args.Namespace, Name: args.Name, UID: args.UID})
 	if err != nil {
 		return nil, err
 	}
@@ -182,11 +190,15 @@ func (s *Server) queryServiceInvestigation(ctx context.Context, args serviceInve
 		return nil, err
 	}
 	defer s.closeReadStore(store)
+	clusterID, err := resolveClusterID(ctx, store, args.ClusterID)
+	if err != nil {
+		return nil, err
+	}
 	serviceStore, ok := store.(storage.ServiceInvestigationStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support service investigation")
 	}
-	result, err := serviceStore.InvestigateServiceWithOptions(ctx, storage.ObjectTarget{ClusterID: args.ClusterID, Kind: "Service", Namespace: args.Namespace, Name: args.Name}, opts)
+	result, err := serviceStore.InvestigateServiceWithOptions(ctx, storage.ObjectTarget{ClusterID: clusterID, Kind: "Service", Namespace: args.Namespace, Name: args.Name}, opts)
 	if err != nil {
 		return nil, err
 	}

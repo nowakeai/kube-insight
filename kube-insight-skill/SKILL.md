@@ -135,13 +135,16 @@ Use the path that matches the question:
   plan needs profile -> proof SQL, several independent aggregates, or SQL rows
   plus JavaScript grouping. Prefer this over serial repeated SQL plus a separate
   transform when the tool is available; keep query count and `maxRows` bounded.
-- Node capacity/allocatable totals:
-  `kube_insight_health` + `kube_insight_schema`, then one facts aggregate over
-  `node_capacity.cpu`, `node_capacity.memory`, `node_allocatable.cpu`, and
-  `node_allocatable.memory`. These values come from Node
-  `status.capacity/status.allocatable`, not `spec`. If older data lacks these
-  facts, run one scoped raw-doc proof query against Node `observations` or
-  `versions`; do not infer CPU or memory from node names or pool labels.
+- Node inventory/capacity/allocatable totals:
+  `kube_insight_health` + `kube_insight_schema`, then one bounded scripted SQL
+  plan using `current_node_capacity_snapshot`; add `recent_node_lifecycle` only
+  when the user asks whether nodes changed in a time window. Current node count
+  and capacity must come from the latest non-deleted Node snapshot per
+  cluster/name/UID, not from counting or summing all fact rows in the time
+  window. Instance type usually comes from Node labels in the latest doc; CPU
+  and memory come from `status.capacity/status.allocatable`, not `spec`. If older
+  data lacks these facts, run one scoped raw-doc proof query against Node
+  `observations` or `versions`; do not infer CPU or memory from node names.
 - Namespace or object topology:
   `kube_insight_health` + candidate discovery, then one
   `kube_insight_topology` around the best root. Do not call topology for every
@@ -206,6 +209,10 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   do not normalize it into a guessed ID. First call health without a cluster
   filter, or use schema/health cluster display maps to match the exact display
   name and stable `cluster_id`.
+- MCP typed tools may accept a known cluster display/context/source alias, but
+  SQL still needs the stable `cluster_id` from health/schema/evidence rows. Do
+  not put the display name into a `cluster_id = ...` SQL predicate unless the
+  schema rows prove that it is the stored ID.
 - For relative time words such as "recent", "today", "yesterday", or "last 24
   hours", compute absolute UTC `from`/`to` bounds from the client context before
   calling search/history/service tools or SQL.
@@ -286,8 +293,9 @@ helpers, not as permission to run broad blind searches.
   symptoms that split cleanly into health/coverage, OOM/restarts, recent
   changes, and topology/impact. Give it 2-4 concrete independent branches with
   absolute time bounds and known cluster/namespace scope. Do not use it for
-  exact Service health or exact kind/namespace/name recent-change prompts where
-  the narrow terminal path is sufficient.
+  exact Service health, exact kind/namespace/name recent-change prompts, or Node
+  inventory/capacity prompts where one health + schema + scripted SQL plan is
+  sufficient.
 
 - Use a scripted query helper after schema when dependent SQL would otherwise
   take several turns. Good examples: profile real keys, query proof rows from

@@ -38,7 +38,7 @@ The default case set currently covers:
 | `oom-restart` | OOMKilled or restart evidence | search + history tools, resource/history artifacts, citation |
 | `oom-aggregate` | OOMKilled ranking/counting | health + schema + bounded aggregate SQL, citation |
 | `allocation-followup` | User corrects intent from live usage to allocation/configuration | schema-guided SQL and readable allocation/config evidence, citation |
-| `node-capacity` | Node count and total capacity | health + schema + Node capacity facts SQL, citation |
+| `node-capacity` | Node count and total capacity | health + schema + latest Node snapshot SQL, citation |
 | `scripted-query-node-capacity` | Dependent/compact SQL plan | schema + `kube_insight_scripted_query`, tool artifact, citation |
 | `recent-changes` | recent object changes | search + history tools, history artifact, citation |
 | `history-diff` | retained object version diff | `kube_insight_history`, history artifact with change/diff proof, citation |
@@ -96,7 +96,7 @@ evidence checks, not exact text matching.
 
 The fake SQL tool used by `TestLiveLLMEvaluation` is input-aware: it returns
 change rows for change-history SQL, allocation rows for requests/limits SQL,
-Node capacity fact rows for capacity SQL, and OOM rows for OOM/fact SQL. This
+latest Node snapshot rows for capacity SQL, and OOM rows for OOM/fact SQL. This
 keeps synthetic eval useful for model behavior without requiring live ClickHouse
 access or exporting real cluster data.
 
@@ -190,8 +190,8 @@ KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smok
 scripts/agent-api-live-smoke.sh
 ```
 
-Use a Node capacity plus scripted-query prompt when validating the capacity
-facts and one-tool SQL planning path:
+Use a Node capacity plus scripted-query prompt when validating the latest Node
+snapshot and one-tool SQL planning path:
 
 ```bash
 make build

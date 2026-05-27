@@ -71,7 +71,59 @@ Avoid repeated JSON syntax probing.
 ## Node Capacity And Allocatable
 
 For node capacity questions, Kubernetes stores the useful values under Node
-`status.capacity` and `status.allocatable`, not `spec`. Prefer facts first:
+`status.capacity` and `status.allocatable`, not `spec`. For current inventory,
+first collapse observations to the latest non-deleted Node snapshot. This avoids
+counting deleted nodes or summing repeated fact rows from a time window:
+
+```sql
+with latest_nodes as (
+  select cluster_id, name, uid,
+         argMax(doc, observed_at) as doc,
+         argMax(observation_type, observed_at) as last_type,
+         max(observed_at) as last_seen
+  from observations
+  where cluster_id = 'CLUSTER_ID'
+    and kind = 'Node'
+  group by cluster_id, name, uid
+), parsed as (
+  select cluster_id, name, uid, last_seen,
+         JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type') as instance_type,
+         toFloat64OrZero(JSONExtractString(doc, 'status', 'capacity', 'cpu')) as capacity_cpu_cores,
+         toFloat64OrZero(replaceRegexpAll(JSONExtractString(doc, 'status', 'capacity', 'memory'), 'Ki$', '')) / 1048576 as capacity_memory_gib
+  from latest_nodes
+  where last_type != 'DELETED'
+)
+select cluster_id, instance_type,
+       count() as nodes,
+       sum(capacity_cpu_cores) as capacity_cpu_cores,
+       round(sum(capacity_memory_gib), 2) as capacity_memory_gib
+from parsed
+group by cluster_id, instance_type
+order by instance_type
+limit 50;
+```
+
+For recent node lifecycle changes, query ADDED/DELETED observations separately:
+
+```sql
+select observation_type, name, uid,
+       any(JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type')) as instance_type,
+       any(JSONExtractString(doc, 'metadata', 'creationTimestamp')) as creation_timestamp,
+       min(observed_at) as first_seen,
+       max(observed_at) as last_seen
+from observations
+where cluster_id = 'CLUSTER_ID'
+  and kind = 'Node'
+  and observation_type in ('ADDED', 'DELETED')
+  and observed_at >= toDateTime64('2026-05-26 04:00:00', 3, 'UTC')
+  and observed_at < toDateTime64('2026-05-26 16:00:00', 3, 'UTC')
+group by observation_type, name, uid
+order by first_seen
+limit 100;
+```
+
+If using facts instead, first take latest values per node and fact key, then
+aggregate. Never sum all fact rows in a time window:
 
 ```sql
 with latest as (

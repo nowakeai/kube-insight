@@ -221,6 +221,72 @@ order by containers_with_requests desc, containers desc
 limit 25`,
 		},
 		{
+			Name:        "current_node_capacity_snapshot",
+			Description: "Current Node inventory, instance type, and capacity/allocatable totals. Use this for questions such as how many nodes, which node types, total CPU, or total memory. It collapses observations to the latest non-deleted Node snapshot before aggregating; do not sum raw fact rows across a time window for current capacity.",
+			SQL: `with latest_nodes as (
+  select cluster_id, name, uid,
+         argMax(doc, observed_at) as doc,
+         argMax(observation_type, observed_at) as last_type,
+         max(observed_at) as last_seen
+  from observations
+  where cluster_id = 'CLUSTER_ID'
+    and kind = 'Node'
+  group by cluster_id, name, uid
+), parsed as (
+  select cluster_id, name, uid, last_seen,
+         JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type') as instance_type,
+         JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool') as nodepool,
+         toFloat64OrZero(JSONExtractString(doc, 'status', 'capacity', 'cpu')) as capacity_cpu_cores,
+         toFloat64OrZero(replaceRegexpAll(JSONExtractString(doc, 'status', 'capacity', 'memory'), 'Ki$', '')) / 1048576 as capacity_memory_gib,
+         JSONExtractString(doc, 'status', 'allocatable', 'cpu') as allocatable_cpu_raw,
+         JSONExtractString(doc, 'status', 'allocatable', 'memory') as allocatable_memory_raw
+  from latest_nodes
+  where last_type != 'DELETED'
+), normalized as (
+  select cluster_id, name, uid, last_seen, instance_type, nodepool,
+         capacity_cpu_cores,
+         capacity_memory_gib,
+         if(endsWith(allocatable_cpu_raw, 'm'),
+            toFloat64OrZero(replaceRegexpAll(allocatable_cpu_raw, 'm$', '')) / 1000,
+            toFloat64OrZero(allocatable_cpu_raw)) as allocatable_cpu_cores,
+         toFloat64OrZero(replaceRegexpAll(allocatable_memory_raw, 'Ki$', '')) / 1048576 as allocatable_memory_gib
+  from parsed
+)
+select cluster_id,
+       if(instance_type = '', 'unknown', instance_type) as instance_type,
+       count() as nodes,
+       sum(capacity_cpu_cores) as capacity_cpu_cores,
+       round(sum(capacity_memory_gib), 2) as capacity_memory_gib,
+       round(sum(allocatable_cpu_cores), 2) as allocatable_cpu_cores,
+       round(sum(allocatable_memory_gib), 2) as allocatable_memory_gib,
+       arrayStringConcat(arraySlice(groupUniqArray(nodepool), 1, 8), ', ') as nodepools,
+       min(last_seen) as oldest_latest_observation,
+       max(last_seen) as newest_latest_observation
+from normalized
+group by cluster_id, instance_type
+order by instance_type
+limit 50`,
+		},
+		{
+			Name:        "recent_node_lifecycle",
+			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals.",
+			SQL: `select observation_type, name, uid,
+       any(JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type')) as instance_type,
+       any(JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool')) as nodepool,
+       any(JSONExtractString(doc, 'metadata', 'creationTimestamp')) as creation_timestamp,
+       min(observed_at) as first_seen,
+       max(observed_at) as last_seen
+from observations
+where cluster_id = 'CLUSTER_ID'
+  and kind = 'Node'
+  and observation_type in ('ADDED', 'DELETED')
+  and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+  and observed_at < toDateTime64('2026-05-26 00:00:00', 3, 'UTC')
+group by observation_type, name, uid
+order by first_seen
+limit 100`,
+		},
+		{
 			Name:        "raw_doc_field_profile",
 			Description: "Fallback only after facts/changes do not carry a requested configuration field. Keep time and identity predicates tight before scanning doc text.",
 			SQL: `select cluster_id, kind, observation_type, count() as rows, max(observed_at) as last_seen

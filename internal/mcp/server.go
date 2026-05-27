@@ -272,8 +272,17 @@ func (s *Server) querySQL(ctx context.Context, args sqlArguments) (any, error) {
 }
 
 func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, error) {
+	store, err := s.openReadStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer s.closeReadStore(store)
+	clusterID, err := resolveClusterID(ctx, store, args.ClusterID)
+	if err != nil {
+		return nil, err
+	}
 	opts := storage.ResourceHealthOptions{
-		ClusterID:        args.ClusterID,
+		ClusterID:        clusterID,
 		Status:           args.Status,
 		ErrorsOnly:       args.ErrorsOnly,
 		Limit:            args.Limit,
@@ -287,11 +296,6 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 		}
 		opts.StaleAfter = value
 	}
-	store, err := s.openReadStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer s.closeReadStore(store)
 	healthStore, ok := store.(storage.ResourceHealthStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support resource health")
@@ -304,13 +308,6 @@ func (s *Server) queryHealth(ctx context.Context, args healthArguments) (any, er
 }
 
 func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, error) {
-	target := storage.ObjectTarget{
-		ClusterID: args.ClusterID,
-		UID:       args.UID,
-		Kind:      args.Kind,
-		Namespace: args.Namespace,
-		Name:      args.Name,
-	}
 	opts := storage.ObjectHistoryOptions{
 		MaxVersions:     args.MaxVersions,
 		MaxObservations: args.MaxObservations,
@@ -341,6 +338,17 @@ func (s *Server) queryHistory(ctx context.Context, args historyArguments) (any, 
 		return nil, err
 	}
 	defer s.closeReadStore(store)
+	clusterID, err := resolveClusterID(ctx, store, args.ClusterID)
+	if err != nil {
+		return nil, err
+	}
+	target := storage.ObjectTarget{
+		ClusterID: clusterID,
+		UID:       args.UID,
+		Kind:      args.Kind,
+		Namespace: args.Namespace,
+		Name:      args.Name,
+	}
 	historyStore, ok := store.(storage.ObjectHistoryStore)
 	if !ok {
 		return nil, fmt.Errorf("configured store does not support object history")
@@ -404,7 +412,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_health",
-			Description: "Summarize collector coverage, staleness, and resource stream health before making current-state claims. Returns a compact DSL summary plus a bounded list of problematic resources by default; the HTTP /api/v1/health endpoint is much larger and intended for dashboards.",
+			Description: "Summarize collector coverage, staleness, and resource stream health before making current-state claims. The optional cluster argument accepts the stable cluster_id or a known display/context/source alias and resolves it to the stored cluster_id. Returns a compact DSL summary plus a bounded list of problematic resources by default; the HTTP /api/v1/health endpoint is much larger and intended for dashboards.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -433,7 +441,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_search",
-			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; for exact recent-change questions use schema-guided SQL over changes, and for exact Service health use the Service investigation tool. Start with includeBundles=false and narrow by kind, namespace, cluster, and from/to time when known; for relative-time prompts derive absolute bounds from client context. Set includeBundles=true only for top targets that need compact proof.",
+			Description: "Search kube-insight evidence to find candidate Kubernetes objects from symptoms, names, labels, statuses, facts, changes, retained documents, and indexed evidence. The optional clusterId accepts the stable cluster_id or a known display/context/source alias and resolves it to the stored cluster_id. Use after kube_insight_health for broad discovery. Do not use search when the user already supplied an exact kind plus namespace/name target; for exact recent-change questions use schema-guided SQL over changes, and for exact Service health use the Service investigation tool. Start with includeBundles=false and narrow by kind, namespace, cluster, and from/to time when known; for relative-time prompts derive absolute bounds from client context. Set includeBundles=true only for top targets that need compact proof.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -454,7 +462,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_history",
-			Description: "Return one known object's retained content versions, observation trail, and optional version diffs. Use after search or SQL identifies the exact object. Do not call this for exact recent-change questions if a bounded changes SQL query already returned enough rows to answer. In multi-cluster data, include cluster or uid when known; if only namespace/name is known and the object may exist in multiple clusters, locate the exact object with search or SQL first. Keep maxVersions and maxObservations bounded; leave includeDocs=false unless raw YAML/JSON proof is explicitly needed.",
+			Description: "Return one known object's retained content versions, observation trail, and optional version diffs. The optional cluster argument accepts the stable cluster_id or a known display/context/source alias and resolves it to the stored cluster_id. Use after search or SQL identifies the exact object. Do not call this for exact recent-change questions if a bounded changes SQL query already returned enough rows to answer. In multi-cluster data, include cluster or uid when known; if only namespace/name is known and the object may exist in multiple clusters, locate the exact object with search or SQL first. Keep maxVersions and maxObservations bounded; leave includeDocs=false unless raw YAML/JSON proof is explicitly needed.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -474,7 +482,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_topology",
-			Description: "Load the retained topology graph around one known Kubernetes object. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search or SQL identifies a target; do not use it for broad discovery. One call around the best root is usually enough for a namespace map; do not call repeatedly for every returned node unless the graph is incomplete.",
+			Description: "Load the retained topology graph around one known Kubernetes object. The optional clusterId accepts the stable cluster_id or a known display/context/source alias and resolves it to the stored cluster_id. Use this to inspect Service, EndpointSlice, Pod, Node, owner, and event relationships after search or SQL identifies a target; do not use it for broad discovery. One call around the best root is usually enough for a namespace map; do not call repeatedly for every returned node unless the graph is incomplete.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -489,7 +497,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_service_investigation",
-			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. Use only when the target Kubernetes object is an exact Service namespace/name. For exact Service health, endpoint readiness, or impact questions, this result plus kube_insight_health is terminal evidence: stop and answer instead of calling search, schema, SQL, history, or topology again unless this bundle is missing the requested Service, EndpointSlice, Pod, or Event evidence. Do not use this tool just to answer recent-changes questions when search and history already returned changes. Start with low limits, then expand only if the compact bundle does not answer the question.",
+			Description: "Load a compact typed Service investigation bundle, including Service evidence, related EndpointSlices, Pods, Nodes, Events, facts, changes, and topology edges. The optional clusterId accepts the stable cluster_id or a known display/context/source alias and resolves it to the stored cluster_id. Use only when the target Kubernetes object is an exact Service namespace/name. For exact Service health, endpoint readiness, or impact questions, this result plus kube_insight_health is terminal evidence: stop and answer instead of calling search, schema, SQL, history, or topology again unless this bundle is missing the requested Service, EndpointSlice, Pod, or Event evidence. Do not use this tool just to answer recent-changes questions when search and history already returned changes. Start with low limits, then expand only if the compact bundle does not answer the question.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

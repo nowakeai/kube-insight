@@ -204,6 +204,20 @@ KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smok
 scripts/agent-api-live-smoke.sh
 ```
 
+For an existing ClickHouse-backed compose API server, `agent-clickhouse-case-smoke`
+can also submit a real agent run for the abbreviated-cluster Node inventory case.
+The optional agent check verifies the desired tool path: discover clusters with
+unfiltered health, use schema plus one scripted query, avoid a follow-up
+`artifact_transform_js`, and keep the first health call from treating `gcp2` as
+the stored cluster ID.
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-gcp2" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
 
 ## 2026-05-25 Server Flow Smoke
 

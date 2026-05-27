@@ -286,9 +286,8 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   starter prompt cards are randomized per page load, while composer
   placeholders stay stable. Completed run pages prefer LLM-authored
   conversation-related follow-up prompts emitted as `followup.suggestions`
-  run events from temporary `{{followup: ...}}` final-answer markers, with
-  deterministic local suggestions only as a compatibility fallback for older
-  runs that lack the event.
+  run events from temporary `{{followup: ...}}` final-answer markers. Runs
+  without `followup.suggestions` do not show follow-up buttons.
 - [x] Chat composer submits to server sessions/runs first and replays SSE run
   events, with local demo fallback when the API origin is unavailable. New
   browser-created runs include client time, local time, time zone, UTC offset,

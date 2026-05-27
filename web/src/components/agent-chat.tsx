@@ -6,7 +6,7 @@ import {
   type ThreadMessage,
 } from "@assistant-ui/react"
 import { ArrowRight, CircleStop, LayoutDashboard, Sparkles } from "lucide-react"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { SessionSidebar } from "@/components/agent-session-sidebar"
@@ -75,11 +75,6 @@ export function AgentChat() {
   const activeRunEvents = activeRunEventIds
     .map((eventID) => eventsById[eventID])
     .filter((event): event is AgentRunEvent => Boolean(event))
-  const activeRunArtifacts = useMemo(() => (
-    activeRun?.artifactIds
-      .map((artifactID) => artifactsById[artifactID])
-      .filter((artifact): artifact is AgentArtifact => Boolean(artifact)) ?? []
-  ), [activeRun?.artifactIds, artifactsById])
   const selectedArtifactId = useAgentProjectionStore((state) => state.selectedArtifactId)
   const visibleSessionId = routeRun?.sessionID ?? activeSessionId
   const visiblePanelWorkspace = useAgentProjectionStore((state) => visibleSessionId ? state.panelWorkspaces[visibleSessionId] : undefined)
@@ -251,9 +246,7 @@ export function AgentChat() {
     if (latestRunningRun) cancelRun(latestRunningRun)
   }, [activeRun, cancelRun])
 
-  const followUpSuggestions = useMemo(() => (
-    effectiveIsRunning ? [] : followUpSuggestionsForRun({ events: activeRunEvents, run: activeRun, artifacts: activeRunArtifacts })
-  ), [activeRun, activeRunArtifacts, activeRunEvents, effectiveIsRunning])
+  const followUpSuggestions = effectiveIsRunning ? [] : followUpSuggestionsForRun({ events: activeRunEvents, run: activeRun })
 
   const handleFollowUpSuggestion = useCallback((prompt: string) => {
     if (effectiveIsRunning) return

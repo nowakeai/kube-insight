@@ -100,6 +100,7 @@ type AddCitationInput = {
 
 type UpsertServerOptions = {
   activate?: boolean
+  promote?: boolean
 }
 
 type AgentProjectionState = {
@@ -220,6 +221,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
   upsertServerSessions: (sessions, options = {}) => {
     if (sessions.length === 0) return
     const activate = options.activate ?? true
+    const promote = options.promote ?? true
     set((current) => {
       let runs = current.runs
       for (const session of sessions) {
@@ -259,7 +261,7 @@ export const useAgentProjectionStore = create<AgentProjectionState>((set, get) =
           runIds,
           runCount: session.runCount ?? previous?.runCount ?? runIds.length,
         }
-        sessionOrder = uniquePrepend(sessionOrder, session.id)
+        sessionOrder = promote ? uniquePrepend(sessionOrder, session.id) : uniqueAppend(sessionOrder, session.id)
       }
       return {
         activeSessionId: activate ? sessions[sessions.length - 1]?.id : current.activeSessionId,

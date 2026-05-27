@@ -91,6 +91,64 @@ test("batch server session hydration preserves list order and run projections", 
   expect(state.runs.run_new.input).toBe("new")
 })
 
+test("server session hydration can avoid promoting a viewed session", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerSessions([
+    {
+      id: "sess_old",
+      title: "Old",
+      createdAt,
+      updatedAt: createdAt,
+      latestRun: runDTO("run_old", "old", undefined, "sess_old"),
+    },
+    {
+      id: "sess_new",
+      title: "New",
+      createdAt,
+      updatedAt: createdAt,
+      latestRun: runDTO("run_new", "new", undefined, "sess_new"),
+    },
+  ], { activate: false })
+
+  store.upsertServerSession({
+    id: "sess_old",
+    title: "Old",
+    createdAt,
+    updatedAt: createdAt,
+    runs: [runDTO("run_old", "old", undefined, "sess_old")],
+  }, { promote: false })
+
+  const state = useAgentProjectionStore.getState()
+  expect(state.sessionOrder).toEqual(["sess_new", "sess_old"])
+  expect(state.activeSessionId).toBe("sess_old")
+})
+
+test("server run upsert promotes the session after a new message", () => {
+  const store = useAgentProjectionStore.getState()
+
+  store.upsertServerSessions([
+    {
+      id: "sess_old",
+      title: "Old",
+      createdAt,
+      updatedAt: createdAt,
+      latestRun: runDTO("run_old", "old", undefined, "sess_old"),
+    },
+    {
+      id: "sess_new",
+      title: "New",
+      createdAt,
+      updatedAt: createdAt,
+      latestRun: runDTO("run_new", "new", undefined, "sess_new"),
+    },
+  ], { activate: false })
+
+  store.upsertServerRun(runDTO("run_followup", "new message", undefined, "sess_old"))
+
+  expect(useAgentProjectionStore.getState().sessionOrder).toEqual(["sess_old", "sess_new"])
+})
+
 test("removeSession clears runs, events, artifacts, citations, and active selection", () => {
   const store = useAgentProjectionStore.getState()
 

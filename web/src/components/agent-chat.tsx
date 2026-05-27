@@ -147,7 +147,7 @@ export function AgentChat() {
 
     async function hydrateRouteRun() {
       const session = await getAgentSession(routeRun!.sessionID, { signal: abortController.signal })
-      upsertServerSession(session)
+      upsertServerSession(session, { promote: false })
       const sessionRuns = session.runs ?? []
       const routeRunDTO = sessionRuns.find((candidate) => candidate.id === routeRun!.runID)
       if (!routeRunDTO) throw new AgentAPIError(404, "run not found in session")

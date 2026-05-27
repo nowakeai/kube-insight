@@ -10,8 +10,12 @@ AGENT_CASE_REQUIRED_TOOLS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_TOOLS:-kube_insight
 AGENT_CASE_FORBIDDEN_TOOLS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_TOOLS:-artifact_transform_js,kube_insight_scripted_query}
 AGENT_CASE_EXPECTED_TOOL_SEQUENCE=${KUBE_INSIGHT_AGENT_CASE_EXPECTED_TOOL_SEQUENCE:-kube_insight_health,kube_insight_schema,kube_insight_js;kube_insight_schema,kube_insight_health,kube_insight_js}
 AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT:-gcp2}
-AGENT_CASE_REQUIRED_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS:-节点,CPU,内存}
-AGENT_CASE_FORBIDDEN_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_ANSWER_TERMS:-—,没有净增减}
+AGENT_CASE_REQUIRED_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS:-节点,CPU,GiB}
+AGENT_CASE_FORBIDDEN_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_ANSWER_TERMS:-没有净增减}
+AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS:-北京时间|Asia/Shanghai|+08:00}
+AGENT_CASE_CLIENT_TIME_ZONE=${KUBE_INSIGHT_AGENT_CASE_CLIENT_TIME_ZONE:-Asia/Shanghai}
+AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES=${KUBE_INSIGHT_AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES:-480}
+AGENT_CASE_CLIENT_LOCALE=${KUBE_INSIGHT_AGENT_CASE_CLIENT_LOCALE:-zh-CN}
 mkdir -p "$OUT_DIR"
 
 request_json() {
@@ -47,16 +51,39 @@ csv_each() {
   tr ',' '\n' <<<"$raw" | sed 's/^ *//;s/ *$//' | sed '/^$/d'
 }
 
+pipe_each() {
+  local raw=$1
+  tr '|' '\n' <<<"$raw" | sed 's/^ *//;s/ *$//' | sed '/^$/d'
+}
+
 agent_case() {
   local session_json session_id run_json run_id slug sse_path events_json status final_answer
 
   printf 'running agent case: %s\n' "$AGENT_CASE_QUESTION" >&2
   session_json="$(request_json POST /api/v1/agent/sessions "$(jq -n --arg title "ClickHouse agent case smoke" '{title:$title}')")"
   session_id="$(jq -r '.id' <<<"$session_json")"
+  local client_sent_at client_context_json
+  client_sent_at="${KUBE_INSIGHT_AGENT_CASE_CLIENT_SENT_AT:-$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')}"
+  client_context_json="$(python3 -c '
+import json, sys
+from datetime import datetime, timedelta, timezone
+sent_at, zone, offset_minutes, locale = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+parsed = datetime.fromisoformat(sent_at.replace("Z", "+00:00"))
+if parsed.tzinfo is None:
+    parsed = parsed.replace(tzinfo=timezone.utc)
+client_tz = timezone(timedelta(minutes=offset_minutes))
+print(json.dumps({
+    "sentAt": sent_at,
+    "localTime": parsed.astimezone(client_tz).isoformat(timespec="milliseconds"),
+    "timeZone": zone,
+    "timezoneOffsetMinutes": offset_minutes,
+    "locale": locale,
+}))
+' "$client_sent_at" "$AGENT_CASE_CLIENT_TIME_ZONE" "$AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES" "$AGENT_CASE_CLIENT_LOCALE")"
   run_json="$(request_json POST "/api/v1/agent/sessions/$session_id/runs" "$(jq -n \
     --arg input "$AGENT_CASE_QUESTION" \
-    --arg sentAt "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
-    '{input:$input, metadata:{clientContext:{sentAt:$sentAt, localTime:$sentAt, timeZone:"UTC", timezoneOffsetMinutes:0, locale:"zh-CN"}}}')")"
+    --argjson clientContext "$client_context_json" \
+    '{input:$input, metadata:{clientContext:$clientContext}}')")"
   run_id="$(jq -r '.id' <<<"$run_json")"
   slug="agent-gcp2-half-day-node-capacity"
   sse_path="$OUT_DIR/$slug.sse"
@@ -104,6 +131,23 @@ agent_case() {
     fi
   fi
 
+  if jq -e '
+    [.[]
+      | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js")
+      | .data.artifact.data.output
+      | (if type=="string" then (fromjson? // {}) else . end)
+      | ..
+      | objects
+      | select(has("nodeLifecycle") or has("recent_lifecycle_events"))
+      | (.nodeLifecycle // .recent_lifecycle_events // [])[]
+      | select(((.instance_type // .instanceType // "") | tostring) == "")
+    ] | length > 0
+  ' "$events_json" >/dev/null; then
+    echo "Agent run $run_id returned Node lifecycle rows without instance type." >&2
+    jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
+    exit 1
+  fi
+
   if [[ -n "$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" ]]; then
     if jq -e --arg fragment "$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" '
       [.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_health")]
@@ -135,6 +179,19 @@ agent_case() {
       exit 1
     fi
   done < <(csv_each "$AGENT_CASE_FORBIDDEN_ANSWER_TERMS")
+  if [[ -n "$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" ]]; then
+    local matched_any_term=0
+    while IFS= read -r term; do
+      if grep -Fqi "$term" <<<"$final_answer"; then
+        matched_any_term=1
+      fi
+    done < <(pipe_each "$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS")
+    if [[ "$matched_any_term" != "1" ]]; then
+      echo "Agent run $run_id final answer is missing any required timezone/local-time term: $AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" >&2
+      printf '%s\n' "$final_answer" >&2
+      exit 1
+    fi
+  fi
 
   jq -n \
     --arg sessionId "$session_id" \

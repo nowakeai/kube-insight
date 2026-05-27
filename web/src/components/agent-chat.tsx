@@ -5,8 +5,8 @@ import {
   type AppendMessage,
   type ThreadMessage,
 } from "@assistant-ui/react"
-import { CircleStop, LayoutDashboard, Sparkles } from "lucide-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { ArrowRight, CircleStop, LayoutDashboard, Sparkles } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { ArtifactDock } from "@/components/artifact-panel"
 import { SessionSidebar } from "@/components/agent-session-sidebar"
@@ -22,6 +22,7 @@ import { displayRunIdsForRetryBranches, parentRunId } from "@/lib/agent-retry-br
 import { formatPromptWithContextBlocks, type ComposerContextBlock } from "@/lib/composer-context"
 import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
 import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+import { followUpSuggestionsForRun } from "@/lib/follow-up-suggestions"
 import { randomStarterPrompts } from "@/lib/starter-prompts"
 
 const emptyEventIds: string[] = []
@@ -74,6 +75,11 @@ export function AgentChat() {
   const activeRunEvents = activeRunEventIds
     .map((eventID) => eventsById[eventID])
     .filter((event): event is AgentRunEvent => Boolean(event))
+  const activeRunArtifacts = useMemo(() => (
+    activeRun?.artifactIds
+      .map((artifactID) => artifactsById[artifactID])
+      .filter((artifact): artifact is AgentArtifact => Boolean(artifact)) ?? []
+  ), [activeRun?.artifactIds, artifactsById])
   const selectedArtifactId = useAgentProjectionStore((state) => state.selectedArtifactId)
   const visibleSessionId = routeRun?.sessionID ?? activeSessionId
   const visiblePanelWorkspace = useAgentProjectionStore((state) => visibleSessionId ? state.panelWorkspaces[visibleSessionId] : undefined)
@@ -244,6 +250,17 @@ export function AgentChat() {
     const latestRunningRun = latestRunningRunID()
     if (latestRunningRun) cancelRun(latestRunningRun)
   }, [activeRun, cancelRun])
+
+  const followUpSuggestions = useMemo(() => (
+    effectiveIsRunning ? [] : followUpSuggestionsForRun({ run: activeRun, artifacts: activeRunArtifacts })
+  ), [activeRun, activeRunArtifacts, effectiveIsRunning])
+
+  const handleFollowUpSuggestion = useCallback((prompt: string) => {
+    if (effectiveIsRunning) return
+    if (visibleSessionId) selectSession(visibleSessionId)
+    setComposerContextBlocks([])
+    void runPrompt(prompt)
+  }, [effectiveIsRunning, runPrompt, selectSession, visibleSessionId])
 
   const handleNewSession = useCallback(() => {
     startNewSession()
@@ -443,6 +460,11 @@ export function AgentChat() {
                       <LocalMessageConversation messages={messages} />
                     )}
                     <ThreadPrimitive.ViewportFooter className="sticky bottom-0 mt-auto bg-background/95 py-4 backdrop-blur">
+                      <FollowUpSuggestions
+                        disabled={effectiveIsRunning}
+                        onSelect={handleFollowUpSuggestion}
+                        suggestions={followUpSuggestions}
+                      />
                       <ChatComposer
                         isRunning={effectiveIsRunning}
                         contextBlocks={composerContextBlocks}
@@ -483,6 +505,33 @@ export function AgentChat() {
   )
 }
 
+function FollowUpSuggestions({
+  disabled,
+  onSelect,
+  suggestions,
+}: {
+  disabled?: boolean
+  onSelect: (prompt: string) => void
+  suggestions: string[]
+}) {
+  if (suggestions.length === 0) return null
+  return (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {suggestions.map((suggestion) => (
+        <button
+          key={suggestion}
+          type="button"
+          className="inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-left text-xs font-medium text-foreground shadow-sm shadow-muted/20 transition hover:border-primary/40 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={disabled}
+          onClick={() => onSelect(suggestion)}
+        >
+          <span className="truncate">{suggestion}</span>
+          <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </button>
+      ))}
+    </div>
+  )
+}
 
 type RunServerPromptOptions = {
   activeSessionId?: string

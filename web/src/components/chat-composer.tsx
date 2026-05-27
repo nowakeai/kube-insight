@@ -1,16 +1,11 @@
 import { ComposerPrimitive } from "@assistant-ui/react"
 import { ArrowRight, CircleStop, Search, X } from "lucide-react"
-import { useEffect, useMemo, useState, type ClipboardEvent, type ReactNode } from "react"
+import { useMemo, type ClipboardEvent, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import type { ComposerContextBlock } from "@/lib/composer-context"
 
-const composerPlaceholders = [
-  "Ask about a Service, Pod, namespace, topology, or recent change",
-  "Find restart, OOM, scheduling, or readiness evidence",
-  "Compare the last hour with the current cluster state",
-  "Trace a Service to EndpointSlices, Pods, Nodes, and Events",
-]
+const composerPlaceholder = "Ask about a Service, Pod, namespace, topology, or recent change"
 
 const longPasteMinChars = 900
 const longPasteMinLines = 10
@@ -35,15 +30,6 @@ export function ChatComposer({
   variant?: "home" | "thread"
 }) {
   const isHome = variant === "home"
-  const [placeholderIndex, setPlaceholderIndex] = useState(0)
-  const placeholder = composerPlaceholders[placeholderIndex % composerPlaceholders.length]
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setPlaceholderIndex((current) => current + 1)
-    }, 4200)
-    return () => window.clearInterval(intervalId)
-  }, [])
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const text = event.clipboardData.getData("text")
@@ -65,7 +51,7 @@ export function ChatComposer({
         autoFocus={autoFocus}
         rows={1}
         submitMode="enter"
-        placeholder={placeholder}
+        placeholder={composerPlaceholder}
         onPaste={handlePaste}
         className={
           isHome

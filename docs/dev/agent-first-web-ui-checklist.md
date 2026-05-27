@@ -282,6 +282,11 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 ## Chat Experience
 
 - [x] Implement search-style chat home page.
+- [x] Keep starter recommendations scoped to the empty home page: the four
+  starter prompt cards are randomized per page load, while composer
+  placeholders stay stable. Completed run pages show deterministic
+  conversation-related follow-up prompts derived from the current run instead
+  of rotating generic placeholders.
 - [x] Chat composer submits to server sessions/runs first and replays SSE run
   events, with local demo fallback when the API origin is unavailable. New
   browser-created runs include client time, local time, time zone, UTC offset,

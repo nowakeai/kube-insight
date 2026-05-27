@@ -26,6 +26,7 @@ const (
 	EventArtifact             RunEventType = "artifact.created"
 	EventArtifactUpdate       RunEventType = "artifact.updated"
 	EventCitation             RunEventType = "citation.created"
+	EventFollowUpSuggestions  RunEventType = "followup.suggestions"
 	EventError                RunEventType = "error"
 )
 
@@ -116,6 +117,10 @@ type Citation struct {
 
 type CitationEventData struct {
 	Citation Citation `json:"citation"`
+}
+
+type FollowUpSuggestionsEventData struct {
+	Suggestions []string `json:"suggestions"`
 }
 
 type ErrorEventData struct {

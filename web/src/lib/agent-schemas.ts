@@ -36,6 +36,7 @@ export const agentKnownRunEventTypeSchema = z.enum([
   "artifact.created",
   "artifact.updated",
   "citation.created",
+  "followup.suggestions",
   "error",
 ])
 
@@ -151,6 +152,10 @@ export const citationEventDataSchema = z.object({
   citation: agentCitationSchema,
 })
 
+export const followUpSuggestionsEventDataSchema = z.object({
+  suggestions: z.array(z.string()),
+})
+
 export const errorEventDataSchema = z.object({
   code: z.string().optional(),
   message: z.string(),
@@ -217,6 +222,8 @@ export function parseAgentRunEventData(type: string, data: unknown) {
       return artifactEventDataSchema.parse(data)
     case "citation.created":
       return citationEventDataSchema.parse(data)
+    case "followup.suggestions":
+      return followUpSuggestionsEventDataSchema.parse(data)
     case "error":
       return errorEventDataSchema.parse(data)
     default:

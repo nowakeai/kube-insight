@@ -33,6 +33,26 @@ func TestAnnotateAnswerStripsUnverifiedEvidenceLabels(t *testing.T) {
 	}
 }
 
+func TestExtractFollowUpSuggestions(t *testing.T) {
+	answer := strings.Join([]string{
+		"The Pod restarted twice. {{evidence: restart facts}}",
+		"",
+		"{{followup: Check resource requests and limits for default/api-0}}",
+		"{{followup: Compare OOM and restart evidence in the last hour}}",
+		"{{followup: Check resource requests and limits for default/api-0}}",
+	}, "\n")
+	clean, suggestions := extractFollowUpSuggestions(answer)
+	if strings.Contains(clean, "{{followup:") {
+		t.Fatalf("follow-up marker leaked: %q", clean)
+	}
+	if len(suggestions) != 2 {
+		t.Fatalf("suggestions = %#v", suggestions)
+	}
+	if suggestions[0] != "Check resource requests and limits for default/api-0" {
+		t.Fatalf("suggestions = %#v", suggestions)
+	}
+}
+
 func TestEvidenceLabelCandidatePrefersSemanticSource(t *testing.T) {
 	candidates := []answerCitationCandidate{
 		{Artifact: Artifact{ID: "artifact_search", Title: "Search evidence"}, Source: "kube_insight_search", Text: "search evidence oomkilled pod candidate"},
@@ -95,7 +115,7 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := recorder.Complete(ctx, "Pod `api-0` was OOMKilled. {{evidence: OOM facts}}"); err != nil {
+	if err := recorder.Complete(ctx, "Pod `api-0` was OOMKilled. {{evidence: OOM facts}}\n\n{{followup: Check resource requests and limits for api-0}}"); err != nil {
 		t.Fatal(err)
 	}
 	events, err := store.ListRunEvents(ctx, run.ID)
@@ -103,6 +123,7 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 		t.Fatal(err)
 	}
 	var citation CitationEventData
+	var followUps FollowUpSuggestionsEventData
 	var final MessageEventData
 	for _, event := range events {
 		switch event.Type {
@@ -114,6 +135,10 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 			if err := json.Unmarshal(event.Data, &final); err != nil {
 				t.Fatal(err)
 			}
+		case EventFollowUpSuggestions:
+			if err := json.Unmarshal(event.Data, &followUps); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if citation.Citation.ArtifactID != "artifact_parallel" || citation.Citation.Text != "OOM facts" {
@@ -121,6 +146,9 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 	}
 	if !strings.Contains(final.Content, "[OOM facts](#citation:"+citation.Citation.ID+")") {
 		t.Fatalf("final = %q citation=%#v", final.Content, citation)
+	}
+	if strings.Contains(final.Content, "{{followup:") || len(followUps.Suggestions) != 1 || followUps.Suggestions[0] != "Check resource requests and limits for api-0" {
+		t.Fatalf("final=%q followUps=%#v", final.Content, followUps)
 	}
 }
 

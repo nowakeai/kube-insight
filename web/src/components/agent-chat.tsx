@@ -252,8 +252,8 @@ export function AgentChat() {
   }, [activeRun, cancelRun])
 
   const followUpSuggestions = useMemo(() => (
-    effectiveIsRunning ? [] : followUpSuggestionsForRun({ run: activeRun, artifacts: activeRunArtifacts })
-  ), [activeRun, activeRunArtifacts, effectiveIsRunning])
+    effectiveIsRunning ? [] : followUpSuggestionsForRun({ events: activeRunEvents, run: activeRun, artifacts: activeRunArtifacts })
+  ), [activeRun, activeRunArtifacts, activeRunEvents, effectiveIsRunning])
 
   const handleFollowUpSuggestion = useCallback((prompt: string) => {
     if (effectiveIsRunning) return

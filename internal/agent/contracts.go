@@ -88,6 +88,7 @@ Answer format:
 - Evidence labels are not proof by themselves. The server verifies labels against exact IDs and object identities from tool output; unsupported or invented labels will be removed and will not become citations.
 - Write the exact stable IDs or object identities from tool output in the final answer so the server can bind the useful evidence labels to verified citations.
 - Separate confirmed findings from hypotheses and recommended next checks.
+- At the very end of the final answer, include 2 to 4 tightly related follow-up choices for the user as temporary hidden labels, one per line, using exactly this syntax: {{followup: Check resource requests and limits for the affected Pods}}. Each follow-up must continue the current investigation, reuse the current object/symptom/time context when useful, and avoid generic random prompts.
 `)
 }
 func toolCitationGuidance() string {

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 
-import { followUpSuggestionsForRun } from "@/lib/follow-up-suggestions"
-import type { AgentRun } from "@/lib/agent-store"
+import { followUpSuggestionsForRun, followUpSuggestionsFromEvents } from "@/lib/follow-up-suggestions"
+import type { AgentRun, AgentRunEvent } from "@/lib/agent-store"
 
 test("followUpSuggestionsForRun returns no suggestions for non-completed runs", () => {
   expect(followUpSuggestionsForRun({ run: runFixture({ status: "running" }) })).toEqual([])
@@ -17,6 +17,40 @@ test("followUpSuggestionsForRun prefers OOM and restart follow-ups when the run 
 
   expect(suggestions).toContain("Check resource requests and limits for the affected Pods")
   expect(suggestions).toContain("Compare OOM and restart evidence in the last hour")
+})
+
+test("followUpSuggestionsForRun prefers model suggestions from run events", () => {
+  const suggestions = followUpSuggestionsForRun({
+    run: runFixture({
+      input: "why did default/api OOM?",
+      finalAnswer: "The pod was OOMKilled and restarted twice.",
+    }),
+    events: [{
+      id: "evt_followup",
+      runId: "run_1",
+      type: "followup.suggestions",
+      createdAt: "2026-05-27T00:00:01Z",
+      data: {
+        suggestions: [
+          "Check default/api-0 requests and limits",
+          "Compare default/api-0 restarts in the last hour",
+        ],
+      },
+    }],
+  })
+
+  expect(suggestions).toEqual([
+    "Check default/api-0 requests and limits",
+    "Compare default/api-0 restarts in the last hour",
+  ])
+})
+
+test("followUpSuggestionsFromEvents deduplicates and bounds suggestions", () => {
+  const suggestions = followUpSuggestionsFromEvents([
+    followUpEvent(["A", "B", "A", "C", "D", "E"]),
+  ])
+
+  expect(suggestions).toEqual(["A", "B", "C", "D"])
 })
 
 test("followUpSuggestionsForRun derives node follow-ups from Chinese answer text", () => {
@@ -43,5 +77,15 @@ function runFixture(overrides: Partial<AgentRun> = {}): AgentRun {
     artifactIds: [],
     citationIds: [],
     ...overrides,
+  }
+}
+
+function followUpEvent(suggestions: string[]): AgentRunEvent {
+  return {
+    id: "evt_followup",
+    runId: "run_1",
+    type: "followup.suggestions",
+    createdAt: "2026-05-27T00:00:01Z",
+    data: { suggestions },
   }
 }

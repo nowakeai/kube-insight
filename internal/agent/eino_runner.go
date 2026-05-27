@@ -325,11 +325,17 @@ func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error
 		return nil
 	}
 	if finalAnswer != "" {
-		citations, err := r.verifiedAnswerCitations(ctx, finalAnswer)
+		cleanAnswer, followUps := extractFollowUpSuggestions(finalAnswer)
+		citations, err := r.verifiedAnswerCitations(ctx, cleanAnswer)
 		if err != nil {
 			return err
 		}
-		annotatedAnswer := annotateAnswerWithEvidenceReferences(finalAnswer, citations)
+		annotatedAnswer := annotateAnswerWithEvidenceReferences(cleanAnswer, citations)
+		if len(followUps) > 0 {
+			if err := r.append(ctx, EventFollowUpSuggestions, FollowUpSuggestionsEventData{Suggestions: followUps}); err != nil {
+				return err
+			}
+		}
 		if err := r.append(ctx, EventFinalAnswer, MessageEventData{MessageID: NewMessageID(), Role: RoleAssistant, Content: annotatedAnswer}); err != nil {
 			return err
 		}

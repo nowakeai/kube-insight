@@ -29,6 +29,7 @@ func TestRunEventTypeNamesAreStableAndUnique(t *testing.T) {
 		EventArtifact,
 		EventArtifactUpdate,
 		EventCitation,
+		EventFollowUpSuggestions,
 		EventError,
 	}
 	seen := map[RunEventType]bool{}
@@ -86,6 +87,11 @@ func TestRunEventPayloadsMarshalContractFields(t *testing.T) {
 			name: "citation",
 			in:   CitationEventData{Citation: Citation{ID: "citation_1", ArtifactID: "artifact_1", Text: "version 3"}},
 			want: []string{`"id":"citation_1"`, `"artifactId":"artifact_1"`, `"text":"version 3"`},
+		},
+		{
+			name: "follow-up suggestions",
+			in:   FollowUpSuggestionsEventData{Suggestions: []string{"Check the same Pods in the last hour"}},
+			want: []string{`"suggestions":["Check the same Pods in the last hour"]`},
 		},
 		{
 			name: "error",

@@ -208,8 +208,8 @@ For an existing ClickHouse-backed compose API server, `agent-clickhouse-case-smo
 can also submit a real agent run for the abbreviated-cluster Node inventory case.
 The optional agent check verifies the desired tool path: discover clusters with
 unfiltered health, use schema plus one `kube_insight_js` call, avoid legacy split
-JS tools, and keep the first health call from treating `gcp2` as
-the stored cluster ID.
+JS tools, keep the sequence to only `health/schema -> kube_insight_js`, and keep
+the first health call from treating `gcp2` as the stored cluster ID.
 
 ```bash
 KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \

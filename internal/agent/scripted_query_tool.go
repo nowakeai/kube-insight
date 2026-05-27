@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,12 +152,33 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		if err != nil {
 			panic(vm.ToValue(err.Error()))
 		}
-		return vm.ToValue(result)
+		return jsSQLResultValue(vm, result, "")
 	})
 	_ = vm.Set("sqlAll", func(call goja.FunctionCall) goja.Value {
 		result, err := state.sqlAll(vm, call)
 		if err != nil {
 			panic(vm.ToValue(err.Error()))
+		}
+		if named, ok := result.(scriptedQueryAllResult); ok {
+			array := vm.NewArray()
+			for i, item := range named.Items {
+				alias := ""
+				if i < len(named.Names) {
+					alias = named.Names[i]
+				}
+				if err := array.Set(strconv.Itoa(i), jsSQLResultValue(vm, item, alias)); err != nil {
+					panic(vm.ToValue(err.Error()))
+				}
+			}
+			for name, item := range named.ByName {
+				if err := array.Set(name, jsSQLResultValue(vm, item, name)); err != nil {
+					panic(vm.ToValue(err.Error()))
+				}
+			}
+			if err := array.Set("_items", named.Items); err != nil {
+				panic(vm.ToValue(err.Error()))
+			}
+			return array
 		}
 		return vm.ToValue(result)
 	})
@@ -240,6 +262,12 @@ type scriptedQueryState struct {
 	queryLog []scriptedQueryLog
 }
 
+type scriptedQueryAllResult struct {
+	Items  []any
+	Names  []string
+	ByName map[string]any
+}
+
 func (s *scriptedQueryState) sql(vm *goja.Runtime, call goja.FunctionCall) (any, error) {
 	if len(call.Arguments) == 0 {
 		return nil, errors.New("sql(query, maxRows) requires a query string")
@@ -268,6 +296,7 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 		return nil, err
 	}
 	results := make([]any, len(items))
+	resultNames := make([]string, len(items))
 	resultsByName := map[string]any{}
 	named := make([]bool, len(items))
 	errs := make([]error, len(items))
@@ -295,7 +324,8 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 				return
 			}
 			if name, _ := spec["name"].(string); name != "" {
-				results[i] = map[string]any{"name": name, "result": result}
+				results[i] = result
+				resultNames[i] = name
 				named[i] = true
 				s.mu.Lock()
 				resultsByName[name] = result
@@ -319,8 +349,7 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 		}
 	}
 	if allNamed {
-		resultsByName["_items"] = results
-		return resultsByName, nil
+		return scriptedQueryAllResult{Items: results, Names: resultNames, ByName: resultsByName}, nil
 	}
 	return results, nil
 }
@@ -436,6 +465,9 @@ func firstToolText(object map[string]any) (string, bool) {
 }
 
 func sqlRows(value any) any {
+	if rows, ok := value.([]any); ok {
+		return rows
+	}
 	if object, ok := value.(map[string]any); ok {
 		if rows, ok := object["rows"]; ok {
 			return rows
@@ -445,6 +477,31 @@ func sqlRows(value any) any {
 		}
 	}
 	return []any{}
+}
+
+func jsSQLResultValue(vm *goja.Runtime, value any, alias string) goja.Value {
+	rows := sqlRows(value)
+	rowItems, ok := rows.([]any)
+	if !ok {
+		return vm.ToValue(value)
+	}
+	array := vm.NewArray()
+	for i, row := range rowItems {
+		_ = array.Set(strconv.Itoa(i), row)
+	}
+	_ = array.Set("rows", rowItems)
+	if object, ok := value.(map[string]any); ok {
+		for _, key := range []string{"rowCount", "truncated", "elapsedMs", "columns", "data"} {
+			if item, ok := object[key]; ok {
+				_ = array.Set(key, item)
+			}
+		}
+		_ = array.Set("_result", object)
+	}
+	if alias != "" {
+		_ = array.Set(alias, rowItems)
+	}
+	return array
 }
 
 func jsTransformRowsAlias(input any) any {

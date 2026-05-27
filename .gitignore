@@ -19,3 +19,4 @@ compose.dev.local.yaml
 *.chdb-shm
 *.chdb-wal
 RELEASE_NOTES.md
+code_references/

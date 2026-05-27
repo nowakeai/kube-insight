@@ -5,6 +5,7 @@ import { MarkdownContent } from "@/components/markdown-content"
 import { Button } from "@/components/ui/button"
 import type { EvidenceSegment } from "@/components/agent-chat-stream-model"
 import type { AgentArtifact } from "@/lib/agent-store"
+import { isVisibleEvidenceCitation } from "@/lib/evidence-visibility"
 
 type EvidenceListProps = {
   artifactsById: Record<string, AgentArtifact>
@@ -29,7 +30,7 @@ type EvidenceItem = {
 export function EvidenceList({ artifactsById, citations, onSelectArtifact }: EvidenceListProps) {
   const [expanded, setExpanded] = useState(false)
   const items = useMemo(
-    () => citations.map((citation, index) => evidenceItem(citation, artifactsById[citation.artifactId ?? ""], index)),
+    () => evidenceItemsForCitations(citations, artifactsById),
     [artifactsById, citations],
   )
   useEffect(() => {
@@ -70,6 +71,12 @@ export function EvidenceList({ artifactsById, citations, onSelectArtifact }: Evi
       ) : null}
     </div>
   )
+}
+
+function evidenceItemsForCitations(citations: EvidenceSegment[], artifactsById: Record<string, AgentArtifact>) {
+  return citations
+    .filter((citation) => isVisibleEvidenceCitation(citation, artifactsById[citation.artifactId ?? ""]))
+    .map((citation, index) => evidenceItem(citation, artifactsById[citation.artifactId ?? ""], index))
 }
 
 function EvidenceCard({ item, onSelectArtifact }: { item: EvidenceItem; onSelectArtifact?: (artifactId?: string) => void }) {

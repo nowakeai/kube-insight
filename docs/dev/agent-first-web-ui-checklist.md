@@ -313,7 +313,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Render answer evidence as a collapsed count-first list. Expanding the list
   shows readable per-evidence summaries, inline detail expansion, Summary/Table/
   Markdown/JSON views when data is available, and a separate pin action for
-  evidence that should stay watched in the right-side dock.
+  evidence that should stay watched in the right-side dock. Zero-row or
+  otherwise empty evidence artifacts are omitted from the expanded evidence
+  list so the UI does not show hollow proof cards.
 - [x] Render dockable run artifacts as lightweight inline preview cards under
   the final answer. The cards summarize markdown/resource/list/topology/history/
   diff artifacts, expand to show a bounded detail preview, and pin/open them in

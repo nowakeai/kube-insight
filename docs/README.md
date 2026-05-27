@@ -24,7 +24,7 @@ Read these in order when evaluating or using kube-insight:
 4. [Data Model](data/data-model.md)
 5. [Storage Modes And Performance](validation/storage-mode-comparison.md)
 6. [Agent SQL Cookbook](workflows/agent-sql-cookbook.md)
-7. [kube-insight Agent Skill](agent/kube-insight-skill/SKILL.md)
+7. [kube-insight Agent Skill](../kube-insight-skill/SKILL.md)
 8. [Real-World Troubleshooting Cases](workflows/real-world-cases.md)
 9. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
 10. [Security, Privacy, And Retention](security/security-retention.md)

@@ -288,7 +288,7 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Data model](docs/data/data-model.md)
 - [Roadmap](docs/roadmap/roadmap.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
-- [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
+- [kube-insight agent skill](kube-insight-skill/SKILL.md)
 - [Storage modes and performance](docs/validation/storage-mode-comparison.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)

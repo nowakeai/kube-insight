@@ -62,9 +62,10 @@ operational notes, and design details in `docs/`.
   evidence condenser is used, pass artifact IDs/titles and concrete row or
   snippet excerpts so the secondary model remains evidence-bound.
 - When tuning built-in agent prompts, tool budgets, context replay, retry
-  semantics, or subagent behavior, carry durable lessons into
-  `docs/agent/kube-insight-skill/` so external MCP/CLI users can get the same
-  investigation quality without the built-in agent.
+  semantics, subagent behavior, or discovering generic agent usage lessons,
+  carry durable guidance into `kube-insight-skill/SKILL.md` or
+  `kube-insight-skill/references/` so users who do not use the built-in agent can
+  still get the best kube-insight results.
 - Agent answers should prefer human-readable cluster context/display names when
   available, while still including stable cluster IDs for exact evidence binding.
   Tool/SQL arguments remain UTC, but final user-facing timestamps should be

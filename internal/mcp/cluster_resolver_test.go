@@ -40,6 +40,33 @@ func TestResolveClusterIDMatchesDisplaySourceAndUID(t *testing.T) {
 	}
 }
 
+func TestResolveClusterIDMatchesAbbreviatedClusterFragments(t *testing.T) {
+	store := clusterResolverStore{clusters: []storage.ClusterRecord{{
+		Name:   "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc",
+		Source: "demo-project_us-central1_demo-cluster-2 https://192.0.2.10",
+	}}}
+	for _, input := range []string{"gcp2", "gcp cluster 2", "cluster2", "gke2"} {
+		got, err := resolveClusterID(context.Background(), store, input)
+		if err != nil {
+			t.Fatalf("resolveClusterID(%q) error = %v", input, err)
+		}
+		if got != "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc" {
+			t.Fatalf("resolveClusterID(%q) = %q", input, got)
+		}
+	}
+}
+
+func TestResolveClusterIDRejectsAmbiguousAbbreviations(t *testing.T) {
+	store := clusterResolverStore{clusters: []storage.ClusterRecord{
+		{Name: "c1", Source: "demo-project_us-west1_demo-cluster-2"},
+		{Name: "c2", Source: "demo-project_us-east1_demo-cluster-2"},
+	}}
+	_, err := resolveClusterID(context.Background(), store, "gcp2")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("resolveClusterID ambiguous error = %v", err)
+	}
+}
+
 func TestResolveClusterIDRejectsUnknownWhenClustersKnown(t *testing.T) {
 	store := clusterResolverStore{clusters: []storage.ClusterRecord{{Name: "c1", Source: "prod"}}}
 	_, err := resolveClusterID(context.Background(), store, "missing")

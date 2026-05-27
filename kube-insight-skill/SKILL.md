@@ -210,9 +210,13 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   filter, or use schema/health cluster display maps to match the exact display
   name and stable `cluster_id`.
 - MCP typed tools may accept a known cluster display/context/source alias, but
-  SQL still needs the stable `cluster_id` from health/schema/evidence rows. Do
-  not put the display name into a `cluster_id = ...` SQL predicate unless the
-  schema rows prove that it is the stored ID.
+  SQL still needs the stable `cluster_id` from health/schema/evidence rows. If a
+  short alias such as `gcp2` is not an exact cluster ID, first try a typed tool
+  such as health/search with that cluster value so kube-insight can resolve an
+  unambiguous abbreviation; if the tool reports ambiguity, ask the user to pick
+  the displayed stable ID. Do not put the display name or abbreviation into a
+  `cluster_id = ...` SQL predicate unless the schema rows prove that it is the
+  stored ID.
 - For relative time words such as "recent", "today", "yesterday", or "last 24
   hours", compute absolute UTC `from`/`to` bounds from the client context before
   calling search/history/service tools or SQL.

@@ -322,7 +322,7 @@ func liveEvalTools() []tool.BaseTool {
 			output: map[string]any{
 				"backend": "sqlite",
 				"tables":  []any{"objects", "facts", "edges", "changes", "versions", "latest_index"},
-				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows.", "For Node capacity, query node_capacity.cpu and node_capacity.memory facts, first taking the latest numeric_value per cluster_id/name/fact_key before summing."},
+				"recipes": []any{"Query facts where fact_key = 'pod_status.last_reason' and fact_value = 'OOMKilled'.", "For allocation/configuration follow-ups, profile available fact keys before querying request/limit rows.", "For Node capacity, collapse observations to the latest non-deleted Node snapshot per cluster_id/name/uid before summing capacity."},
 			},
 		},
 		sqlTool,

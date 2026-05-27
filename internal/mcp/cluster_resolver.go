@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"kube-insight/internal/storage"
 )
@@ -28,11 +29,9 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 	if len(clusters) == 0 {
 		return value, nil
 	}
-	matches := make([]storage.ClusterRecord, 0, 1)
-	for _, cluster := range clusters {
-		if clusterAliasMatches(cluster, value) {
-			matches = append(matches, cluster)
-		}
+	matches := matchingClusters(clusters, value, clusterAliasMatches)
+	if len(matches) == 0 {
+		matches = matchingClusters(clusters, value, clusterAliasFuzzyMatches)
 	}
 	if len(matches) == 1 {
 		return matches[0].Name, nil
@@ -56,10 +55,38 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 	return "", fmt.Errorf("cluster %q was not found; available clusters: %s", value, strings.Join(available, ", "))
 }
 
+func matchingClusters(clusters []storage.ClusterRecord, input string, match func(storage.ClusterRecord, string) bool) []storage.ClusterRecord {
+	matches := make([]storage.ClusterRecord, 0, 1)
+	for _, cluster := range clusters {
+		if match(cluster, input) {
+			matches = append(matches, cluster)
+		}
+	}
+	return matches
+}
+
 func clusterAliasMatches(cluster storage.ClusterRecord, input string) bool {
 	want := normalizeClusterAlias(input)
 	for _, alias := range clusterAliases(cluster) {
 		if normalizeClusterAlias(alias) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func clusterAliasFuzzyMatches(cluster storage.ClusterRecord, input string) bool {
+	wantTokens := clusterAliasTokens(input)
+	if len(wantTokens) < 2 {
+		return false
+	}
+	wantCompact := compactClusterAlias(input)
+	for _, alias := range clusterAliases(cluster) {
+		aliasTokens := clusterAliasTokens(alias)
+		if tokenSubsequence(wantTokens, aliasTokens) {
+			return true
+		}
+		if len(wantCompact) >= 4 && strings.Contains(compactClusterAlias(alias), wantCompact) {
 			return true
 		}
 	}
@@ -96,4 +123,71 @@ func clusterDisplayAlias(cluster storage.ClusterRecord) string {
 
 func normalizeClusterAlias(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func compactClusterAlias(value string) string {
+	return strings.Join(clusterAliasTokens(value), "")
+}
+
+func clusterAliasTokens(value string) []string {
+	tokens := make([]string, 0, 4)
+	var b strings.Builder
+	lastClass := runeClassNone
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, strings.ToLower(b.String()))
+		b.Reset()
+	}
+	for _, r := range value {
+		class := runeClass(r)
+		if class == runeClassNone {
+			flush()
+			lastClass = runeClassNone
+			continue
+		}
+		if b.Len() > 0 && lastClass != runeClassNone && class != lastClass {
+			flush()
+		}
+		b.WriteRune(unicode.ToLower(r))
+		lastClass = class
+	}
+	flush()
+	return tokens
+}
+
+type aliasRuneClass int
+
+const (
+	runeClassNone aliasRuneClass = iota
+	runeClassLetter
+	runeClassDigit
+)
+
+func runeClass(r rune) aliasRuneClass {
+	switch {
+	case unicode.IsLetter(r):
+		return runeClassLetter
+	case unicode.IsDigit(r):
+		return runeClassDigit
+	default:
+		return runeClassNone
+	}
+}
+
+func tokenSubsequence(needles, haystack []string) bool {
+	if len(needles) == 0 {
+		return false
+	}
+	next := 0
+	for _, token := range haystack {
+		if token == needles[next] {
+			next++
+			if next == len(needles) {
+				return true
+			}
+		}
+	}
+	return false
 }

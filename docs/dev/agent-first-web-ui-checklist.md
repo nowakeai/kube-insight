@@ -294,8 +294,9 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
   - Stop replaces the composer submit button while a run is active; copy and
     retry live under each assistant response; the old always-visible continue
     control was removed.
-- [x] Implement tool calls as compact ordered chat-stream steps with input
-  summary, output summary, status, duration, and error display. Consecutive
+- [x] Implement tool calls as compact ordered chat-stream steps with visible
+  argument previews, output summary, output artifact handles, subagent/child-run
+  badges, status, duration, and error display. Consecutive
   tool calls collapse into one `Tool calls` group, and intermediate visible
   progress notes plus tool calls render together inside a single `Worked for ...`
   research block so the final answer stays distinct. The research block and

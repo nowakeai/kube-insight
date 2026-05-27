@@ -362,8 +362,8 @@ export function isActiveToolStatus(status: string) {
 }
 
 export function toolSegmentSummary(segment: ToolSegment) {
-  if (segment.error) return segment.error
-  if (segment.outputSummary) return segment.outputSummary
+  if (segment.error) return compactText(segment.error, 180)
+  if (segment.outputSummary) return compactText(segment.outputSummary, 240)
   if (segment.input !== undefined) return `input ${compactJSON(segment.input)}`
   return "waiting"
 }
@@ -448,6 +448,12 @@ function compactJSON(value: unknown) {
   const text = typeof value === "string" ? value : JSON.stringify(value)
   if (!text) return ""
   return text.length > 96 ? `${text.slice(0, 93)}...` : text
+}
+
+function compactText(value: string, maxLength: number) {
+  const text = value.replace(/\s+/g, " ").trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
 export function estimateTokenCount(text: string) {

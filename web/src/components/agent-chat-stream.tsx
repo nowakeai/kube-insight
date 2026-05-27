@@ -140,6 +140,7 @@ function RunConversation({
         <WorkStreamMessage
           activity={activity}
           events={events}
+          onSelectArtifact={onSelectArtifact}
           running={isRunning}
           segments={response.workSegments}
           status={status}
@@ -242,6 +243,7 @@ function renderResponseSegment({
 function renderWorkSegment(
   segment: ResponseSegment,
   activity: RunActivitySummary,
+  onSelectArtifact: (artifactId?: string) => void,
   toolGroupDefaultExpanded: boolean,
 ) {
   if (segment.type === "assistant") {
@@ -255,8 +257,8 @@ function renderWorkSegment(
       />
     )
   }
-  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} segment={segment} />
-  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={toolGroupDefaultExpanded} segment={segment} />
+  if (segment.type === "tool") return <ToolStreamMessage key={segment.id} onSelectArtifact={onSelectArtifact} segment={segment} />
+  if (segment.type === "tool_group") return <ToolGroupStreamMessage key={segment.id} defaultExpanded={toolGroupDefaultExpanded} onSelectArtifact={onSelectArtifact} segment={segment} />
   if (segment.type === "error") return <ErrorStreamMessage key={segment.id} text={segment.content} />
   return null
 }
@@ -265,6 +267,7 @@ function WorkStreamMessage({
   activity,
   events,
   nowMs,
+  onSelectArtifact,
   running,
   segments,
   status,
@@ -273,6 +276,7 @@ function WorkStreamMessage({
   activity: RunActivitySummary
   events: AgentRunEvent[]
   nowMs: number
+  onSelectArtifact: (artifactId?: string) => void
   running: boolean
   segments: ResponseSegment[]
   status: string
@@ -298,7 +302,7 @@ function WorkStreamMessage({
         </button>
         {expanded ? (
           <div className="mt-3 space-y-4">
-            {segments.map((segment) => renderWorkSegment(segment, activity, expanded))}
+            {segments.map((segment) => renderWorkSegment(segment, activity, onSelectArtifact, expanded))}
           </div>
         ) : null}
       </div>
@@ -577,10 +581,19 @@ function truncateJSON(value: unknown) {
   return text.length > 2000 ? `${text.slice(0, 2000)}\n...` : text
 }
 
+function toolInputPreview(value: unknown) {
+  if (value === undefined || value === null) return ""
+  const text = typeof value === "string" ? value : JSON.stringify(value)
+  if (!text || text === "{}") return ""
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text
+}
+
 
 function ToolStreamMessage({
+  onSelectArtifact,
   segment,
 }: {
+  onSelectArtifact?: (artifactId?: string) => void
   segment: ToolSegment
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -597,7 +610,7 @@ function ToolStreamMessage({
         </button>
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="min-w-0 truncate">{toolSegmentSummary(segment)}</span>
-          <ChildRunBadges segment={segment} />
+          <ToolMetaBadges onSelectArtifact={onSelectArtifact} segment={segment} />
         </div>
         {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{detail}</pre> : null}
       </div>
@@ -607,9 +620,11 @@ function ToolStreamMessage({
 
 function ToolGroupStreamMessage({
   defaultExpanded,
+  onSelectArtifact,
   segment,
 }: {
   defaultExpanded: boolean
+  onSelectArtifact?: (artifactId?: string) => void
   segment: ToolGroupSegment
 }) {
   const status = toolGroupStatus(segment.tools)
@@ -634,7 +649,7 @@ function ToolGroupStreamMessage({
         </div>
         {expanded ? (
           <div className="mt-2 flex flex-col gap-1.5">
-            {segment.tools.map((tool) => <ToolGroupRow key={tool.id} segment={tool} />)}
+            {segment.tools.map((tool) => <ToolGroupRow key={tool.id} onSelectArtifact={onSelectArtifact} segment={tool} />)}
           </div>
         ) : null}
       </div>
@@ -664,7 +679,7 @@ function DurationBadge({
   )
 }
 
-function ToolGroupRow({ segment }: { segment: ToolSegment }) {
+function ToolGroupRow({ onSelectArtifact, segment }: { onSelectArtifact?: (artifactId?: string) => void; segment: ToolSegment }) {
   const [expanded, setExpanded] = useState(false)
   return (
     <div className="rounded-md border border-border/80 bg-background/60 px-3 py-2">
@@ -676,9 +691,31 @@ function ToolGroupRow({ segment }: { segment: ToolSegment }) {
         <ChevronDown className={expanded ? "size-3.5 rotate-180 text-muted-foreground transition" : "size-3.5 text-muted-foreground transition"} aria-hidden="true" />
       </button>
       <div className="mt-1 truncate text-xs text-muted-foreground">{toolSegmentSummary(segment)}</div>
-      <ChildRunBadges segment={segment} compact />
+      <ToolMetaBadges compact onSelectArtifact={onSelectArtifact} segment={segment} />
       {expanded ? <pre className="mt-2 max-h-48 overflow-auto border-l border-border/80 pl-3 text-[0.7rem] leading-5 text-muted-foreground">{toolSegmentDetail(segment)}</pre> : null}
     </div>
+  )
+}
+
+function ToolMetaBadges({ compact, onSelectArtifact, segment }: { compact?: boolean; onSelectArtifact?: (artifactId?: string) => void; segment: ToolSegment }) {
+  const input = toolInputPreview(segment.input)
+  const childCount = segment.childRunIds?.length ?? 0
+  return (
+    <span className={compact ? "mt-2 flex min-w-0 flex-wrap gap-1" : "flex min-w-0 flex-wrap gap-1"}>
+      {input ? <span className="max-w-80 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground" title={input}>args {input}</span> : null}
+      {segment.outputArtifactId ? (
+        <button
+          type="button"
+          className="max-w-44 truncate rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground hover:bg-secondary hover:text-foreground"
+          title={`Open artifact ${segment.outputArtifactId}`}
+          onClick={() => onSelectArtifact?.(segment.outputArtifactId)}
+        >
+          artifact {shortID(segment.outputArtifactId)}
+        </button>
+      ) : null}
+      {childCount > 0 ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[0.68rem] text-muted-foreground">subagents {childCount}</span> : null}
+      <ChildRunBadges compact={compact} segment={segment} />
+    </span>
   )
 }
 

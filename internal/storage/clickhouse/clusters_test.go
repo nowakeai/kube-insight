@@ -43,9 +43,12 @@ func TestStoreClustersRoundTripMetadataQueriesClusterTable(t *testing.T) {
 		t.Fatalf("clusters = %#v", clusters)
 	}
 	joined := strings.Join(requests, "\n")
-	for _, want := range []string{"INSERT INTO `ki`.`clusters`", "FROM `ki`.clusters", "FROM `ki`.versions"} {
+	for _, want := range []string{"INSERT INTO `ki`.`clusters`", "FROM `ki`.clusters", "FROM `ki`.versions", "latest_created_at AS created_at"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("requests missing %q: %s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "max(created_at) AS created_at") {
+		t.Fatalf("ListClusters should avoid same-name aggregate aliases that can trip ClickHouse analyzer: %s", joined)
 	}
 }

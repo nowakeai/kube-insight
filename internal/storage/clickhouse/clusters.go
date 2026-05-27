@@ -32,7 +32,7 @@ latest_clusters AS (
     name,
     argMax(uid, created_at) AS uid,
     argMax(source, created_at) AS source,
-    max(created_at) AS created_at
+    max(created_at) AS latest_created_at
   FROM %s.clusters
   GROUP BY name
 ),
@@ -55,7 +55,7 @@ SELECT
   lc.name,
   lc.uid,
   lc.source,
-  lc.created_at,
+  lc.latest_created_at AS created_at,
   ifNull(oc.objects, 0) AS objects,
   ifNull(vc.versions, 0) AS versions,
   ifNull(lc2.latest, 0) AS latest

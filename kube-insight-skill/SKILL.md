@@ -130,20 +130,19 @@ Use the path that matches the question:
   `kube_insight_health` + `kube_insight_schema`, then the
   `container_resource_allocation_rollup` recipe or one scoped proof query. Stop
   when SQL returns request/limit rows or snippets.
-- Dependent or parallel SQL plans:
-  after `kube_insight_schema`, use `kube_insight_scripted_query` when one small
-  plan needs profile -> proof SQL, several independent aggregates, or SQL rows
-  plus JavaScript grouping. Also use it for latest-per-object selection, JSON
-  field extraction, Kubernetes CPU/memory unit normalization, and other
-  code-shaped aggregation that SQL is easy to get subtly wrong. Prefer this
-  over serial repeated SQL plus a separate transform when the tool is
-  available; keep query count and `maxRows` bounded. Return answer-ready JSON
-  from the script, with grouping, totals, sorting, and unit normalization already
-  done. Do not call a separate transform tool afterward just to reshape the same
-  rows.
+- JavaScript interpreter:
+  after `kube_insight_schema`, use `kube_insight_js` when one small script can
+  run profile -> proof SQL, several independent aggregates, or SQL rows plus
+  JavaScript grouping. Also use it for latest-per-object selection, JSON field
+  extraction, Kubernetes CPU/memory unit normalization, and other code-shaped
+  aggregation that SQL is easy to get subtly wrong. The same interpreter can
+  transform bounded JSON passed as `input`, so do not split the work into a
+  separate transform tool. Keep query count and `maxRows` bounded. Return
+  answer-ready JSON from the script, with grouping, totals, sorting, and unit
+  normalization already done.
 - Node inventory/capacity/allocatable totals:
   `kube_insight_health` + `kube_insight_schema`, then one bounded
-  `kube_insight_scripted_query` as the first data query. Use
+  `kube_insight_js` as the first data query. Use
   `current_node_capacity_snapshot`; add `recent_node_lifecycle` in the same
   script when the user asks whether nodes changed in a time window. Current node
   count and capacity must come from the latest non-deleted Node snapshot per
@@ -298,9 +297,8 @@ Common over-investigation patterns to avoid:
 ## Data Transform And Condensing
 
 Some agent environments have helper tools equivalent to the built-in
-`parallel_investigation`, `kube_insight_scripted_query`,
-`artifact_transform_js`, or `evidence_condenser`. Use them only as bounded
-helpers, not as permission to run broad blind searches.
+`parallel_investigation`, `kube_insight_js`, or `evidence_condenser`. Use them
+only as bounded helpers, not as permission to run broad blind searches.
 
 - Use `parallel_investigation` proactively for broad, multi-branch prompts such
   as incident triage, cluster health overview, namespace triage, or mixed
@@ -308,21 +306,18 @@ helpers, not as permission to run broad blind searches.
   changes, and topology/impact. Give it 2-4 concrete independent branches with
   absolute time bounds and known cluster/namespace scope. Do not use it for
   exact Service health, exact kind/namespace/name recent-change prompts, or Node
-  inventory/capacity prompts where one health + schema + scripted SQL plan is
+  inventory/capacity prompts where one health + schema + JS interpreter plan is
   sufficient.
 
-- Use a scripted query helper after schema when dependent SQL would otherwise
-  take several turns. Good examples: profile real keys, query proof rows from
-  the discovered keys, and return a grouped summary; or run several independent
-  facts/changes aggregates in parallel. Keep scripts small and query limits
-  explicit.
-- Use a transform helper for grouping, filtering, sorting, field extraction, or
-  numeric aggregation over literal JSON rows/snippets already returned by
-  search, SQL, or artifacts.
-- Do not use a transform helper to fetch new Kubernetes data, access files,
-  access network, run shell commands, or run unbounded loops.
-- One successful transform over relevant rows is terminal: answer from its JSON
-  result instead of running repeated SQL or a second transform.
+- Use the JS interpreter after schema when dependent SQL would otherwise take
+  several turns. Good examples: profile real keys, query proof rows from the
+  discovered keys, and return a grouped summary; run several independent
+  facts/changes aggregates in parallel; or transform already-returned JSON rows
+  by passing them as `input`. Keep scripts small and query limits explicit.
+- Do not use the JS interpreter to access files, access network, run shell
+  commands, or run unbounded loops.
+- One successful JS interpreter result over relevant rows is terminal: answer
+  from its JSON result instead of running repeated SQL or another transform.
 - Use a condenser only when useful evidence is too large or repetitive. Pass
   source artifact IDs/titles and concrete row or snippet excerpts, not only your
   own prose summary.

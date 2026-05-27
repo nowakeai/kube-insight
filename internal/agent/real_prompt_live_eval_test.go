@@ -219,10 +219,7 @@ func realPromptEvalTools(t *testing.T, ctx context.Context, source realPromptEva
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sqlTool := findRealEvalInvokableTool(ctx, tools, "kube_insight_sql"); sqlTool != nil {
-		tools = append(tools, kiagent.NewScriptedQueryTool(sqlTool))
-	}
-	tools = append(tools, kiagent.NewJSTransformTool())
+	tools = append(tools, kiagent.NewJSInterpreterTool(findRealEvalInvokableTool(ctx, tools, "kube_insight_sql")))
 	return kiagent.WrapRecoverableToolErrors(tools)
 }
 

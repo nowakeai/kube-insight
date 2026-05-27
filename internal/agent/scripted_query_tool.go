@@ -15,7 +15,10 @@ import (
 )
 
 const (
-	scriptedQueryToolName          = "kube_insight_scripted_query"
+	jsInterpreterToolName          = "kube_insight_js"
+	scriptedQueryToolName          = jsInterpreterToolName
+	legacyScriptedQueryToolName    = "kube_insight_scripted_query"
+	legacyJSTransformToolName      = "artifact_transform_js"
 	defaultScriptedQueryTimeout    = 3 * time.Second
 	maxScriptedQueryTimeout        = 8 * time.Second
 	defaultScriptedQueryOutputSize = 128 * 1024
@@ -32,11 +35,12 @@ type ScriptedQueryTool struct {
 }
 
 type scriptedQueryArguments struct {
-	Script         string `json:"script"`
-	TimeoutMillis  int    `json:"timeoutMillis,omitempty"`
-	MaxOutputBytes int    `json:"maxOutputBytes,omitempty"`
-	MaxQueries     int    `json:"maxQueries,omitempty"`
-	DefaultMaxRows int    `json:"defaultMaxRows,omitempty"`
+	Script         string          `json:"script"`
+	Input          json.RawMessage `json:"input,omitempty"`
+	TimeoutMillis  int             `json:"timeoutMillis,omitempty"`
+	MaxOutputBytes int             `json:"maxOutputBytes,omitempty"`
+	MaxQueries     int             `json:"maxQueries,omitempty"`
+	DefaultMaxRows int             `json:"defaultMaxRows,omitempty"`
 }
 
 type scriptedQueryResult struct {
@@ -56,18 +60,26 @@ type scriptedQueryLog struct {
 }
 
 func NewScriptedQueryTool(sqlTool tool.InvokableTool) tool.BaseTool {
+	return NewJSInterpreterTool(sqlTool)
+}
+
+func NewJSInterpreterTool(sqlTool tool.InvokableTool) tool.BaseTool {
 	return ScriptedQueryTool{sqlTool: sqlTool}
 }
 
 func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: scriptedQueryToolName,
-		Desc: "Run bounded JavaScript that can call kube_insight_sql through sql(query, maxRows) and sqlAll([{name, sql, maxRows}]) for dependent or parallel read-only SQL investigation. Use after kube_insight_schema when one tool call should perform a small query plan, such as profile -> proof, several independent aggregates, latest-per-object selection, JSON field extraction, Kubernetes unit normalization, or SQL rows plus compact grouping. Prefer this as the first data query for Node inventory/capacity/recent lifecycle prompts after health identifies the stable cluster_id. The script has no filesystem, network, process, or environment access. Return compact answer-ready JSON: do grouping, totals, sorting, and unit normalization inside this script. One successful scripted query is terminal evidence; answer from it instead of calling repeated SQL or artifact_transform_js to reshape the same rows. When the final answer uses this result, add a nearby evidence label such as {{evidence: Node capacity facts}} so the server can verify citations.",
+		Desc: "Run one bounded JavaScript interpreter for kube-insight investigation. Use it both to transform JSON already returned in this run via input/rows and to call kube_insight_sql through sql(query, maxRows) or sqlAll([{name, sql, maxRows}]) after kube_insight_schema. Prefer this single JS tool when one script can do dependent or parallel profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON field extraction, Kubernetes CPU/memory unit normalization, grouping, sorting, filtering, counting, or answer-ready summarization. The script has no filesystem, network, process, or environment access beyond bounded read-only SQL helpers. Return compact answer-ready JSON with grouping, totals, sorting, and unit normalization already done; one successful interpreter result is usually terminal evidence. When the final answer uses this result, add a nearby evidence label such as {{evidence: Node capacity facts}} so the server can verify citations.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"script": {
 				Type:     schema.String,
 				Required: true,
-				Desc:     "JavaScript statements. Available helpers: sql(query, maxRows), sqlAll([{name, sql, maxRows}]), rows(result), ki/_ helpers groupBy/countBy/sumBy/sortBy/uniqBy/pick, input logs via console.log. Return JSON-serializable data.",
+				Desc:     "JavaScript statements. Available helpers: input, inputRows, sql(query, maxRows), sqlAll([{name, sql, maxRows}]) which returns an object keyed by name plus _items when all specs are named, rows(result), ki/_ helpers groupBy/countBy/sumBy/sortBy/uniqBy/pick, console.log, print, and json(value). Use return to provide JSON-serializable data.",
+			},
+			"input": {
+				Type: schema.Object,
+				Desc: "Optional bounded JSON object/array/scalar from prior tool output. The script can read it as input; rows aliases input.rows or input when it is an array.",
 			},
 			"timeoutMillis": {
 				Type: schema.Integer,
@@ -90,9 +102,6 @@ func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 }
 
 func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
-	if t.sqlTool == nil {
-		return "", fmt.Errorf("%s requires a kube_insight_sql tool", scriptedQueryToolName)
-	}
 	var args scriptedQueryArguments
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
 		return "", fmt.Errorf("parse %s arguments: %w", scriptedQueryToolName, err)
@@ -103,6 +112,15 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	}
 	if len(script) > maxScriptedQueryScriptSize {
 		return "", fmt.Errorf("%s script too large: %d bytes > %d", scriptedQueryToolName, len(script), maxScriptedQueryScriptSize)
+	}
+	if len(args.Input) > maxJSTransformInputSize {
+		return "", fmt.Errorf("%s input too large: %d bytes > %d", scriptedQueryToolName, len(args.Input), maxJSTransformInputSize)
+	}
+	var input any
+	if len(args.Input) > 0 {
+		if err := json.Unmarshal(args.Input, &input); err != nil {
+			return "", fmt.Errorf("%s input must be valid JSON: %w", scriptedQueryToolName, err)
+		}
 	}
 	timeout := boundedScriptedQueryTimeout(args.TimeoutMillis)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -116,6 +134,8 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	outputLimit := boundedScriptedQueryOutputLimit(args.MaxOutputBytes)
 	vm := goja.New()
 	logs := []string{}
+	_ = vm.Set("input", input)
+	_ = vm.Set("inputRows", jsTransformRowsAlias(input))
 	_ = vm.Set("console", map[string]any{
 		"log": func(call goja.FunctionCall) goja.Value {
 			logs = append(logs, compactText(jsLogArgs(call.Arguments), 500))
@@ -140,9 +160,19 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 		}
 		return vm.ToValue(result)
 	})
+	_ = vm.Set("json", func(call goja.FunctionCall) goja.Value {
+		if len(call.Arguments) == 0 {
+			return vm.ToValue("null")
+		}
+		data, err := json.Marshal(call.Arguments[0].Export())
+		if err != nil {
+			panic(vm.ToValue(err.Error()))
+		}
+		return vm.ToValue(string(data))
+	})
 	_ = vm.Set("rows", func(call goja.FunctionCall) goja.Value {
 		if len(call.Arguments) == 0 {
-			return vm.ToValue([]any{})
+			return vm.ToValue(jsTransformRowsAlias(input))
 		}
 		return vm.ToValue(sqlRows(call.Arguments[0].Export()))
 	})
@@ -238,6 +268,8 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 		return nil, err
 	}
 	results := make([]any, len(items))
+	resultsByName := map[string]any{}
+	named := make([]bool, len(items))
 	errs := make([]error, len(items))
 	var wg sync.WaitGroup
 	for i, item := range items {
@@ -264,6 +296,10 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 			}
 			if name, _ := spec["name"].(string); name != "" {
 				results[i] = map[string]any{"name": name, "result": result}
+				named[i] = true
+				s.mu.Lock()
+				resultsByName[name] = result
+				s.mu.Unlock()
 				return
 			}
 			results[i] = result
@@ -275,10 +311,24 @@ func (s *scriptedQueryState) sqlAll(vm *goja.Runtime, call goja.FunctionCall) (a
 			return nil, err
 		}
 	}
+	allNamed := true
+	for _, ok := range named {
+		if !ok {
+			allNamed = false
+			break
+		}
+	}
+	if allNamed {
+		resultsByName["_items"] = results
+		return resultsByName, nil
+	}
 	return results, nil
 }
 
 func (s *scriptedQueryState) runQuery(query string, maxRows int) (any, error) {
+	if s.sqlTool == nil {
+		return nil, errors.New("sql helpers are unavailable because kube_insight_sql is not registered")
+	}
 	if err := s.reserveQueries(1); err != nil {
 		return nil, err
 	}
@@ -397,6 +447,18 @@ func sqlRows(value any) any {
 	return []any{}
 }
 
+func jsTransformRowsAlias(input any) any {
+	if rows, ok := input.([]any); ok {
+		return rows
+	}
+	if object, ok := input.(map[string]any); ok {
+		if rows, ok := object["rows"]; ok {
+			return rows
+		}
+	}
+	return []any{}
+}
+
 func boundedScriptedQueryTimeout(ms int) time.Duration {
 	if ms <= 0 {
 		return defaultScriptedQueryTimeout
@@ -476,4 +538,12 @@ func scriptedQueryFirstNonNil(values ...any) any {
 		}
 	}
 	return nil
+}
+
+func jsLogArgs(args []goja.Value) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		parts = append(parts, fmt.Sprint(arg.Export()))
+	}
+	return strings.Join(parts, " ")
 }

@@ -113,7 +113,7 @@ func DefaultEvaluationCases() []EvaluationCase {
 		},
 		{
 			ID:                    "scripted-query-node-capacity",
-			Question:              "Use one bounded scripted SQL plan to get Node count plus total capacity CPU and memory, then report the result.",
+			Question:              "Use one bounded JS interpreter SQL plan to get Node count plus total capacity CPU and memory, then report the result.",
 			RequiredTools:         []string{"kube_insight_schema", scriptedQueryToolName},
 			RequiredArtifactKinds: []string{ArtifactKindToolCall},
 			RequiredAnswerTerms:   []string{"node", "cpu", "memory"},
@@ -173,8 +173,8 @@ func DefaultEvaluationCases() []EvaluationCase {
 		},
 		{
 			ID:                    "js-transform-aggregation",
-			Question:              "Run a bounded SQL query for recent OOMKilled Pod fact rows, then use artifact_transform_js to group the returned rows by namespace and report counts.",
-			RequiredTools:         []string{"kube_insight_schema", "kube_insight_sql", jsTransformToolName},
+			Question:              "Use the JS interpreter to run a bounded SQL query for recent OOMKilled Pod fact rows, group the rows by namespace, and report counts.",
+			RequiredTools:         []string{"kube_insight_schema", jsInterpreterToolName},
 			RequiredArtifactKinds: []string{ArtifactKindToolCall},
 			RequiredAnswerTerms:   []string{"oomkilled", "namespace", "count"},
 			MinCitations:          1,

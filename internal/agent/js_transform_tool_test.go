@@ -9,14 +9,14 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 )
 
-func TestJSTransformToolGroupsRows(t *testing.T) {
+func TestJSInterpreterToolGroupsRows(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool()
+	transform := NewJSInterpreterTool(nil)
 	info, err := transform.Info(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Name != jsTransformToolName || !strings.Contains(info.Desc, "JavaScript") {
+	if info.Name != jsInterpreterToolName || !strings.Contains(info.Desc, "JavaScript") {
 		t.Fatalf("tool info = %#v", info)
 	}
 	invokable, ok := transform.(tool.InvokableTool)
@@ -31,12 +31,12 @@ func TestJSTransformToolGroupsRows(t *testing.T) {
 				{"namespace": "ops", "memory": 128}
 			]
 		},
-		"script": "const byNs = {}; for (const row of rows) { byNs[row.namespace] = (byNs[row.namespace] || 0) + row.memory; } return byNs;"
+		"script": "const byNs = {}; for (const row of inputRows) { byNs[row.namespace] = (byNs[row.namespace] || 0) + row.memory; } return byNs;"
 	}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result jsTransformResult
+	var result scriptedQueryResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -49,17 +49,17 @@ func TestJSTransformToolGroupsRows(t *testing.T) {
 	}
 }
 
-func TestJSTransformToolExposesDataHelpers(t *testing.T) {
+func TestJSInterpreterToolExposesDataHelpers(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool().(tool.InvokableTool)
+	transform := NewJSInterpreterTool(nil).(tool.InvokableTool)
 	out, err := transform.InvokableRun(ctx, `{
 		"input": {"rows": [{"namespace":"default","cpu":1},{"namespace":"default","cpu":2},{"namespace":"ops","cpu":4}]},
-		"script": "const grouped = ki.groupBy(rows, 'namespace'); return {counts: _.countBy(rows, 'namespace'), defaultCPU: ki.sumBy(grouped.default, 'cpu')};"
+		"script": "const grouped = ki.groupBy(inputRows, 'namespace'); return {counts: _.countBy(inputRows, 'namespace'), defaultCPU: ki.sumBy(grouped.default, 'cpu')};"
 	}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result jsTransformResult
+	var result scriptedQueryResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +75,14 @@ func TestJSTransformToolExposesDataHelpers(t *testing.T) {
 	}
 }
 
-func TestJSTransformToolDoesNotExposeHostCapabilities(t *testing.T) {
+func TestJSInterpreterToolDoesNotExposeHostCapabilities(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool().(tool.InvokableTool)
+	transform := NewJSInterpreterTool(nil).(tool.InvokableTool)
 	out, err := transform.InvokableRun(ctx, `{"script":"return {process: typeof process, require: typeof require, fetch: typeof fetch};"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result jsTransformResult
+	var result scriptedQueryResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -97,14 +97,14 @@ func TestJSTransformToolDoesNotExposeHostCapabilities(t *testing.T) {
 	}
 }
 
-func TestJSTransformToolSanitizesNonFiniteNumbers(t *testing.T) {
+func TestJSInterpreterToolSanitizesNonFiniteNumbers(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool().(tool.InvokableTool)
+	transform := NewJSInterpreterTool(nil).(tool.InvokableTool)
 	out, err := transform.InvokableRun(ctx, `{"script":"return {nan: Number.NaN, inf: Infinity, ok: 3};"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result jsTransformResult
+	var result scriptedQueryResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -117,18 +117,18 @@ func TestJSTransformToolSanitizesNonFiniteNumbers(t *testing.T) {
 	}
 }
 
-func TestJSTransformToolRejectsLargeInput(t *testing.T) {
+func TestJSInterpreterToolRejectsLargeInput(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool().(tool.InvokableTool)
+	transform := NewJSInterpreterTool(nil).(tool.InvokableTool)
 	_, err := transform.InvokableRun(ctx, `{"input":"`+strings.Repeat("x", maxJSTransformInputSize+1)+`","script":"return input"}`)
 	if err == nil || !strings.Contains(err.Error(), "input too large") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestJSTransformToolTimesOut(t *testing.T) {
+func TestJSInterpreterToolTimesOut(t *testing.T) {
 	ctx := context.Background()
-	transform := NewJSTransformTool().(tool.InvokableTool)
+	transform := NewJSInterpreterTool(nil).(tool.InvokableTool)
 	_, err := transform.InvokableRun(ctx, `{"script":"while (true) {}","timeoutMillis":1}`)
 	if err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Fatalf("err = %v", err)

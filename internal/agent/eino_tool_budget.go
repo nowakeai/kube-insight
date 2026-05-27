@@ -75,7 +75,7 @@ func toolBudgetSignal(messages []adk.Message) (int, string) {
 
 func repeatedToolWarningThreshold(name string) int {
 	switch name {
-	case "kube_insight_sql", scriptedQueryToolName:
+	case "kube_insight_sql", jsInterpreterToolName, legacyScriptedQueryToolName:
 		return 4
 	default:
 		return 3

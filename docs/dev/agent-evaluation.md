@@ -39,13 +39,13 @@ The default case set currently covers:
 | `oom-aggregate` | OOMKilled ranking/counting | health + schema + bounded aggregate SQL, citation |
 | `allocation-followup` | User corrects intent from live usage to allocation/configuration | schema-guided SQL and readable allocation/config evidence, citation |
 | `node-capacity` | Node count and total capacity | health + schema + latest Node snapshot SQL, citation |
-| `scripted-query-node-capacity` | Dependent/compact SQL plan | schema + `kube_insight_scripted_query`, tool artifact, citation |
+| `scripted-query-node-capacity` | Dependent/compact SQL plan | schema + `kube_insight_js`, tool artifact, citation |
 | `recent-changes` | recent object changes | search + history tools, history artifact, citation |
 | `history-diff` | retained object version diff | `kube_insight_history`, history artifact with change/diff proof, citation |
 | `exact-recent-changes` | exact object recent changes | health + schema + one rollup SQL, citation |
 | `schema-sql-evidence` | exact aggregate proof query | schema + bounded SQL rows, citation |
 | `topology-mapping` | namespace topology | search + topology tools, topology artifact, citation |
-| `js-transform-aggregation` | SQL rows need grouping/counting | schema + SQL + `artifact_transform_js`, cited answer |
+| `js-transform-aggregation` | SQL rows need grouping/counting | schema + `kube_insight_js`, cited answer |
 
 ## Live LLM Matrix
 
@@ -101,13 +101,13 @@ keeps synthetic eval useful for model behavior without requiring live ClickHouse
 access or exporting real cluster data.
 
 Latest synthetic provider findings after adding `js-transform-aggregation`,
-fixing the fake SQL branch order, and wrapping the JS transform tool as
-recoverable in live eval:
+fixing the fake SQL branch order, and wrapping the unified JS interpreter tool
+as recoverable in live eval:
 
 | Provider | Full 8-case snapshot | Targeted OOM+JS rerun | Notes |
 | --- | ---: | ---: | --- |
 | `mimo` | 7/8 | 2/2 | Strong overall. The remaining full-matrix failure was evaluator-path related for broad recent changes; schema+SQL produced a valid cited answer. |
-| `deepseek` | 2/8 before targeted fixes | 2/2 | Correct but over-investigates in broad cases. The targeted OOM aggregate and JS transform cases pass after fixture and recoverability fixes. |
+| `deepseek` | 2/8 before targeted fixes | 2/2 | Correct but over-investigates in broad cases. The targeted OOM aggregate and JS interpreter cases pass after fixture and recoverability fixes. |
 | `sub2api` | 6/8 before fixture fix | 2/2 | Good default candidate. Previous OOM/JS failures were caused by fake SQL returning allocation rows for OOM-shaped queries. |
 | `moonshot` | 5/8 before fixture fix | 2/2 | Tool calling works but latency is high and it tends to verify more than needed. |
 | `deepinfra` | 7/8 | 2/2 | Fast and good on simple/aggregate/JS cases, but one exact recent-change run used history instead of schema+SQL. |
@@ -190,7 +190,7 @@ KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smok
 scripts/agent-api-live-smoke.sh
 ```
 
-Use a Node capacity plus scripted-query prompt when validating the latest Node
+Use a Node capacity plus JS-interpreter prompt when validating the latest Node
 snapshot and one-tool SQL planning path:
 
 ```bash
@@ -198,7 +198,7 @@ make build
 KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
 KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
 KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
-KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='How many Nodes are there, and what are total capacity CPU and memory? Cite the proof.;;Use one bounded scripted SQL plan to summarize Node count plus total capacity CPU and memory, and cite the proof.' \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='How many Nodes are there, and what are total capacity CPU and memory? Cite the proof.;;Use one bounded JS interpreter SQL plan to summarize Node count plus total capacity CPU and memory, and cite the proof.' \
 KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS=4 \
 KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-node-capacity" \
 scripts/agent-api-live-smoke.sh
@@ -207,8 +207,8 @@ scripts/agent-api-live-smoke.sh
 For an existing ClickHouse-backed compose API server, `agent-clickhouse-case-smoke`
 can also submit a real agent run for the abbreviated-cluster Node inventory case.
 The optional agent check verifies the desired tool path: discover clusters with
-unfiltered health, use schema plus one scripted query, avoid a follow-up
-`artifact_transform_js`, and keep the first health call from treating `gcp2` as
+unfiltered health, use schema plus one `kube_insight_js` call, avoid legacy split
+JS tools, and keep the first health call from treating `gcp2` as
 the stored cluster ID.
 
 ```bash
@@ -233,7 +233,7 @@ subagent fan-out can be inspected without opening the full SSE log.
 | --- | --- | ---: | ---: | --- |
 | Service health | `run.completed` | 5 | 3 | `kube_insight_health` + `kube_insight_service_investigation` |
 | Namespace topology | `run.completed` | 10 | 1 | search retries hit the budget guard, then `kube_insight_topology` completed |
-| SQL + JS grouping | `run.completed` | 6 | 2 | `kube_insight_schema` + `kube_insight_sql` + `artifact_transform_js` |
+| SQL + JS grouping | `run.completed` | 6 | 2 | `kube_insight_schema` + `kube_insight_js` |
 
 A local ClickHouse-backed server smoke against `http://127.0.0.1:8080` also
 passed health, schema, and representative SQL cases: clusters, recent OOM facts,
@@ -262,7 +262,7 @@ Add these after the current harness has settled:
 - `zero-result-pivot`: feed a transcript where one exact query returns zero rows
   and require the next action to profile available keys/types or report a
   coverage gap instead of repeating wildcard variants.
-- `real-db-scripted-query`: run the scripted query case against the local
+- `real-db-js-interpreter`: run the JS interpreter case against the local
   ClickHouse dev database, then compare tool count and answer quality against
   the plain schema+SQL capacity case.
 - `noisy-evidence-condenser`: feed a large SQL/search artifact and require

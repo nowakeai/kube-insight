@@ -67,7 +67,7 @@ func TestScriptedQueryToolRunsSQLAll(t *testing.T) {
 	}}
 	scripted := NewScriptedQueryTool(sqlTool).(tool.InvokableTool)
 	out, err := scripted.InvokableRun(ctx, `{
-		"script": "const out = sqlAll([{name: 'one', sql: 'select 1', maxRows: 1}, {name: 'two', sql: 'select 2', maxRows: 1}]); return out.map(x => ({name: x.name, n: rows(x.result)[0].n}));"
+		"script": "const out = sqlAll([{name: 'one', sql: 'select 1', maxRows: 1}, {name: 'two', sql: 'select 2', maxRows: 1}]); return {one: rows(out.one)[0].n, two: rows(out.two)[0].n, itemCount: out._items.length};"
 	}`)
 	if err != nil {
 		t.Fatal(err)
@@ -76,12 +76,12 @@ func TestScriptedQueryToolRunsSQLAll(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(result.Result, &rows); err != nil {
+	var payload map[string]float64
+	if err := json.Unmarshal(result.Result, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 || rows[0]["name"] != "one" || rows[1]["n"] != float64(2) {
-		t.Fatalf("rows = %#v", rows)
+	if payload["one"] != 1 || payload["two"] != 2 || payload["itemCount"] != 2 {
+		t.Fatalf("payload = %#v", payload)
 	}
 }
 

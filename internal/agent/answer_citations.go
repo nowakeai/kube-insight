@@ -163,7 +163,7 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	if strings.Contains(label, "oom") || strings.Contains(label, "restart") || strings.Contains(label, "facts") || strings.Contains(label, "事实") {
-		if candidate.Source == "kube_insight_sql" || candidate.Source == scriptedQueryToolName {
+		if candidate.Source == "kube_insight_sql" || isJSInterpreterToolName(candidate.Source) {
 			score += 55
 		}
 		if strings.Contains(text, "oomkilled") || strings.Contains(text, "oom") {
@@ -182,7 +182,7 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	if strings.Contains(label, "change") || strings.Contains(label, "changes") || strings.Contains(label, "recent") || strings.Contains(label, "变更") {
-		if candidate.Source == "kube_insight_sql" || candidate.Source == scriptedQueryToolName {
+		if candidate.Source == "kube_insight_sql" || isJSInterpreterToolName(candidate.Source) {
 			score += 45
 		}
 		if strings.Contains(text, "change") || strings.Contains(text, "changes") || strings.Contains(text, "change_family") {
@@ -203,7 +203,7 @@ func evidenceLabelCandidateScore(label string, candidate answerCitationCandidate
 		}
 	}
 	if strings.Contains(label, "scripted") || strings.Contains(label, "sql") || strings.Contains(label, "rollup") || strings.Contains(label, "capacity") || strings.Contains(label, "容量") {
-		if candidate.Source == scriptedQueryToolName {
+		if isJSInterpreterToolName(candidate.Source) {
 			score += 65
 		}
 		if candidate.Source == "kube_insight_sql" {
@@ -228,11 +228,15 @@ func toolCallArtifactCanSupportCitation(artifact Artifact) bool {
 		return false
 	}
 	name := textField(record, "name")
-	if name == parallelInvestigationToolName || name == evidenceCondenserToolName || name == scriptedQueryToolName {
+	if name == parallelInvestigationToolName || name == evidenceCondenserToolName || isJSInterpreterToolName(name) {
 		return true
 	}
 	output := valueRecord(record["output"])
 	return output != nil && textField(output, "tool") == parallelInvestigationToolName
+}
+
+func isJSInterpreterToolName(name string) bool {
+	return name == jsInterpreterToolName || name == legacyScriptedQueryToolName || name == legacyJSTransformToolName
 }
 
 func toolCallArtifactName(artifact Artifact) string {

@@ -120,20 +120,16 @@ bounded preview. This is a cheap replay-time compaction, not a replacement for
 higher-quality human-readable synthesis of noisy current-run evidence before
 answering.
 
-### 4. Bounded Local Data Transform
+### 4. Bounded JavaScript Interpreter
 
-First implementation slice: `artifact_transform_js` is a native Eino tool backed
-by goja. It accepts literal `input` JSON and a JavaScript function body, injects
-`input`, a `rows` alias when available, small `ki`/`_` data helpers, and safe
-logging/JSON helpers, and returns bounded JSON. It has no filesystem, network,
-process, or environment access.
-
-Second implementation slice: `kube_insight_scripted_query` wraps the existing
-read-only `kube_insight_sql` tool and exposes bounded `sql()` plus `sqlAll()`
-inside goja. Use it after schema when one tool call should perform dependent
-profile -> proof SQL, several independent aggregates, or SQL rows plus compact
-grouping. It is still not a shell replacement; SQL read-only validation, query
-count, row count, timeout, and output limits remain mandatory.
+Current design: expose one native Eino tool, `kube_insight_js`, backed by goja.
+It accepts literal `input` JSON, injects `input`, `inputRows`, small `ki`/`_`
+data helpers, safe logging/JSON helpers, and bounded read-only SQL helpers
+`sql()` plus `sqlAll()`. Use it after schema when one tool call should perform
+dependent profile -> proof SQL, several independent aggregates, SQL rows plus
+compact grouping, or pure JSON transformation over current-run evidence. It has
+no filesystem, network, process, or environment access; SQL read-only
+validation, query count, row count, timeout, and output limits remain mandatory.
 
 Add a safe transform capability after prompt and condenser improvements settle.
 This is not a shell replacement.
@@ -292,7 +288,7 @@ Do not add allocation-specific storage just to satisfy this case.
 3. Add evaluation coverage for the generic allocation/configuration follow-up
    shape.
 4. Update schema notes with generic profiling guidance.
-5. Add `artifact_transform_js` as the first bounded language-shaped data tool.
+5. Add `kube_insight_js` as the single bounded language-shaped data tool.
 6. Add ClickHouse support to real prompt eval and a local no-LLM ClickHouse case smoke.
 7. Run narrow tests for agent contracts, config, API, and evaluation.
 

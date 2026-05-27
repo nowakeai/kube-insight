@@ -44,10 +44,7 @@ func newConfiguredAgentRunner(ctx context.Context, cfg appconfig.Config, dbPath 
 	if err != nil {
 		return nil, nil, err
 	}
-	localTools := []tool.BaseTool{agent.NewJSTransformTool()}
-	if sqlTool := findInvokableToolByName(ctx, tools, "kube_insight_sql"); sqlTool != nil {
-		localTools = append(localTools, agent.NewScriptedQueryTool(sqlTool))
-	}
+	localTools := []tool.BaseTool{agent.NewJSInterpreterTool(findInvokableToolByName(ctx, tools, "kube_insight_sql"))}
 	localTools = agent.WrapRecoverableToolErrors(localTools)
 	parallelTools := append([]tool.BaseTool(nil), tools...)
 	parallelTools = append(parallelTools, localTools...)

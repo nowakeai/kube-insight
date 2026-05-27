@@ -152,7 +152,7 @@ func TestVerifiedAnswerCitationsCanUseParallelInvestigationArtifact(t *testing.T
 	}
 }
 
-func TestVerifiedAnswerCitationsCanUseScriptedQueryArtifact(t *testing.T) {
+func TestVerifiedAnswerCitationsCanUseJSInterpreterArtifact(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 	session, err := store.CreateSession(ctx, CreateSessionInput{})
@@ -167,7 +167,7 @@ func TestVerifiedAnswerCitationsCanUseScriptedQueryArtifact(t *testing.T) {
 	if err := recorder.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{
 		ID:    "artifact_scripted",
 		Kind:  ArtifactKindToolCall,
-		Title: "Tool output: kube_insight_scripted_query",
+		Title: "Tool output: kube_insight_js",
 		Data: jsonRaw(map[string]any{
 			"toolCallId": "call_scripted",
 			"name":       scriptedQueryToolName,
@@ -186,7 +186,7 @@ func TestVerifiedAnswerCitationsCanUseScriptedQueryArtifact(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := recorder.Complete(ctx, "There is 1 node with 8 CPU cores. {{evidence: scripted SQL rollup}}"); err != nil {
+	if err := recorder.Complete(ctx, "There is 1 node with 8 CPU cores. {{evidence: JS SQL rollup}}"); err != nil {
 		t.Fatal(err)
 	}
 	events, err := store.ListRunEvents(ctx, run.ID)
@@ -207,10 +207,10 @@ func TestVerifiedAnswerCitationsCanUseScriptedQueryArtifact(t *testing.T) {
 			}
 		}
 	}
-	if citation.Citation.ArtifactID != "artifact_scripted" || citation.Citation.Text != "scripted SQL rollup" {
+	if citation.Citation.ArtifactID != "artifact_scripted" || citation.Citation.Text != "JS SQL rollup" {
 		t.Fatalf("citation = %#v", citation)
 	}
-	if !strings.Contains(final.Content, "[scripted SQL rollup](#citation:"+citation.Citation.ID+")") {
+	if !strings.Contains(final.Content, "[JS SQL rollup](#citation:"+citation.Citation.ID+")") {
 		t.Fatalf("final = %q citation=%#v", final.Content, citation)
 	}
 }

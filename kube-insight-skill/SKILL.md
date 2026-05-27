@@ -137,7 +137,10 @@ Use the path that matches the question:
   field extraction, Kubernetes CPU/memory unit normalization, and other
   code-shaped aggregation that SQL is easy to get subtly wrong. Prefer this
   over serial repeated SQL plus a separate transform when the tool is
-  available; keep query count and `maxRows` bounded.
+  available; keep query count and `maxRows` bounded. Return answer-ready JSON
+  from the script, with grouping, totals, sorting, and unit normalization already
+  done. Do not call a separate transform tool afterward just to reshape the same
+  rows.
 - Node inventory/capacity/allocatable totals:
   `kube_insight_health` + `kube_insight_schema`, then one bounded
   `kube_insight_scripted_query` as the first data query. Use
@@ -211,22 +214,22 @@ Agents should not guess SQL shape from memory. Detect it at runtime:
   select or group by `cluster_id`.
 - When the user gives a natural-language cluster name such as "gcp cluster 2",
   or a short fragment such as `gcp2`, proactively list available clusters before
-  scoped analysis. First call health without a cluster filter, or use
-  schema/health cluster display maps to match the exact display/source/context
-  name and stable `cluster_id`.
-- MCP typed tools may accept a known cluster display/context/source alias, but
-  SQL still needs the stable `cluster_id` from health/schema/evidence rows. If a
-  short alias such as `gcp2` is not an exact cluster ID, first try a typed tool
-  such as health/search with that cluster value so kube-insight can resolve an
-  unambiguous abbreviation; if the tool reports ambiguity, ask the user to pick
-  the displayed stable ID. Do not put the display name or abbreviation into a
+  scoped analysis. First call health without a cluster filter and use the
+  returned cluster display map to match the exact display/source/context name
+  and stable `cluster_id`. Do not pass the fragment as the first health cluster
+  argument.
+- MCP typed tools may accept a known cluster display/context/source alias after
+  discovery, but SQL still needs the stable `cluster_id` from
+  health/schema/evidence rows. Do not put the display name or abbreviation into a
   `cluster_id = ...` SQL predicate unless the schema rows prove that it is the
   stored ID. If an exact short alias exists but has no objects while a fuzzy
   display/source match has data, prefer the dataful fuzzy match and state the
   stable ID used.
-- For relative time words such as "recent", "today", "yesterday", or "last 24
-  hours", compute absolute UTC `from`/`to` bounds from the client context before
-  calling search/history/service tools or SQL.
+- For relative time words such as "recent", "today", "yesterday", "last 24
+  hours", "half day", or `半天`, compute absolute UTC `from`/`to` bounds from
+  the client context before calling search/history/service tools or SQL. Treat
+  "half day" and `半天` as the last 12 hours unless the user clearly means a
+  calendar half-day.
 - SQL arguments stay in UTC. Final user-facing timestamps should use the
   browser/client time zone when known, with the IANA zone or numeric offset; add
   UTC as secondary context only when useful.

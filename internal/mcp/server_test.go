@@ -370,12 +370,14 @@ func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
 		"kube_insight_sql": {
 			"Always call kube_insight_schema first",
 			"ClickHouse-compatible tables",
+			"first inspect kube_insight_health without a cluster filter",
 			"Keep maxRows bounded",
 			"timestamp predicates",
 			"indexed fact/change/edge fields",
 		},
 		"kube_insight_health": {
 			"current-state claims",
+			"Do not pass a user fragment",
 			"compact DSL",
 			"/api/v1/health endpoint is much larger",
 		},
@@ -425,6 +427,7 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 			want: []string{
 				"Default to SQL after schema detection",
 				"kube_insight_sql",
+				"Do not pass the user fragment as the first health cluster argument",
 				"ingestion_offsets is append-only",
 				"argMax(status, updated_at)",
 				"facts and changes",

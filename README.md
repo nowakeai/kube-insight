@@ -205,16 +205,17 @@ history examples.
 
 <!--
 Replace this placeholder with the GitHub user-attachments `.mp4` URL after
-recording. Recommended first demo: ask the built-in Web UI agent which
-historical Pods for Service `default/api` had OOMKilled/restart evidence after
-the live state recovered, then show collector coverage, search/history tool
-calls, retained Pod/Event artifacts, citations, and the final evidence-backed
-answer.
+recording. Recommended prompt for the first demo:
+"What happened to Service default/api before it recovered? Use retained history
+and cite the evidence."
+
+This keeps the recording short while showing the advantage over live kubectl:
+the agent can explain a recovered incident from retained Pod/Event/version
+history, not just current state.
 -->
 
-> Built-in agent demo video placeholder: find historical OOMKilled/restart
-> evidence for Service `default/api` from retained Pod, Event, version, and
-> topology history.
+> Built-in agent demo video placeholder: explain what happened to Service
+> `default/api` before it recovered, using retained history and citations.
 
 ## Agent Investigation Loop
 

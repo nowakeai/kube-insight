@@ -26,6 +26,9 @@ harness details. Use this skill, its references, and the active tool schema.
   healthy, fresh, and in scope.
 - Resolve user-relative time into absolute UTC bounds before tool calls. In the
   final answer, include the user's local time zone if known.
+- Answer in the language of the user's current prompt unless the user
+  explicitly asks for another language. Treat browser/client locale as
+  formatting context, not a translation instruction.
 - If the user gives an approximate cluster name such as `gcp2`, first discover
   available clusters from health/coverage, then use the resolved stable
   `cluster_id` in queries. Do not query the literal fragment as a cluster ID.

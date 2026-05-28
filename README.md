@@ -205,13 +205,16 @@ history examples.
 
 <!--
 Replace this placeholder with the GitHub user-attachments `.mp4` URL after
-recording. Recommended first demo: ask the built-in Web UI agent to investigate
-Service `default/api`, then show collector coverage, the Service investigation
-tool call, cited artifacts, and the final evidence-backed answer.
+recording. Recommended first demo: ask the built-in Web UI agent which
+historical Pods for Service `default/api` had OOMKilled/restart evidence after
+the live state recovered, then show collector coverage, search/history tool
+calls, retained Pod/Event artifacts, citations, and the final evidence-backed
+answer.
 -->
 
-> Built-in agent demo video placeholder: investigate Service `default/api` from
-> retained Service, EndpointSlice, Pod, Event, and topology evidence.
+> Built-in agent demo video placeholder: find historical OOMKilled/restart
+> evidence for Service `default/api` from retained Pod, Event, version, and
+> topology history.
 
 ## Agent Investigation Loop
 

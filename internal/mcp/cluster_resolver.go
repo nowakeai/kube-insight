@@ -29,6 +29,9 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 	if len(clusters) == 0 {
 		return value, nil
 	}
+	if !hasNamedCluster(clusters) {
+		return value, nil
+	}
 	matches := matchingClusters(clusters, value, clusterAliasMatches)
 	if len(matches) == 1 && clusterHasEvidence(matches[0]) {
 		return matches[0].Name, nil
@@ -71,6 +74,15 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 		available = append(available, cluster.Name)
 	}
 	return "", fmt.Errorf("cluster %q was not found; available clusters: %s", value, strings.Join(available, ", "))
+}
+
+func hasNamedCluster(clusters []storage.ClusterRecord) bool {
+	for _, cluster := range clusters {
+		if strings.TrimSpace(cluster.Name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func clusterHasEvidence(cluster storage.ClusterRecord) bool {

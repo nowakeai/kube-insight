@@ -190,6 +190,90 @@ print(json.dumps({
       failures+=("Node lifecycle rows still contain unknown/missing instance type after enrichment")
       jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
     fi
+    if ! jq -e '
+      any(.[]; .type=="artifact.created"
+        and .data.artifact.kind=="tool_call"
+        and .data.artifact.data.name=="kube_insight_js"
+        and (
+          (.data.artifact.data.output | tostring)
+          | test("net_delta|netDelta|node_net_change|start_node_count|end_node_count|added_count|deleted_count"; "i")
+        ))
+    ' "$events_json" >/dev/null; then
+      failures+=("Node change case missing explicit net/churn fields such as net_delta, added_count, deleted_count, or start/end node counts")
+      jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
+    fi
+  fi
+
+  if [[ "$slug" == "agent-pod-count-peak" ]]; then
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and (.data.name=="kube_insight_js" or .data.name=="kube_insight_sql")
+        and (((.data.input.script // .data.input.sql // "") | tostring) | test("countDistinct\\s*\\([^)]*uid|count\\s*\\(\\s*distinct\\s+uid|count\\s*\\([^)]*uid|unique_pods"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak tool input appears to count raw observation UIDs instead of reconstructing state")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and (.data.name=="kube_insight_js" or .data.name=="kube_insight_sql")) | {sequence, name:.data.name, input:.data.input}]' "$events_json" >&2
+    fi
+    if ! jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("BASELINE|MODIFIED|observation_type|state"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak script missing state reconstruction markers such as baseline, MODIFIED, or observation_type")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if ! jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("pod_count_peak_intervals_for_js|interval_start|interval_end|from_baseline"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak script did not use per-UID interval fields from pod_count_peak_intervals_for_js")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (
+          (((.data.input.script // "") | tostring | ascii_downcase) | contains("name: '\''baseline'\''"))
+          and (((.data.input.script // "") | tostring | ascii_downcase) | contains("name: '\''window_events'\''"))
+          and (((.data.input.script // "") | tostring | ascii_downcase) | contains("sqlall"))
+        ))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak script split the interval recipe into baseline/window_events queries")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (
+          (((.data.input.script // "") | tostring | ascii_downcase) | contains("from observations"))
+          and (
+            (((.data.input.script // "") | tostring | ascii_downcase) | contains("uid, observation_type, observed_at"))
+            or (((.data.input.script // "") | tostring | ascii_downcase) | contains("uid, observed_at, observation_type"))
+          )
+        ))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak script exports raw Pod observation rows instead of per-UID interval rows")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("totalCountHistory\\s*\\.\\s*filter|bucketPoints\\s*=\\s*totalCountHistory\\.filter|for\\s*\\([^)]*bucket[^)]*\\)[\\s\\S]{0,600}\\.filter\\("; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("Pod-count peak script uses per-bucket filtering over history and may timeout")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+  fi
+
+  if [[ "$slug" == *"endpoint"* || "$slug" == *"service-empty"* ]]; then
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("arrayJoin\\s*\\(\\s*JSONExtractArrayRaw\\s*\\([^)]*endpoints"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("EndpointSlice readiness script uses arrayJoin over endpoints and may drop empty endpoint arrays")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
   fi
 
   if [[ -n "$forbidden_first_health_input" ]]; then
@@ -246,6 +330,22 @@ print(json.dumps({
         and (((.data.input.script // "") | tostring) | test("(JSONExtractString|replace(All|RegexpAll)?)[^`]{0,240}/\\s*(1000|1024|1048576)"; "i")))
     ' "$events_json" >/dev/null; then
       failures+=("JS SQL appears to parse Kubernetes quantity strings inside ClickHouse; fetch raw strings and parse units in JS")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input // {}) | tostring) | test("\"maxRows\"\\s*:\\s*(50000|100000)|maxRows\\s*:\\s*(50000|100000)"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS script requested maxRows above the 10000 per-query cap")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input // {}) | tostring) | test("\"maxQueries\"\\s*:\\s*([1-9][1-9]|30)|maxQueries\\s*:\\s*([1-9][1-9]|30)"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS script requested maxQueries above the hard cap of 10")
       jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
     fi
   fi

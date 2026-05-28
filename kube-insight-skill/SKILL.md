@@ -198,6 +198,14 @@ For SQL:
 - Do not compute peak or point-in-time object counts from raw observation
   distinct counts. Reconstruct state: `ADDED` and `MODIFIED` mean the object
   exists after that timestamp, while `DELETED` means it does not.
+- For Pod-count peaks, use the schema recipe
+  `pod_count_peak_intervals_for_js` first. Prefer per-UID intervals plus one
+  event sweep over raw observation exports. Copy the final `interval_rows`
+  output shape instead of separately querying baseline and window events; never
+  treat `1970-01-01` sentinel values as real delete events. Do not raise
+  built-in JS `maxRows` above 10000 or `maxQueries` above 10; split by
+  cluster/time if interval rows truncate. A raw Pod observation export that
+  hits its row cap is incomplete evidence for a peak.
 - Do not answer "no data" as "no issue" until coverage proves the relevant
   stream was collected.
 - Do not silently pick the first cluster from health output. For ambiguous

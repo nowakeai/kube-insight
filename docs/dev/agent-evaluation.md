@@ -117,6 +117,20 @@ latency can exceed the default ten-minute Go test timeout even when each case ha
 a per-run timeout. For routine prompt work, prefer targeted case filters over
 running every provider and every case.
 
+Recent ClickHouse-backed live agent findings are also carried into the built-in
+prompt/tool harness:
+
+- Pod-count peak questions should use the `pod_count_peak_intervals_for_js`
+  recipe and reconstruct state from per-UID interval rows. Do not count raw
+  observation UIDs, export capped raw observation rows as proof, run one SQL
+  query per time bucket, or raise `maxQueries` above the hard cap of 10; use a
+  small number of interval queries and sweep in JS.
+- EndpointSlice readiness checks must preserve empty `endpoints` arrays.
+  `arrayJoin(JSONExtractArrayRaw(doc, 'endpoints'))` alone can drop zero-endpoint
+  slices and turn "empty" into "absent".
+- Node change answers must separate lifecycle churn from net node/capacity
+  change using start/end latest non-deleted snapshots plus lifecycle rows.
+
 
 ## API Live Smoke Path
 
@@ -296,6 +310,15 @@ Kubernetes units when applicable, and cited proof. Treat failures as taxonomy
 data before editing the prompt: relative time, fuzzy lookup, complex
 aggregation, deep field extraction, parallel discovery, complex predicates,
 zero-result pivot, or evidence stopping.
+The peak Pod-count case should reconstruct state, not count raw observation
+UIDs: seed a baseline from the latest non-deleted Pod snapshot at the start of
+the window, then apply ADDED/MODIFIED/DELETED observations where ADDED and
+MODIFIED mean the Pod exists after that timestamp and DELETED means it does
+not. EndpointSlice readiness tests should preserve zero-endpoint slices; an
+`arrayJoin(JSONExtractArrayRaw(..., 'endpoints'))` query by itself can drop
+empty arrays and hide the evidence. Node change tests should report churn
+(`added_count`, `deleted_count`, replacements) separately from net node/capacity
+change using start/end latest snapshots plus lifecycle rows.
 `KUBE_INSIGHT_AGENT_CASE_PARALLEL` submits multiple live runs concurrently for
 faster prompt iteration; use it only for opt-in provider-backed testing where
 parallel token spend is acceptable.

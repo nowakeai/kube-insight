@@ -378,6 +378,8 @@ func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
 		"kube_insight_health": {
 			"current-state claims",
 			"Do not pass a user fragment",
+			"Do not call this again",
+			"answer-ready SQL/JS/tool result",
 			"compact DSL",
 			"/api/v1/health endpoint is much larger",
 		},

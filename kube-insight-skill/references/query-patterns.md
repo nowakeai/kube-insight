@@ -282,10 +282,70 @@ and lifetimes outside SQL. Do not infer CronJob from name alone; DaemonSet
 replacement during node churn can look like short-lived task churn.
 
 For "Pod count peak" or point-in-time Pod totals, use a state reconstruction
-over observations rather than this lifecycle rollup. Build a baseline from each
-Pod UID's latest pre-window observation, then sweep all in-window
-ADDED/MODIFIED/DELETED rows. Treat ADDED/MODIFIED as present and DELETED as
-absent. This handles windows where existing Pods only emit MODIFIED rows.
+over observations rather than this lifecycle rollup. Prefer compressing rows to
+one interval per Pod UID before processing:
+
+- baseline active Pods before the window from each Pod UID's latest prior
+  observation;
+- one interval start at the window start for baseline Pods, otherwise at the
+  first in-window ADDED/MODIFIED observation;
+- one interval end at the first in-window DELETED observation, if present;
+- `ADDED` and `MODIFIED` mean the UID exists after that timestamp;
+- `DELETED` means the UID no longer exists after that timestamp.
+
+Use the built-in schema recipe `pod_count_peak_intervals_for_js` when it is
+available. Copy the final `interval_rows` output shape instead of separately
+querying baseline and window events; never treat `1970-01-01` sentinel values as
+real deletes. Then convert intervals into `+1`/`-1` events, sort once, and sweep
+once while updating the peak. Do not fetch every raw observation if per-UID
+intervals fit under the row cap. Do not run one SQL query per bucket, do not build a
+`totalCountHistory` list and filter it for every bucket, and do not raise
+`maxRows` above the built-in cap. If the interval query truncates, split by
+cluster or time and merge partial sweeps. A raw Pod observation export that
+hits its row cap is incomplete evidence for a peak.
+
+```sql
+with baseline as (
+  select cluster_id, namespace, name, uid,
+         max(observed_at) as baseline_observed_at,
+         argMax(observation_type, observed_at) as last_type
+  from observations
+  where kind = 'Pod'
+    and observed_at < toDateTime64('2026-05-21 00:00:00', 3, 'UTC')
+    and observation_type in ('ADDED','MODIFIED','DELETED')
+  group by cluster_id, namespace, name, uid
+  having last_type != 'DELETED'
+), window_uid as (
+  select cluster_id, namespace, name, uid,
+         minIf(observed_at, observation_type in ('ADDED','MODIFIED')) as first_present_at,
+         minIf(observed_at, observation_type = 'DELETED') as first_deleted_at,
+         count() as observation_rows
+  from observations
+  where kind = 'Pod'
+    and observed_at >= toDateTime64('2026-05-21 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-28 00:00:00', 3, 'UTC')
+    and observation_type in ('ADDED','MODIFIED','DELETED')
+  group by cluster_id, namespace, name, uid
+)
+select cluster_id, namespace, name, uid,
+       1 as from_baseline,
+       toDateTime64('2026-05-21 00:00:00', 3, 'UTC') as interval_start,
+       nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+       observation_rows
+from baseline
+left join window_uid using (cluster_id, namespace, name, uid)
+union all
+select cluster_id, namespace, name, uid,
+       0 as from_baseline,
+       first_present_at as interval_start,
+       nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+       observation_rows
+from window_uid
+where first_present_at != toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+  and uid not in (select uid from baseline)
+order by interval_start, namespace, name
+limit 10000;
+```
 
 ## Quantity Parsing Outside SQL
 

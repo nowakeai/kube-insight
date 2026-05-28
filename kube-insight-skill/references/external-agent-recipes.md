@@ -94,23 +94,34 @@ Plan:
 
 1. Convert the week to UTC bounds.
 2. `kube_insight_health` and `kube_insight_schema`.
-3. Export retained Pod observation rows and run a state sweep in Python, JS,
-   DuckDB, or any other reliable local processor:
+3. Export per-UID Pod intervals with the `pod_count_peak_intervals_for_js`
+   schema recipe when available, then run a state sweep in Python, JS, DuckDB,
+   or any other reliable local processor:
    - baseline active Pods before the window from each Pod UID's latest prior
      observation;
-   - ADDED/MODIFIED/DELETED rows in the window;
-   - `ADDED` and `MODIFIED` mean the UID exists after that timestamp;
-   - `DELETED` means the UID no longer exists after that timestamp;
-   - bucket or exact-event peak calculation.
+   - interval start is window start for baseline Pods, otherwise the first
+     in-window `ADDED`/`MODIFIED`;
+   - interval end is the first in-window `DELETED`, if any;
+   - convert intervals to `+1`/`-1` events, sort once, and sweep once while
+     updating the peak;
+   - bucket the already-swept series with a moving pointer if bucket output is
+     required.
 4. Return the peak timestamp/bucket, count, cluster/namespace grouping, and
    truncation/coverage caveats.
 
 Do not use `countDistinct(uid)` over raw observations as the peak. Observation
 frequency is not object count.
+Copy the recipe's final `interval_rows` output shape instead of separately
+querying baseline and window events. Do not treat `1970-01-01` sentinel values
+as real delete times.
 Use a pure ADDED/DELETED lifecycle sweep only after confirming lifecycle
 coverage is complete for the window. In real retained data, current Pods may
 only have MODIFIED rows inside the window, and lifecycle-only sweeps can
 severely undercount.
+Do not raise built-in JS `maxRows` above 10000 or `maxQueries` above 10. If the
+interval export truncates, split by cluster or time and merge compact partial
+results instead of pulling every raw observation row. A raw Pod observation
+export that hits its row cap is incomplete evidence for a peak.
 
 ## PVC Storage Resize Deltas
 

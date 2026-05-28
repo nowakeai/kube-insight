@@ -21,12 +21,13 @@ func (s *Store) QuerySQL(ctx context.Context, opts storage.SQLQueryOptions) (sto
 	if maxRows <= 0 {
 		maxRows = 1000
 	}
+	execQuery := boundedClickHouseQuery(query, maxRows)
 	start := time.Now()
 	runner, err := s.sqlQueryRunner()
 	if err != nil {
 		return storage.SQLQueryResult{}, err
 	}
-	result, err := runner.QueryJSON(ctx, query)
+	result, err := runner.QueryJSON(ctx, execQuery)
 	if err != nil {
 		return storage.SQLQueryResult{}, err
 	}
@@ -49,6 +50,36 @@ func (s *Store) QuerySQL(ctx context.Context, opts storage.SQLQueryOptions) (sto
 		Truncated: truncated || result.RowsBefore > maxRows,
 		ElapsedMS: float64(time.Since(start).Microseconds()) / 1000,
 	}, nil
+}
+
+func boundedClickHouseQuery(query string, maxRows int) string {
+	query = strings.TrimSpace(query)
+	if maxRows <= 0 || !shouldWrapClickHouseQuery(query) {
+		return query
+	}
+	query = strings.TrimRightFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) || r == ';'
+	})
+	return fmt.Sprintf("SELECT * FROM (\n%s\n) LIMIT %d", query, maxRows+1)
+}
+
+func shouldWrapClickHouseQuery(query string) bool {
+	first := firstSQLKeyword(query)
+	switch first {
+	case "SELECT", "WITH":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstSQLKeyword(query string) string {
+	sanitized := sanitizeClickHouseSQLForValidation(query)
+	tokens := clickHouseSQLTokens(strings.TrimSpace(sanitized))
+	if len(tokens) == 0 {
+		return ""
+	}
+	return strings.ToUpper(tokens[0])
 }
 
 func (s *Store) sqlQueryRunner() (QueryRunner, error) {
@@ -283,26 +314,80 @@ from containers
 limit 5000`,
 		},
 		{
-			Name:        "pod_lifecycle_hourly_events_for_js",
-			Description: "Pod lifecycle rows for kube_insight_js time bucketing. Use this for peak Pod-count or Pod-count delta questions; reconstruct object state per time bucket in JS from ADDED/DELETED lifecycles plus a baseline, not from raw observation counts or countDistinct(uid) per bucket. Use an event-sweep algorithm: sorted +1/-1 lifecycle events, cumulative counts once, then moving-pointer or binary-search bucket lookup. Do not scan all lifecycle rows for every bucket; that O(bucket_count*object_count) loop can timeout in goja.",
-			SQL: `with lifecycles as (
+			Name:        "pod_count_peak_intervals_for_js",
+			Description: "Primary per-UID intervals recipe for kube_insight_js Pod-count peak and time-bucket questions. Use this final interval_rows SELECT instead of exporting raw Pod observation rows or separately querying baseline and window_events. It returns one row per Pod UID interval with interval_start, interval_end, and from_baseline, derived from a latest non-deleted baseline at the window start plus ADDED/MODIFIED/DELETED observations. ADDED and MODIFIED mean the UID exists after that timestamp; DELETED means it does not. Convert each returned row to at most two events: +1 at interval_start and -1 at interval_end when present, sort once, and sweep once while updating the peak. Never treat 1970-01-01 sentinel values as real deletes; this recipe nulls them before output. Do not request more than 10000 rows, do not scan all rows for every bucket, and do not raise maxRows above the cap; if this recipe truncates, split by cluster or time.",
+			SQL: `with baseline as (
   select cluster_id, namespace, name, uid,
-         minIf(observed_at, observation_type = 'ADDED') as added_at,
-         minIf(observed_at, observation_type = 'DELETED') as deleted_at
+         max(observed_at) as baseline_observed_at,
+         argMax(observation_type, observed_at) as last_type
   from observations
   where kind = 'Pod'
     and cluster_id = 'CLUSTER_ID'
-    and observed_at <= toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
-    and observation_type in ('ADDED', 'DELETED')
+    and observed_at < toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+    and observation_type in ('ADDED', 'MODIFIED', 'DELETED')
   group by cluster_id, namespace, name, uid
-  having added_at > toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+  having last_type != 'DELETED'
+), window_events as (
+  select cluster_id, namespace, name, uid,
+         minIf(observed_at, observation_type in ('ADDED','MODIFIED')) as first_present_at,
+         minIf(observed_at, observation_type = 'DELETED') as first_deleted_at,
+         count() as observation_rows
+  from observations
+  where kind = 'Pod'
+    and cluster_id = 'CLUSTER_ID'
+    and observed_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+    and observation_type in ('ADDED', 'MODIFIED', 'DELETED')
+  group by cluster_id, namespace, name, uid
+), interval_rows as (
+  select cluster_id, namespace, name, uid,
+         1 as from_baseline,
+         toDateTime64('2026-05-20 00:00:00', 3, 'UTC') as interval_start,
+         nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+         baseline_observed_at,
+         observation_rows
+  from baseline
+  left join window_events using (cluster_id, namespace, name, uid)
+  union all
+  select cluster_id, namespace, name, uid,
+         0 as from_baseline,
+         first_present_at as interval_start,
+         nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+         null as baseline_observed_at,
+         observation_rows
+  from window_events
+  where first_present_at != toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+    and uid not in (select uid from baseline)
 )
-select cluster_id, namespace, name, uid, added_at, deleted_at
-from lifecycles
-where added_at < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
-  and (deleted_at = toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
-       or deleted_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC'))
-limit 2000`,
+select cluster_id, namespace, name, uid, from_baseline,
+       interval_start, interval_end, baseline_observed_at, observation_rows
+from interval_rows
+order by interval_start, namespace, name
+limit 10000`,
+		},
+		{
+			Name:        "endpointslice_latest_for_js",
+			Description: "Latest non-deleted EndpointSlice snapshots for kube_insight_js Service endpoint readiness checks. Use this when proving zero ready endpoints or empty endpoint arrays. Do not rely on arrayJoin(JSONExtractArrayRaw(doc, 'endpoints')) alone because ClickHouse drops rows for EndpointSlices whose endpoints array is empty; preserve each slice row and parse endpoint_count/ready counts in JavaScript or a SQL shape that keeps zero-endpoint slices.",
+			SQL: `with latest_slices as (
+  select cluster_id, namespace, name, uid,
+         argMax(doc, observed_at) as latest_doc,
+         argMax(observation_type, observed_at) as last_type,
+         max(observed_at) as last_seen
+  from observations
+  where kind = 'EndpointSlice'
+    and cluster_id = 'CLUSTER_ID'
+    and namespace = 'NAMESPACE'
+    and observed_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+  group by cluster_id, namespace, name, uid
+  having last_type != 'DELETED'
+)
+select cluster_id, namespace, name, uid, last_seen,
+       JSONExtractString(latest_doc, 'metadata', 'labels', 'kubernetes.io/service-name') as service_name,
+       length(JSONExtractArrayRaw(latest_doc, 'endpoints')) as endpoint_count,
+       latest_doc
+from latest_slices
+limit 1000`,
 		},
 		{
 			Name:        "current_node_capacity_snapshot",
@@ -341,7 +426,7 @@ limit 5000`,
 		},
 		{
 			Name:        "recent_node_lifecycle",
-			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals. The event row is enriched from nearby same-name observations with instance-type labels because ADDED docs can arrive before labels such as instance type are complete.",
+			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot and start/end latest non-deleted Node snapshots when the user asks whether nodes changed and also wants current totals. Report churn or replacements separately from net_delta and net capacity changes; balanced added/deleted counts alone do not prove stable node count or capacity. The event row is enriched from nearby same-name observations with instance-type labels because ADDED docs can arrive before labels such as instance type are complete.",
 			SQL: `with lifecycle as (
   select cluster_id, observation_type, name, uid,
          min(observed_at) as first_seen,

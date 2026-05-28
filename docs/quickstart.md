@@ -200,6 +200,36 @@ Open the Web UI at <http://127.0.0.1:8090>. `--app` uses one listener for the
 local app: Web UI is available at `/`, API at `/api/v1/*`, MCP at `/mcp`, and
 legacy SSE at `/sse`.
 
+The built-in Web UI agent uses the server-side LLM configuration under
+`server.chat`. Enable it in your config and point `apiKeyEnv` and `baseUrlEnv`
+to environment variable names; keep the secret values in the environment, not in
+the YAML file:
+
+```yaml
+server:
+  chat:
+    enabled: true
+    provider: openai-compatible
+    apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
+    model: gpt-5.2
+    maxIterations: 32
+```
+
+```bash
+export OPENAI_API_KEY='...'
+export OPENAI_BASE_URL='https://api.openai.com/v1'
+./kube-insight --config config/kube-insight.example.yaml serve \
+  --watch --app --db kubeinsight.db
+```
+
+Supported provider values are `openai` and `openai-compatible`. Omit
+`baseUrlEnv` or leave the named environment variable unset for the default
+OpenAI endpoint. The API reports whether the key/base URL variables are
+configured, but never returns the secret values. See
+[Configuration](configuration/configuration.md#roles-and-service-mode) for the
+full `server.chat` schema.
+
 `--watch` is independent from the app surfaces. Add it when this process should
 also collect Kubernetes history; omit it when another writer already owns
 collection.

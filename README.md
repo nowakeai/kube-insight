@@ -69,15 +69,19 @@ Start SQL investigations by selecting a cluster:
   "select id, name, source from clusters order by id"
 ```
 
-For a continuous local agent service, keep the watcher running with API and MCP
-enabled:
+For a continuous local agent service, keep the watcher running with API, MCP,
+and the built-in Web UI enabled:
 
 ```bash
-./kube-insight serve --watch --api --mcp --db kubeinsight.db
+./kube-insight serve --watch --app --db kubeinsight.db
 ```
 
-See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
-history examples.
+Open the embedded UI at <http://127.0.0.1:8090>. Release binaries include the
+prebuilt React app; no separate frontend checkout or Node.js runtime is needed
+to use it.
+
+See the full [quickstart](docs/quickstart.md) for Web UI, API, MCP, compaction,
+and history examples.
 
 ## The Problem
 

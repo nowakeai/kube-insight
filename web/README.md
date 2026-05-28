@@ -1,7 +1,7 @@
 # kube-insight Web UI
 
 This directory contains the React/Vite frontend that is embedded by
-`kube-insight serve --webui` and used by the Docker Compose development stack.
+`kube-insight serve --app` and used by the Docker Compose development stack.
 
 ## Development
 
@@ -16,10 +16,10 @@ make dev-compose-logs-web
 
 The Compose Web UI listens on `http://127.0.0.1:5173` by default and proxies:
 
-- `/api/*` to `KUBE_INSIGHT_API_PROXY_TARGET` (default `http://watcher:8080`)
-- `/healthz` to the watcher/API service
+- `/api/*` to `KUBE_INSIGHT_API_PROXY_TARGET` (default `http://watcher:8090`)
+- `/healthz` to the watcher/app service
 - `/metrics` to `KUBE_INSIGHT_METRICS_PROXY_TARGET` (default
-  `http://watcher:9090`)
+  `http://watcher:8090`)
 
 After dependency or Dockerfile changes, rebuild the web service:
 

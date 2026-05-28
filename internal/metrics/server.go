@@ -63,6 +63,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+func (s *Server) MountHTTP(mux *http.ServeMux) {
+	mux.Handle("/metrics", s)
+}
+
 func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) error {
 	if listen == "" {
 		listen = "127.0.0.1:9090"

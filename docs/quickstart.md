@@ -179,29 +179,67 @@ content versions while keeping every observation timestamp:
 
 ## Service Mode
 
-For a local all-in-one service process, run watcher plus read surfaces together:
+For a local all-in-one service process, run watcher plus read surfaces together.
+Release binaries embed the prebuilt React Web UI into the `kube-insight`
+binary, so using the UI does not require a separate frontend checkout or Node.js
+runtime:
 
 ```bash
-./kube-insight serve --watch --api --mcp --db kubeinsight.db
+./kube-insight serve --watch --app --db kubeinsight.db
 ```
 
-The combined command supports these components:
+`--app` enables the local agent app surfaces together:
 
-- `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
 - `--webui`: embedded Web UI listener for the React app built from `web/`.
   The first formal UI milestone is the agent-first chat surface described in
   [Agent-First Web UI Design](product/agent-first-web-ui.md).
 
+Open the Web UI at <http://127.0.0.1:8090>. `--app` uses one listener for the
+local app: Web UI is available at `/`, API at `/api/v1/*`, MCP at `/mcp`, and
+legacy SSE at `/sse`.
+
+The built-in Web UI agent uses the server-side LLM configuration under
+`server.chat`. Enable it in your config and point `apiKeyEnv` and `baseUrlEnv`
+to environment variable names; keep the secret values in the environment, not in
+the YAML file:
+
+```yaml
+server:
+  chat:
+    enabled: true
+    provider: openai-compatible
+    apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
+    model: gpt-5.2
+    maxIterations: 32
+```
+
+```bash
+export OPENAI_API_KEY='...'
+export OPENAI_BASE_URL='https://api.openai.com/v1'
+./kube-insight --config config/kube-insight.example.yaml serve \
+  --watch --app --db kubeinsight.db
+```
+
+Supported provider values are `openai` and `openai-compatible`. Omit
+`baseUrlEnv` or leave the named environment variable unset for the default
+OpenAI endpoint. The API reports whether the key/base URL variables are
+configured, but never returns the secret values. See
+[Configuration](configuration/configuration.md#roles-and-service-mode) for the
+full `server.chat` schema.
+
+`--watch` is independent from the app surfaces. Add it when this process should
+also collect Kubernetes history; omit it when another writer already owns
+collection.
+
 Example with all service surfaces:
 
 ```bash
-./kube-insight serve --watch --api --mcp --webui \
+./kube-insight serve --watch --app \
   --db kubeinsight.db \
-  --api-listen 127.0.0.1:8080 \
-  --mcp-listen 127.0.0.1:8090 \
-  --webui-listen 127.0.0.1:8081
+  --listen 127.0.0.1:8090
 ```
 
 `serve --mcp` is the preferred service deployment mode for agents that support

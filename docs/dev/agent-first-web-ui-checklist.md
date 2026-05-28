@@ -474,5 +474,5 @@ Decision: keep `serve --webui` as the service flag for the first implementation.
 - [x] Verify the embedded binary serves the built React app.
 - [x] Verify dashboard health calls work with and without metrics enabled.
   - Compose Web UI service runs Vite on 5173 and proxies `/api`, `/healthz`,
-    and `/metrics` to the compose watcher/API service; verified collector
+    and `/metrics` to the compose watcher/app service on port 8090; verified collector
     coverage and metrics through the 5173 dev origin and allowed authproxy host.

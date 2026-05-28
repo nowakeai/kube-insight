@@ -38,7 +38,7 @@ make clickhouse-down
 
 For a containerized local dev loop, use the compose file instead of running the
 watcher on the host. This is also the default backend for Web UI/frontend
-development, so the compose Web UI service proxies to the compose watcher/API
+development, so the compose Web UI service proxies to the compose watcher/app
 instead of requiring a separate host `kube-insight serve` process:
 
 ```bash
@@ -54,8 +54,8 @@ The compose workflow starts three services:
   `docker/clickhouse-dev/config.d/system-logs.xml` so ClickHouse diagnostic
   system logs use a 1-day TTL in the dev environment.
 - `watcher`, built from `docker/dev-watcher.Dockerfile`, running
-  `serve --watch --api --api-listen 0.0.0.0:8080 --metrics
-  --metrics-listen 0.0.0.0:9090` against the ClickHouse service name.
+  `serve --watch --app --metrics --listen 0.0.0.0:8090` against the
+  ClickHouse service name.
 - `web`, built from `docker/dev-web.Dockerfile`, running Vite on
   `127.0.0.1:5173` and proxying API and metrics requests to the compose
   `watcher` service.
@@ -273,7 +273,7 @@ Primary MVP signals:
 ## 8. Scrape Metrics
 
 ```bash
-curl http://127.0.0.1:9090/metrics | rg \
+curl http://127.0.0.1:8090/metrics | rg \
   'kube_insight_storage_(compression_ratio|compressed_bytes_per_row)|clickhouse_(compressed|uncompressed|proof_compressed|derived_compressed)'
 ```
 

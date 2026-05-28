@@ -116,6 +116,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
+func (s *Server) MountHTTP(mux *http.ServeMux) {
+	mux.Handle("/api/", s)
+}
+
 func (s *Server) Close() error {
 	s.cancelAgentRuns()
 	s.waitAgentRuns(agentRunShutdownWait)

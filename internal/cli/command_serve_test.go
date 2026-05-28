@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -21,14 +23,13 @@ func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{
 		"serve [RESOURCE_PATTERN ...]",
+		"--app",
+		"--listen",
 		"--watch",
 		"--api",
 		"--mcp",
 		"--webui",
 		"--metrics",
-		"--api-listen",
-		"--mcp-listen",
-		"--webui-listen",
 		"--metrics-listen",
 		"kube-insight serve mcp",
 	} {
@@ -69,6 +70,69 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 	cfg.Storage.Driver = "sqlite"
 	if got := serviceStorageTarget(cfg, "custom.db"); got != "custom.db" {
 		t.Fatalf("sqlite target = %q", got)
+	}
+}
+
+func TestBuildServeSelectionAppEnablesAgentSurfaces(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("app", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("listen", "127.0.0.1:19090"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{App: true, AppListen: "127.0.0.1:19090"})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if !selection.App || !selection.API || !selection.MCP || !selection.WebUI {
+		t.Fatalf("app selection = app %v api %v mcp %v webui %v, want all true", selection.App, selection.API, selection.MCP, selection.WebUI)
+	}
+	if selection.AppListen != "127.0.0.1:19090" || selection.APIListen != "127.0.0.1:19090" || selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
+		t.Fatalf("app listen = app %q api %q mcp %q webui %q, want shared override", selection.AppListen, selection.APIListen, selection.MCPListen, selection.WebUIListen)
+	}
+}
+
+func TestBuildServeSelectionDefaultsWebUIToMCPListen(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("webui", "true"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{WebUI: true})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if selection.WebUIListen != selection.MCPListen || selection.WebUIListen != "127.0.0.1:8090" {
+		t.Fatalf("webui listen = %q, mcp listen = %q; want shared 127.0.0.1:8090", selection.WebUIListen, selection.MCPListen)
+	}
+}
+
+func TestBuildServeSelectionMCPListenOverrideMovesDefaultWebUI(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("mcp", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("webui", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("mcp-listen", "127.0.0.1:19090"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{MCP: true, WebUI: true, MCPListen: "127.0.0.1:19090"})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
+		t.Fatalf("mcp/webui listen = %q/%q, want shared override", selection.MCPListen, selection.WebUIListen)
 	}
 }
 
@@ -120,5 +184,51 @@ func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	}
 	if opts.AgentRetentionInterval != time.Duration(cfg.Server.AgentRetention.IntervalSeconds)*time.Second || !opts.AgentRetentionRunOnStart {
 		t.Fatalf("agent retention options = interval %s runOnStart %v", opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
+	}
+}
+
+func TestWebUIProxiesAPIRoutesToAPIListener(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/server/info" {
+			t.Fatalf("proxied path = %q, want /api/v1/server/info", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(apiServer.Close)
+	apiListen := strings.TrimPrefix(apiServer.URL, "http://")
+
+	handler, err := reverseProxyForListen(apiListen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/info", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"ok":true`) {
+		t.Fatalf("body = %q, want proxied api response", recorder.Body.String())
+	}
+}
+
+func TestLocalHTTPURLForListenNormalizesWildcardHosts(t *testing.T) {
+	cases := map[string]string{
+		"127.0.0.1:8080": "http://127.0.0.1:8080",
+		":8080":          "http://127.0.0.1:8080",
+		"0.0.0.0:8080":   "http://127.0.0.1:8080",
+		"[::]:8080":      "http://127.0.0.1:8080",
+	}
+	for input, want := range cases {
+		got, err := localHTTPURLForListen(input)
+		if err != nil {
+			t.Fatalf("%q returned error: %v", input, err)
+		}
+		if got.String() != want {
+			t.Fatalf("%q = %q, want %q", input, got.String(), want)
+		}
 	}
 }

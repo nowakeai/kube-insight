@@ -52,7 +52,7 @@ Configuration shape:
 server:
   web:
     enabled: true
-    listen: 127.0.0.1:8081
+    listen: 127.0.0.1:8090
   chat:
     enabled: true
     provider: openai

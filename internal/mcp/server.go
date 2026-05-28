@@ -111,13 +111,7 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 	}
 	defer server.Close()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "streamable-http+sse"})
-	})
-	mux.Handle("/mcp", server.StreamableHTTPHandler(30*time.Minute))
-	mux.Handle("/sse", sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
-		return server.sdkServer
-	}, nil))
+	server.MountHTTP(mux)
 	httpServer := &http.Server{
 		Addr:              listen,
 		Handler:           mux,
@@ -145,6 +139,16 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 		}
 		return err
 	}
+}
+
+func (s *Server) MountHTTP(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeHTTPJSON(w, http.StatusOK, map[string]any{"ok": true, "transport": "streamable-http+sse"})
+	})
+	mux.Handle("/mcp", s.StreamableHTTPHandler(30*time.Minute))
+	mux.Handle("/sse", sdkmcp.NewSSEHandler(func(*http.Request) *sdkmcp.Server {
+		return s.sdkServer
+	}, nil))
 }
 
 func (s *Server) ServeStdio(ctx context.Context, in io.Reader, out io.Writer) error {

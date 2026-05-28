@@ -35,5 +35,8 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Smoke embedded Web UI
+        run: make web-embedded-smoke
+
       - name: Validate PoC fixtures
         run: make validate

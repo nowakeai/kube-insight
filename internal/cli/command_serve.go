@@ -41,11 +41,13 @@ type serveOptions struct {
 }
 
 type serveSelection struct {
+	App           bool
 	API           bool
 	MCP           bool
 	WebUI         bool
 	Metrics       bool
 	Watch         bool
+	AppListen     string
 	APIListen     string
 	MCPListen     string
 	WebUIListen   string
@@ -66,10 +68,10 @@ Examples:
   kube-insight serve --watch --api --mcp
 
 With no component flags, serve uses enabled services from the config file. The
-recommended local agent path is --app, which enables the API, MCP HTTP, and the
-embedded Web UI together. The shared app listener serves the Web UI at /, MCP
-Streamable HTTP at /mcp, and legacy SDK SSE at /sse. Use "kube-insight serve mcp"
-only for stdio MCP.`,
+recommended local agent path is --app, which enables API, MCP HTTP, and the
+embedded Web UI on one listener. The app listener serves the Web UI at /, API at
+/api/v1/*, MCP Streamable HTTP at /mcp, and legacy SDK SSE at /sse. Use
+"kube-insight serve mcp" only for stdio MCP.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runServeCommand(ctx, stdout, stderr, state, cmd, args, opts)
@@ -81,7 +83,7 @@ only for stdio MCP.`,
 	cmd.Flags().BoolVar(&opts.MCP, "mcp", false, "Run only the HTTP MCP server, or add MCP to a custom component set")
 	cmd.Flags().BoolVar(&opts.WebUI, "webui", false, "Run only the embedded Web UI, or add Web UI to a custom component set")
 	cmd.Flags().BoolVar(&opts.Metrics, "metrics", false, "Run the Prometheus metrics server at /metrics")
-	cmd.Flags().StringVar(&opts.AppListen, "listen", "", "Shared MCP/Web UI listen address for --app; defaults to 127.0.0.1:8090")
+	cmd.Flags().StringVar(&opts.AppListen, "listen", "", "App listen address for --app; defaults to 127.0.0.1:8090")
 	cmd.Flags().StringVar(&opts.APIListen, "api-listen", "", "API listen address; defaults to server.api.listen")
 	cmd.Flags().StringVar(&opts.MCPListen, "mcp-listen", "", "MCP HTTP listen address; defaults to mcp.listen")
 	cmd.Flags().StringVar(&opts.WebUIListen, "webui-listen", "", "Web UI listen address; defaults to the MCP HTTP listen address")
@@ -90,6 +92,7 @@ only for stdio MCP.`,
 	cmd.Flags().IntVar(&opts.WatchOpts.MaxRetries, "retries", -1, "Maximum watch retries; -1 retries forever")
 	cmd.Flags().DurationVar(&opts.WatchOpts.Timeout, "timeout", 0, "Watch timeout; 0 runs until interrupted")
 	addOutputFlag(cmd, &opts.Output, outputTable)
+	_ = cmd.Flags().MarkHidden("api-listen")
 	_ = cmd.Flags().MarkHidden("mcp-listen")
 	_ = cmd.Flags().MarkHidden("webui-listen")
 	cmd.AddCommand(serveAPICommand(ctx, stdout, stderr, state))
@@ -142,6 +145,45 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		}()
 	}
 	services := []serveStatusRow{}
+	if selection.App {
+		addr := selection.AppListen
+		logger.Info("serving app", "listen", addr)
+		services = append(services, serveStatusRow{"app", "serving", "http://" + addr})
+		services = append(services, serveStatusRow{"api", "serving", "http://" + addr + "/api/v1"})
+		services = append(services, serveStatusRow{"mcp", "serving", "http://" + addr + "/mcp"})
+		if selection.Metrics {
+			services = append(services, serveStatusRow{"metrics", "serving", "http://" + addr + "/metrics"})
+		}
+		if selection.Watch {
+			services = append(services, serveStatusRow{"watch", "running", watchTargetText(resourceArgs)})
+			watchOpts := opts.WatchOpts
+			start("watch", func() error {
+				return runWatchResourcesCommand(serviceCtx, stdout, stderr, state, cmd, resourceArgs, watchOpts, "serve --watch")
+			})
+		}
+		start("app", func() error {
+			return serveApp(serviceCtx, addr, appServerOptions{
+				API:           apiServerOptions(rt.Config, dbPath, selection),
+				MCP:           mcpServerOptions(rt.Config, dbPath),
+				Metrics:       metricsServerOptions(rt.Config, dbPath),
+				EnableMetrics: selection.Metrics,
+			})
+		})
+		if err := writeServeStatus(stdout, opts.Output, storageTarget, services); err != nil {
+			return err
+		}
+		go func() {
+			wg.Wait()
+			close(errCh)
+		}()
+		for err := range errCh {
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	sharedMCPWebUI := selection.MCP && selection.WebUI && selection.MCPListen == selection.WebUIListen
 	if selection.API {
 		addr := selection.APIListen
@@ -217,12 +259,14 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 	flagMode := serveFlagChanged(cmd) || serveConfiguredByEnv()
 	out := serveSelection{}
 	if flagMode {
+		out.App = opts.App
 		out.API = opts.App || opts.API || rt.Config.Server.API.Enabled
 		out.MCP = opts.App || opts.MCP || rt.Config.MCP.Enabled
 		out.WebUI = opts.App || opts.WebUI || rt.Config.Server.Web.Enabled
 		out.Metrics = opts.Metrics || rt.Config.Server.Metrics.Enabled
 		out.Watch = opts.Watch || (!cmd.Flags().Changed("watch") && envIsSet("KUBE_INSIGHT_COLLECTION_ENABLED") && rt.Config.Collection.Enabled)
 	} else if rt.ConfigProvided {
+		out.App = false
 		out.API = rt.Config.Server.API.Enabled
 		out.MCP = rt.Config.MCP.Enabled
 		out.WebUI = rt.Config.Server.Web.Enabled
@@ -231,17 +275,37 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 	} else {
 		return out, false
 	}
-	out.APIListen = firstNonEmpty(opts.APIListen, rt.Config.Server.API.Listen, "127.0.0.1:8080")
-	out.MCPListen = firstNonEmpty(opts.AppListen, opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
+	out.AppListen = firstNonEmpty(opts.AppListen, opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
+	out.MCPListen = out.AppListen
+	if !out.App {
+		out.MCPListen = firstNonEmpty(opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
+	}
+	out.APIListen = firstNonEmpty(opts.APIListen)
+	if out.APIListen == "" {
+		if out.App {
+			out.APIListen = out.AppListen
+		} else {
+			out.APIListen = firstNonEmpty(rt.Config.Server.API.Listen, "127.0.0.1:8080")
+		}
+	}
 	out.WebUIListen = firstNonEmpty(opts.WebUIListen)
 	if out.WebUIListen == "" {
-		if opts.AppListen != "" || cmd.Flags().Changed("mcp-listen") {
+		if out.App {
+			out.WebUIListen = out.AppListen
+		} else if cmd.Flags().Changed("mcp-listen") {
 			out.WebUIListen = out.MCPListen
 		} else {
 			out.WebUIListen = firstNonEmpty(rt.Config.Server.Web.Listen, out.MCPListen, "127.0.0.1:8090")
 		}
 	}
-	out.MetricsListen = firstNonEmpty(opts.MetricsListen, rt.Config.Server.Metrics.Listen, "127.0.0.1:9090")
+	out.MetricsListen = firstNonEmpty(opts.MetricsListen)
+	if out.MetricsListen == "" {
+		if out.App && out.Metrics {
+			out.MetricsListen = out.AppListen
+		} else {
+			out.MetricsListen = firstNonEmpty(rt.Config.Server.Metrics.Listen, "127.0.0.1:9090")
+		}
+	}
 	return out, out.API || out.MCP || out.WebUI || out.Metrics || out.Watch
 }
 
@@ -296,6 +360,41 @@ func envIsSet(name string) bool {
 type webUIProxyTargets struct {
 	APIListen     string
 	MetricsListen string
+}
+
+type appServerOptions struct {
+	API           api.ServerOptions
+	MCP           mcp.ServerOptions
+	Metrics       metrics.ServerOptions
+	EnableMetrics bool
+}
+
+func serveApp(ctx context.Context, listen string, opts appServerOptions) error {
+	if listen == "" {
+		listen = "127.0.0.1:8090"
+	}
+	apiServer, err := api.NewServer(opts.API)
+	if err != nil {
+		return err
+	}
+	defer apiServer.Close()
+	mcpServer, err := mcp.NewServer(opts.MCP)
+	if err != nil {
+		return err
+	}
+	defer mcpServer.Close()
+	mux := http.NewServeMux()
+	apiServer.MountHTTP(mux)
+	mcpServer.MountHTTP(mux)
+	if opts.EnableMetrics {
+		metricsServer, err := metrics.NewServer(opts.Metrics)
+		if err != nil {
+			return err
+		}
+		metricsServer.MountHTTP(mux)
+	}
+	mux.Handle("/", webui.Handler())
+	return listenAndServeHTTP(ctx, listen, mux)
 }
 
 func serveMCPAndWebUI(ctx context.Context, listen string, mcpOpts mcp.ServerOptions, proxyTargets webUIProxyTargets) error {

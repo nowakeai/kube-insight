@@ -30,7 +30,6 @@ func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
 		"--mcp",
 		"--webui",
 		"--metrics",
-		"--api-listen",
 		"--metrics-listen",
 		"kube-insight serve mcp",
 	} {
@@ -89,11 +88,11 @@ func TestBuildServeSelectionAppEnablesAgentSurfaces(t *testing.T) {
 	if !ok {
 		t.Fatal("serve selection was not enabled")
 	}
-	if !selection.API || !selection.MCP || !selection.WebUI {
-		t.Fatalf("app selection = api %v mcp %v webui %v, want all true", selection.API, selection.MCP, selection.WebUI)
+	if !selection.App || !selection.API || !selection.MCP || !selection.WebUI {
+		t.Fatalf("app selection = app %v api %v mcp %v webui %v, want all true", selection.App, selection.API, selection.MCP, selection.WebUI)
 	}
-	if selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
-		t.Fatalf("app listen = mcp %q webui %q, want shared override", selection.MCPListen, selection.WebUIListen)
+	if selection.AppListen != "127.0.0.1:19090" || selection.APIListen != "127.0.0.1:19090" || selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
+		t.Fatalf("app listen = app %q api %q mcp %q webui %q, want shared override", selection.AppListen, selection.APIListen, selection.MCPListen, selection.WebUIListen)
 	}
 }
 

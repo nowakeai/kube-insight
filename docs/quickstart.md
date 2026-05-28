@@ -179,10 +179,13 @@ content versions while keeping every observation timestamp:
 
 ## Service Mode
 
-For a local all-in-one service process, run watcher plus read surfaces together:
+For a local all-in-one service process, run watcher plus read surfaces together.
+Release binaries embed the prebuilt React Web UI into the `kube-insight`
+binary, so using the UI does not require a separate frontend checkout or Node.js
+runtime:
 
 ```bash
-./kube-insight serve --watch --api --mcp --db kubeinsight.db
+./kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
 ```
 
 The combined command supports these components:
@@ -193,6 +196,10 @@ The combined command supports these components:
 - `--webui`: embedded Web UI listener for the React app built from `web/`.
   The first formal UI milestone is the agent-first chat surface described in
   [Agent-First Web UI Design](product/agent-first-web-ui.md).
+
+Open the Web UI at <http://127.0.0.1:8081>. When `--api` is enabled in the same
+process, the Web UI listener proxies `/api/*` to the API listener, so browser
+requests stay same-origin from the UI.
 
 Example with all service surfaces:
 

@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"sync"
 	"time"
@@ -153,7 +156,10 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		logger.Info("serving webui", "listen", addr)
 		services = append(services, serveStatusRow{"webui", "serving", "http://" + addr})
 		start("webui", func() error {
-			return serveWebUI(serviceCtx, addr)
+			return serveWebUI(serviceCtx, addr, webUIProxyTargets{
+				APIListen:     listenIfEnabled(selection.API, selection.APIListen),
+				MetricsListen: listenIfEnabled(selection.Metrics, selection.MetricsListen),
+			})
 		})
 	}
 	if selection.Metrics {
@@ -259,7 +265,12 @@ func envIsSet(name string) bool {
 	return ok
 }
 
-func serveWebUI(ctx context.Context, listen string) error {
+type webUIProxyTargets struct {
+	APIListen     string
+	MetricsListen string
+}
+
+func serveWebUI(ctx context.Context, listen string, proxyTargets webUIProxyTargets) error {
 	if listen == "" {
 		listen = "127.0.0.1:8081"
 	}
@@ -267,7 +278,21 @@ func serveWebUI(ctx context.Context, listen string) error {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writePlain(w, http.StatusOK, "ok\n")
 	})
-	mux.Handle("GET /", webui.Handler())
+	if proxyTargets.APIListen != "" {
+		proxy, err := reverseProxyForListen(proxyTargets.APIListen)
+		if err != nil {
+			return fmt.Errorf("webui api proxy: %w", err)
+		}
+		mux.Handle("/api/", proxy)
+	}
+	if proxyTargets.MetricsListen != "" {
+		proxy, err := reverseProxyForListen(proxyTargets.MetricsListen)
+		if err != nil {
+			return fmt.Errorf("webui metrics proxy: %w", err)
+		}
+		mux.Handle("/metrics", proxy)
+	}
+	mux.Handle("/", webui.Handler())
 	server := &http.Server{
 		Addr:              listen,
 		Handler:           mux,
@@ -295,6 +320,32 @@ func serveWebUI(ctx context.Context, listen string) error {
 		}
 		return err
 	}
+}
+
+func listenIfEnabled(enabled bool, listen string) string {
+	if !enabled {
+		return ""
+	}
+	return listen
+}
+
+func reverseProxyForListen(listen string) (http.Handler, error) {
+	target, err := localHTTPURLForListen(listen)
+	if err != nil {
+		return nil, err
+	}
+	return httputil.NewSingleHostReverseProxy(target), nil
+}
+
+func localHTTPURLForListen(listen string) (*url.URL, error) {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return nil, fmt.Errorf("invalid listen address %q: %w", listen, err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	return &url.URL{Scheme: "http", Host: net.JoinHostPort(host, port)}, nil
 }
 
 type serveStatusRow struct {

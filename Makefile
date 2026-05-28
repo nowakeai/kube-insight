@@ -1,4 +1,4 @@
-.PHONY: test check-lines web-deps web-build web-lint build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-logs-web dev-compose-logs-watcher dev-compose-logs-clickhouse dev-compose-rebuild-web dev-compose-rebuild-watcher dev-compose-ps open-source-check demo fmt tidy clean
+.PHONY: test check-lines web-deps web-build web-lint web-embedded-smoke build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-logs-web dev-compose-logs-watcher dev-compose-logs-clickhouse dev-compose-rebuild-web dev-compose-rebuild-watcher dev-compose-ps open-source-check demo fmt tidy clean
 
 -include .env
 
@@ -50,6 +50,9 @@ web-build: web-deps
 
 web-lint: web-deps
 	npm --prefix $(WEB_DIR) run lint
+
+web-embedded-smoke: build
+	./scripts/webui-embedded-smoke.sh
 
 build: web-build
 	mkdir -p $(dir $(BIN))

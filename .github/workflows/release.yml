@@ -97,6 +97,7 @@ jobs:
             echo
             printf -- '- Default archives: Linux, macOS, and Windows amd64; Linux and macOS arm64.\n'
             printf -- '- chDB archives: Linux and macOS amd64/arm64, each bundled with the matching `libchdb.so` runtime.\n'
+            printf -- '- Embedded Web UI: release binaries include the prebuilt React app; run `kube-insight serve --api --webui` and open the Web UI listener.\n'
             printf -- '- Container images: `ghcr.io/%s:%s` and `ghcr.io/%s:%s-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
             printf -- '- Convenience tags: `ghcr.io/%s:latest` and `ghcr.io/%s:latest-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REPOSITORY}"
           } >> RELEASE_NOTES.md

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -120,5 +122,51 @@ func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	}
 	if opts.AgentRetentionInterval != time.Duration(cfg.Server.AgentRetention.IntervalSeconds)*time.Second || !opts.AgentRetentionRunOnStart {
 		t.Fatalf("agent retention options = interval %s runOnStart %v", opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
+	}
+}
+
+func TestWebUIProxiesAPIRoutesToAPIListener(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/server/info" {
+			t.Fatalf("proxied path = %q, want /api/v1/server/info", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(apiServer.Close)
+	apiListen := strings.TrimPrefix(apiServer.URL, "http://")
+
+	handler, err := reverseProxyForListen(apiListen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/server/info", nil)
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"ok":true`) {
+		t.Fatalf("body = %q, want proxied api response", recorder.Body.String())
+	}
+}
+
+func TestLocalHTTPURLForListenNormalizesWildcardHosts(t *testing.T) {
+	cases := map[string]string{
+		"127.0.0.1:8080": "http://127.0.0.1:8080",
+		":8080":          "http://127.0.0.1:8080",
+		"0.0.0.0:8080":   "http://127.0.0.1:8080",
+		"[::]:8080":      "http://127.0.0.1:8080",
+	}
+	for input, want := range cases {
+		got, err := localHTTPURLForListen(input)
+		if err != nil {
+			t.Fatalf("%q returned error: %v", input, err)
+		}
+		if got.String() != want {
+			t.Fatalf("%q = %q, want %q", input, got.String(), want)
+		}
 	}
 }

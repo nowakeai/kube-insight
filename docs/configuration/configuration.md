@@ -264,7 +264,7 @@ Kube-insight supports these operational shapes:
 | Metrics only | `kube-insight serve --metrics` | no | Prometheus `/metrics` | Scrape storage, filter, and watch health metrics |
 | MCP stdio | `kube-insight serve mcp` | no | stdio MCP | Local agent process launch |
 | MCP HTTP | `kube-insight serve --mcp` | no | Streamable HTTP `/mcp`, legacy SSE `/sse` | Long-running service deployment |
-| Web UI | `kube-insight serve --webui` | no | HTTP Web UI | Future human UI surface |
+| Web UI | `kube-insight serve --webui` | no | Embedded HTTP Web UI | Agent chat and dashboard surface |
 | All-in-one local | `kube-insight serve --watch --api --mcp --metrics --webui` | yes | HTTP API, HTTP MCP, Metrics, Web UI | Local PoC or small single-instance deployment |
 | Split production | one `--watch` writer plus N `--api/--mcp/--metrics/--webui` readers | writer only | readers only | HA/scale-out with one writer owner |
 
@@ -391,6 +391,11 @@ kube-insight serve --api --mcp --webui \
   --metrics-listen 0.0.0.0:9090 \
   --webui-listen 0.0.0.0:8081
 ```
+
+Release binaries embed the built Web UI assets. Open the UI at the configured
+`--webui-listen` address, for example <http://127.0.0.1:8081>. When `--api` or
+`--metrics` are enabled in the same process, the Web UI listener proxies `/api/*`
+and `/metrics` to those listeners so browser requests stay same-origin.
 
 Metrics are exposed in Prometheus text format at `/metrics`. The metrics server
 uses the official Prometheus Go client and currently exports storage row counts,

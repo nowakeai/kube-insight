@@ -194,7 +194,7 @@ The combined command supports these components:
   The first formal UI milestone is the agent-first chat surface described in
   [Agent-First Web UI Design](product/agent-first-web-ui.md).
 
-Example with all current and planned service surfaces:
+Example with all service surfaces:
 
 ```bash
 ./kube-insight serve --watch --api --mcp --webui \
@@ -284,7 +284,10 @@ MCP currently exposes:
 - `kube_insight_schema`
 - `kube_insight_sql`
 - `kube_insight_health`
+- `kube_insight_search`
 - `kube_insight_history`
+- `kube_insight_topology`
+- `kube_insight_service_investigation`
 
 It also exposes prompts for common agent workflows:
 

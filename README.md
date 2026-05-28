@@ -235,8 +235,14 @@ MCP tools:
 - `kube_insight_sql`: read-only `SELECT`, `WITH`, and `EXPLAIN` queries for the
   configured backend.
 - `kube_insight_health`: collector coverage, staleness, and resource errors.
+- `kube_insight_search`: candidate discovery from symptoms, names, labels,
+  statuses, facts, changes, retained documents, and indexed evidence.
 - `kube_insight_history`: retained versions, observations, and diffs for one
   object.
+- `kube_insight_topology`: related objects and topology edges around one chosen
+  root object.
+- `kube_insight_service_investigation`: compact Service investigation bundles
+  for exact Service namespace/name targets.
 
 MCP prompts:
 
@@ -283,13 +289,15 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Documentation
 
+- [Product brief](docs/requirements/product-brief.md)
 - [Quickstart](docs/quickstart.md)
+- [Full documentation index](docs/README.md)
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)
+- [Storage modes and performance](docs/validation/storage-mode-comparison.md)
 - [Roadmap](docs/roadmap/roadmap.md)
 - [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
 - [kube-insight agent skill](kube-insight-skill/SKILL.md)
-- [Storage modes and performance](docs/validation/storage-mode-comparison.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
@@ -297,7 +305,6 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Maintainers](MAINTAINERS.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Release process](RELEASE.md)
-- [Full documentation index](docs/README.md)
 
 ## Roadmap
 

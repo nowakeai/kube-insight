@@ -12,7 +12,7 @@ storage-efficiency metrics, and low-cost cold object-storage tiering experiments
 Use a version from the [release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
-KI_VERSION=0.1.1
+KI_VERSION=0.1.2
 KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 KI_ARCH="$(uname -m)"
 case "${KI_ARCH}" in

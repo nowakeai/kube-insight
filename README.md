@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="680">
 </p>
@@ -203,17 +205,9 @@ history examples.
 
 ## Built-in Agent Demo
 
-<!--
-Replace this placeholder with the GitHub user-attachments `.mp4` URL after
-recording. Recommended prompt for the first demo:
-"Did the gcp cluster 2 node pool change in the last 3 days? Use retained
-history and SQL aggregation to show added/deleted node counts, current node
-types, and total CPU and memory capacity. Cite the evidence."
 
-This shows the advantage over live kubectl: the agent reconstructs retained Node
-lifecycle history, resolves a human cluster name, runs SQL-backed aggregation,
-and combines historical churn with current capacity.
--->
+https://github.com/user-attachments/assets/dc847c9f-5bd9-4f50-a06b-8424ebb4a3bb
+
 
 > Built-in agent demo video placeholder: explain whether the `gcp cluster 2`
 > node pool changed in the last 3 days, using retained history, SQL aggregation,

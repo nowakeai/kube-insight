@@ -38,12 +38,72 @@ operational notes, and design details in `docs/`.
   more behavior.
 - Preserve user changes. Do not revert unrelated dirty worktree changes.
 - Update docs alongside behavior changes.
+- During development or testing, if you discover a durable workflow rule,
+  constraint, validation prerequisite, or recurring pitfall, update this file
+  or the appropriate `docs/` page in the same change. Do not leave durable
+  process knowledge only in chat history or local scratch notes.
+- When the user proposes conceptual agent/product direction, preserve the intent
+  instead of turning examples into rigid bans. For external skill and black-box
+  agent tests, model realistic user environments where kube-insight works
+  alongside tools such as `kubectl`, port-forwarding, shell, Python, and cloud
+  CLIs; the goal is to prove kube-insight improves AIOps with retained history
+  and aggregation, not to exclude complementary tools.
+- For Web UI or frontend development, use the Docker compose dev environment
+  (`make dev-compose-up-detached`) instead of starting another host
+  `kube-insight serve` process or a host Vite dev server. Compose owns the
+  ClickHouse, watcher/API, metrics, and Web UI services; use the compose Web UI
+  for Vite reloads and rebuild/recreate compose services after backend changes.
+  Start a separate host `serve` only for pure backend tests or isolated smoke
+  scripts, and stop it when the test is done.
 - Prefer configuration, rule tables, and data-driven registries over hardcoded
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.
+- Agent investigation efficiency is a product constraint. For broad symptom,
+  health, topology, or recent-change prompts, prefer time-scoped exact facts,
+  changes, and edges before raw JSON/document scans; pass absolute time bounds
+  from client context for relative-time prompts; avoid repeated broad searches
+  without kind/namespace/cluster/time filters.
+- Optimize agent speed with prompt/tool contracts and real-case evaluation
+  before adding large precomputed context caches. If a subagent such as the
+  evidence condenser is used, pass artifact IDs/titles and concrete row or
+  snippet excerpts so the secondary model remains evidence-bound.
+- For built-in agent behavior fixes, prefer improving the prompt harness, tool
+  descriptions, evaluation cases, and documented tool-use contracts before
+  adding code-side hacks or hidden rewrites. Code guardrails are acceptable for
+  safety, validation, or deterministic product semantics, but they should not
+  teach the model the wrong workflow or silently compensate for avoidable prompt
+  failures.
+- When tuning built-in agent prompts, tool budgets, context replay, retry
+  semantics, subagent behavior, or discovering generic agent usage lessons,
+  carry durable guidance into `kube-insight-skill/SKILL.md` or
+  `kube-insight-skill/references/` so users who do not use the built-in agent can
+  still get the best kube-insight results.
+- Agent answers should prefer human-readable cluster context/display names when
+  available, while still including stable cluster IDs for exact evidence binding.
+  Tool/SQL arguments remain UTC, but final user-facing timestamps should be
+  rendered in the browser/client time zone when the Web UI provides it.
+- Web UI retry is rewind semantics, not append semantics. A retry run must
+  replace the retried run and truncate later runs in that branch in the session
+  projection. Any change to session/run projection or retry UI must keep the
+  retry branch tests passing.
 - Keep compression, delta logic, and retention policy above storage backends so
   SQLite/chDB/ClickHouse and any SQL compatibility backends can share the same
   product semantics.
+- Web UI retry actions must preserve checkpoint semantics. A retry must either
+  call the retry endpoint or create a replacement run with `retryOfRunId`
+  metadata when the original run has already been removed; it must not silently
+  fall back to a plain appended message.
+- Agent retention is server-owned and should run periodically from the API
+  server. Do not prune unreferenced artifact events from in-progress runs;
+  citations can arrive after artifacts during a live agent loop.
+- Agent run lifecycle recovery is server-owned. Persisted `queued` or `running`
+  runs from a previous API process should be transitioned with normal lifecycle
+  events on startup; do not leave durable session state claiming work is active
+  when no current process owns that execution.
+- The built-in agent's private MCP client/server session must not idle-timeout
+  under normal API server operation. The external `/mcp` HTTP surface may keep a
+  bounded session timeout, but the in-process agent should not hold a stale MCP
+  client that later fails tool calls after the LLM response succeeds.
 
 ## Dependency Preferences
 

@@ -28,6 +28,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build embedded web assets
+        run: make web-build
+
       - name: Prepare release notes
         run: mkdir -p dist
 

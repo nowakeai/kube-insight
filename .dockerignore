@@ -17,3 +17,4 @@ compose.dev.local.yaml
 *.chdb/
 *.chdb-shm
 *.chdb-wal
+web/node_modules/

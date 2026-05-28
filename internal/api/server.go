@@ -8,32 +8,54 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"kube-insight/internal/agent"
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/sqlite"
 )
 
 type ServerOptions struct {
-	DBPath        string
-	OpenStore     StoreOpener
-	KeepStoreOpen bool
-	Close         func() error
+	DBPath                   string
+	OpenStore                StoreOpener
+	KeepStoreOpen            bool
+	Close                    func() error
+	AgentStore               agent.Store
+	AgentRunner              AgentRunner
+	AgentRetentionInterval   time.Duration
+	AgentRetentionRunOnStart bool
+	ServerInfo               ServerInfo
 }
 
 type StoreOpener func(context.Context) (ReadStore, error)
+
+type AgentRunner interface {
+	Run(context.Context, agent.EinoRunInput) (agent.EinoRunResult, error)
+}
 
 type ReadStore interface {
 	Close() error
 }
 
 type Server struct {
-	dbPath              string
-	openStore           StoreOpener
-	closeStoreOnRequest bool
-	closeFunc           func() error
-	mux                 *http.ServeMux
+	dbPath               string
+	openStore            StoreOpener
+	closeStoreOnRequest  bool
+	closeFunc            func() error
+	agentStore           agent.Store
+	agentRunner          AgentRunner
+	agentRunMu           sync.Mutex
+	agentRunCancels      map[string]context.CancelFunc
+	agentRunWG           sync.WaitGroup
+	agentRetentionMu     sync.Mutex
+	agentRetentionCancel context.CancelFunc
+	agentRetentionDone   chan struct{}
+	serverInfo           ServerInfo
+	mux                  *http.ServeMux
 }
+
+const agentRunShutdownWait = 5 * time.Second
 
 type sqlRequest struct {
 	SQL     string `json:"sql"`
@@ -52,8 +74,23 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		}
 		openStore = sqliteStoreOpener(opts.DBPath)
 	}
-	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: opts.Close, mux: http.NewServeMux()}
+	agentStore := opts.AgentStore
+	closeFunc := opts.Close
+	if agentStore == nil && opts.DBPath != "" {
+		persistentAgentStore, err := sqlite.Open(opts.DBPath)
+		if err != nil {
+			return nil, err
+		}
+		agentStore = persistentAgentStore
+		closeFunc = joinClose(closeFunc, persistentAgentStore.Close)
+	}
+	if agentStore == nil {
+		agentStore = agent.NewMemoryStore()
+	}
+	s := &Server{dbPath: opts.DBPath, openStore: openStore, closeStoreOnRequest: !opts.KeepStoreOpen, closeFunc: closeFunc, agentStore: agentStore, agentRunner: opts.AgentRunner, agentRunCancels: map[string]context.CancelFunc{}, serverInfo: normalizeServerInfo(opts.ServerInfo, opts.DBPath), mux: http.NewServeMux()}
 	s.routes()
+	s.recoverInterruptedAgentRuns(context.Background())
+	s.startAgentRetentionLoop(opts.AgentRetentionInterval, opts.AgentRetentionRunOnStart)
 	return s, nil
 }
 
@@ -63,11 +100,26 @@ func sqliteStoreOpener(path string) StoreOpener {
 	}
 }
 
+func joinClose(first, second func() error) func() error {
+	if first == nil {
+		return second
+	}
+	if second == nil {
+		return first
+	}
+	return func() error {
+		return errors.Join(first(), second())
+	}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
 func (s *Server) Close() error {
+	s.cancelAgentRuns()
+	s.waitAgentRuns(agentRunShutdownWait)
+	s.stopAgentRetentionLoop()
 	if s.closeFunc == nil {
 		return nil
 	}
@@ -83,16 +135,34 @@ func (s *Server) closeReadStore(store ReadStore) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
 	s.mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
+	s.mux.HandleFunc("GET /api/v1/storage/stats", s.handleStorageStats)
+	s.mux.HandleFunc("GET /api/v1/server/info", s.handleServerInfo)
 	s.mux.HandleFunc("POST /api/v1/sql", s.handleSQL)
 	s.mux.HandleFunc("GET /api/v1/health", s.handleResourceHealth)
 	s.mux.HandleFunc("GET /api/v1/history", s.handleHistory)
 	s.mux.HandleFunc("GET /api/v1/search", s.handleSearch)
 	s.mux.HandleFunc("GET /api/v1/services/{namespace}/{name}/investigation", s.handleServiceInvestigation)
 	s.mux.HandleFunc("GET /api/v1/topology", s.handleTopology)
+	s.mux.HandleFunc("POST /api/v1/agent/retention/compact", s.handleCompactAgentRetention)
+	s.mux.HandleFunc("POST /api/v1/agent/sessions", s.handleCreateAgentSession)
+	s.mux.HandleFunc("GET /api/v1/agent/sessions", s.handleListAgentSessions)
+	s.mux.HandleFunc("GET /api/v1/agent/sessions/{session_id}", s.handleGetAgentSession)
+	s.mux.HandleFunc("DELETE /api/v1/agent/sessions/{session_id}", s.handleDeleteAgentSession)
+	s.mux.HandleFunc("POST /api/v1/agent/sessions/{session_id}/runs", s.handleCreateAgentRun)
+	s.mux.HandleFunc("GET /api/v1/agent/runs", s.handleListAgentRuns)
+	s.mux.HandleFunc("GET /api/v1/agent/runs/{run_id}/events", s.handleAgentRunEvents)
+	s.mux.HandleFunc("POST /api/v1/agent/runs/{run_id}/cancel", s.handleCancelAgentRun)
+	s.mux.HandleFunc("POST /api/v1/agent/runs/{run_id}/retry", s.handleRetryAgentRun)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleServerInfo(w http.ResponseWriter, r *http.Request) {
+	info := s.serverInfo
+	info.CheckedAt = time.Now().UTC()
+	writeJSON(w, http.StatusOK, info)
 }
 
 func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +235,11 @@ func (s *Server) handleResourceHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, report)
+	if resourceHealthDetail(r) == "full" {
+		writeJSON(w, http.StatusOK, report)
+		return
+	}
+	writeJSON(w, http.StatusOK, compactResourceHealthReport(report, compactResourceHealthLimit(r)))
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -300,6 +374,100 @@ func ListenAndServe(ctx context.Context, listen string, opts ServerOptions) erro
 		}
 		return err
 	}
+}
+
+type compactResourceHealthResponse struct {
+	CheckedAt        time.Time                      `json:"checkedAt"`
+	Detail           string                         `json:"detail"`
+	Summary          storage.ResourceHealthSummary  `json:"summary"`
+	ByStatus         map[string]int                 `json:"byStatus"`
+	Resources        []storage.ResourceHealthRecord `json:"resources"`
+	ResourcesOmitted int                            `json:"resourcesOmitted,omitempty"`
+}
+
+func compactResourceHealthReport(report storage.ResourceHealthReport, limit int) compactResourceHealthResponse {
+	if limit <= 0 {
+		limit = 10
+	}
+	resources := make([]storage.ResourceHealthRecord, 0, limit)
+	omitted := 0
+	for _, record := range report.Resources {
+		if !isProblemResourceHealthRecord(record) {
+			continue
+		}
+		if len(resources) >= limit {
+			omitted++
+			continue
+		}
+		resources = append(resources, compactResourceHealthRecord(record))
+	}
+	return compactResourceHealthResponse{
+		CheckedAt:        report.CheckedAt,
+		Detail:           "compact",
+		Summary:          report.Summary,
+		ByStatus:         report.ByStatus,
+		Resources:        resources,
+		ResourcesOmitted: omitted,
+	}
+}
+
+func resourceHealthDetail(r *http.Request) string {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("detail"))) {
+	case "full":
+		return "full"
+	default:
+		return "compact"
+	}
+}
+
+func compactResourceHealthLimit(r *http.Request) int {
+	value := strings.TrimSpace(r.URL.Query().Get("problemLimit"))
+	if value == "" {
+		value = strings.TrimSpace(r.URL.Query().Get("limit"))
+	}
+	if value == "" {
+		return 10
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit <= 0 {
+		return 10
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
+}
+
+func compactResourceHealthRecord(record storage.ResourceHealthRecord) storage.ResourceHealthRecord {
+	record.Error = oneLineLimit(record.Error, 180)
+	return record
+}
+
+func isProblemResourceHealthRecord(record storage.ResourceHealthRecord) bool {
+	if record.Error != "" || record.Stale || record.Skipped {
+		return true
+	}
+	switch record.Status {
+	case "watching", "bookmark", "queued":
+		return false
+	default:
+		return true
+	}
+}
+
+func oneLineLimit(value string, maxRunes int) string {
+	line := strings.Join(strings.Fields(value), " ")
+	if maxRunes <= 0 {
+		return line
+	}
+	runes := []rune(line)
+	if len(runes) <= maxRunes {
+		return line
+	}
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-1]) + "..."
 }
 
 func parseResourceHealthOptions(r *http.Request) (storage.ResourceHealthOptions, error) {

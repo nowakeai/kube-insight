@@ -1,0 +1,97 @@
+import { MessageSquareText, Plus, Trash2 } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import type { AgentRun, AgentSession } from "@/lib/agent-store"
+
+export function SessionSidebar({
+  activeSessionId,
+  disabled,
+  onNew,
+  onDelete,
+  onSelect,
+  runs,
+  sessionOrder,
+  sessions,
+}: {
+  activeSessionId?: string
+  disabled: boolean
+  onNew: () => void
+  onDelete: (sessionId: string) => void
+  onSelect: (sessionId: string) => void
+  runs: Record<string, AgentRun>
+  sessionOrder: string[]
+  sessions: Record<string, AgentSession>
+}) {
+  const visibleSessions = sessionOrder
+    .map((sessionId) => sessions[sessionId])
+    .filter((session): session is AgentSession => Boolean(session))
+
+  return (
+    <aside className="hidden min-h-0 border-r border-border/80 bg-card/60 lg:flex lg:flex-col" aria-label="Sessions">
+      <div className="border-b border-border/80 p-4">
+        <Button type="button" variant="outline" className="w-full justify-start" onClick={onNew} disabled={disabled}>
+          <Plus className="size-4" aria-hidden="true" />
+          New thread
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {visibleSessions.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border bg-background px-3 py-6 text-sm text-muted-foreground">
+            Sessions will appear here after the first run.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {visibleSessions.map((session) => {
+              const latestRunId = session.runIds.at(-1)
+              const latestRun = latestRunId ? runs[latestRunId] : undefined
+              const runCount = session.runCount ?? session.runIds.length
+              const selected = session.id === activeSessionId
+              return (
+                <div
+                  key={session.id}
+                  className={
+                    selected
+                      ? "group grid grid-cols-[minmax(0,1fr)_2rem] gap-1 rounded-md border border-border bg-background px-3 py-2 shadow-sm"
+                      : "group grid grid-cols-[minmax(0,1fr)_2rem] gap-1 rounded-md border border-transparent px-3 py-2 text-muted-foreground transition hover:border-border hover:bg-background hover:text-foreground"
+                  }
+                >
+                  <button type="button" className="min-w-0 text-left" onClick={() => onSelect(session.id)}>
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <MessageSquareText className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{session.title || "New investigation"}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between gap-2 text-[0.7rem] text-muted-foreground">
+                      <span>{latestRun ? runStatusLabel(latestRun.status) : "No runs"}</span>
+                      <span>{runCount} run{runCount === 1 ? "" : "s"}</span>
+                    </div>
+                  </button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8 opacity-70 transition group-hover:opacity-100"
+                    disabled={disabled}
+                    aria-label={`Delete ${session.title || "session"}`}
+                    onClick={() => onDelete(session.id)}
+                  >
+                    <Trash2 className="size-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </aside>
+  )
+}
+
+function runStatusLabel(status: string) {
+  if (status === "queued") return "queued"
+  if (status === "running") return "running"
+  if (status === "completed") return "completed"
+  if (status === "failed") return "failed"
+  if (status === "cancelled") return "cancelled"
+  if (status === "started") return "started"
+  return status
+}

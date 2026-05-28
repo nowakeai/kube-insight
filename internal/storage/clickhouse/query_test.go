@@ -288,6 +288,9 @@ func TestStoreQuerySQLReturnsStorageResult(t *testing.T) {
 	if !strings.Contains(body, "FORMAT JSON") {
 		t.Fatalf("query body = %s", body)
 	}
+	if !strings.Contains(body, "SELECT * FROM (") || !strings.Contains(body, "select name from versions") || !strings.Contains(body, ") LIMIT 2") {
+		t.Fatalf("query body did not enforce maxRows server-side: %s", body)
+	}
 	if !strings.Contains(rawQuery, "database=ki") {
 		t.Fatalf("raw query = %s", rawQuery)
 	}
@@ -296,6 +299,23 @@ func TestStoreQuerySQLReturnsStorageResult(t *testing.T) {
 	}
 	if result.Rows[0]["name"] != "api" {
 		t.Fatalf("rows = %#v", result.Rows)
+	}
+}
+
+func TestBoundedClickHouseQueryWrapsOnlyRowReturningQueries(t *testing.T) {
+	wrapped := boundedClickHouseQuery("with recent as (select * from versions) select * from recent;", 10)
+	if !strings.Contains(wrapped, "SELECT * FROM (") || !strings.Contains(wrapped, "with recent") || !strings.Contains(wrapped, ") LIMIT 11") || strings.Contains(wrapped, ";") {
+		t.Fatalf("wrapped query = %s", wrapped)
+	}
+
+	for _, query := range []string{
+		"EXPLAIN indexes = 1 SELECT * FROM facts",
+		"show tables",
+		"describe versions",
+	} {
+		if got := boundedClickHouseQuery(query, 10); got != query {
+			t.Fatalf("expected %q to stay unwrapped, got %q", query, got)
+		}
 	}
 }
 
@@ -356,5 +376,36 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 	}
 	if len(queries) != 2 || len(schema.Tables) != 1 || schema.Tables[0].Name != "versions" || schema.Tables[0].Columns[0].Name != "object_id" {
 		t.Fatalf("queries=%#v schema=%#v", queries, schema)
+	}
+	joinedNotes := strings.Join(schema.Notes, "\n")
+	for _, want := range []string{"facts.ts", "Prefer sorted columns", "kube_insight_js", "Do not use await", "JSONExtractRaw", "do not use JSONExtract without an explicit return type"} {
+		if !strings.Contains(joinedNotes, want) {
+			t.Fatalf("schema notes missing %q: %#v", want, schema.Notes)
+		}
+	}
+	var recipeNames string
+	for _, recipe := range schema.Recipes {
+		recipeNames += recipe.Name + "\n"
+	}
+	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "container_resource_allocation_rollup", "pod_resource_rows_for_js", "namespace_resource_delta_for_js", "pod_count_peak_intervals_for_js", "endpointslice_latest_for_js", "pvc_storage_history_for_js", "raw_doc_field_profile", "object_proof_after_candidate"} {
+		if !strings.Contains(recipeNames, want) {
+			t.Fatalf("schema recipes missing %q: %#v", want, schema.Recipes)
+		}
+	}
+	podIntervalRecipeIndex := -1
+	for i := range schema.Recipes {
+		if schema.Recipes[i].Name == "pod_count_peak_intervals_for_js" {
+			podIntervalRecipeIndex = i
+			break
+		}
+	}
+	if podIntervalRecipeIndex < 0 {
+		t.Fatal("missing pod_count_peak_intervals_for_js recipe")
+	}
+	podIntervalRecipe := schema.Recipes[podIntervalRecipeIndex]
+	for _, want := range []string{"per-UID intervals", "interval_start", "interval_end", "from_baseline", "baseline_observed_at", "(cluster_id, namespace, name, uid) not in", "limit 10000"} {
+		if !strings.Contains(podIntervalRecipe.Description+" "+podIntervalRecipe.SQL, want) {
+			t.Fatalf("pod interval recipe missing %q: %#v", want, podIntervalRecipe)
+		}
 	}
 }

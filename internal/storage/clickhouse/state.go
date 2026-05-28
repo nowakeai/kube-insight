@@ -313,8 +313,18 @@ func (s *Store) ResourceHealth(ctx context.Context, opts storage.ResourceHealthO
 
 func (s *Store) resourceHealthOffsets(ctx context.Context, clusterID string) ([]storage.ResourceHealthRecord, error) {
 	query := fmt.Sprintf(`
+WITH latest_clusters AS (
+  SELECT
+    name,
+    argMax(uid, created_at) AS cluster_uid,
+    argMax(source, created_at) AS cluster_source
+  FROM %s.clusters
+  GROUP BY name
+)
 SELECT
-  cluster_id,
+  io.cluster_id AS cluster_id,
+  any(lc.cluster_uid) AS cluster_uid,
+  any(lc.cluster_source) AS cluster_source,
   api_group,
   api_version,
   resource,
@@ -328,10 +338,12 @@ SELECT
   maxIf(toUnixTimestamp64Milli(updated_at), event = 'watch') AS last_watch_ms,
   maxIf(toUnixTimestamp64Milli(updated_at), event = 'bookmark') AS last_bookmark_ms,
   max(toUnixTimestamp64Milli(updated_at)) AS updated_ms
-FROM %s.ingestion_offsets
-WHERE (%s = '' OR cluster_id = %s)
-GROUP BY cluster_id, api_group, api_version, resource, namespace
+FROM %s.ingestion_offsets io
+LEFT JOIN latest_clusters lc ON lc.name = io.cluster_id
+WHERE (%s = '' OR io.cluster_id = %s)
+GROUP BY io.cluster_id, api_group, api_version, resource, namespace
 ORDER BY updated_ms DESC`,
+		q(s.database()),
 		q(s.database()),
 		quoteString(clusterID),
 		quoteString(clusterID),
@@ -344,6 +356,8 @@ ORDER BY updated_ms DESC`,
 	for _, row := range result.Data {
 		record := storage.ResourceHealthRecord{
 			ClusterID:       stringValue(row["cluster_id"]),
+			ClusterUID:      stringValue(row["cluster_uid"]),
+			ClusterSource:   stringValue(row["cluster_source"]),
 			Group:           stringValue(row["api_group"]),
 			Version:         stringValue(row["api_version"]),
 			Resource:        stringValue(row["resource"]),

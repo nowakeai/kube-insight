@@ -86,6 +86,8 @@ func (s *Store) ResourceHealth(ctx context.Context, opts ResourceHealthOptions) 
 	rows, err := s.db.QueryContext(ctx, `
 select
   c.name,
+  coalesce(c.uid, ''),
+  coalesce(c.source, ''),
   ar.api_group,
   ar.api_version,
   ar.resource,
@@ -256,6 +258,8 @@ func scanResourceHealthRecord(rows resourceHealthScanner, now time.Time, staleAf
 	var record ResourceHealthRecord
 	if err := rows.Scan(
 		&record.ClusterID,
+		&record.ClusterUID,
+		&record.ClusterSource,
 		&record.Group,
 		&record.Version,
 		&record.Resource,

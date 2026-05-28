@@ -30,6 +30,14 @@ services:
         condition: service_healthy
     environment:
       KUBE_INSIGHT_CLICKHOUSE_DSN: "http://clickhouse:8123/?user=${CLICKHOUSE_USER:-kube_insight}&password=${CLICKHOUSE_PASSWORD:-kube-insight-dev}"
+      KUBE_INSIGHT_SERVER_CHAT_ENABLED: ${KUBE_INSIGHT_SERVER_CHAT_ENABLED:-false}
+      KUBE_INSIGHT_SERVER_CHAT_PROVIDER: ${KUBE_INSIGHT_SERVER_CHAT_PROVIDER:-openai-compatible}
+      KUBE_INSIGHT_SERVER_CHAT_API_KEY_ENV: ${KUBE_INSIGHT_SERVER_CHAT_API_KEY_ENV:-OPENAI_API_KEY}
+      KUBE_INSIGHT_SERVER_CHAT_BASE_URL_ENV: ${KUBE_INSIGHT_SERVER_CHAT_BASE_URL_ENV:-OPENAI_BASE_URL}
+      KUBE_INSIGHT_SERVER_CHAT_MODEL: ${KUBE_INSIGHT_SERVER_CHAT_MODEL:-${MIMO_MODEL:-gpt-5.2}}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${MIMO_API_KEY:-}}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-${MIMO_OPENAI_BASEURL:-}}
+      KUBE_INSIGHT_COLLECTION_CONTEXTS: ${KUBE_INSIGHT_COLLECTION_CONTEXTS:-}
       KUBECONFIG: /home/kube-insight/.kube/config
       CLOUDSDK_CONFIG: /home/kube-insight/.config/gcloud
       USE_GKE_GCLOUD_AUTH_PLUGIN: "True"
@@ -52,5 +60,26 @@ services:
       - --metrics-listen
       - 0.0.0.0:9090
 
+  web:
+    build:
+      context: .
+      dockerfile: docker/dev-web.Dockerfile
+    image: kube-insight-dev-web:local
+    depends_on:
+      watcher:
+        condition: service_started
+    environment:
+      KUBE_INSIGHT_API_PROXY_TARGET: http://watcher:8080
+      KUBE_INSIGHT_METRICS_PROXY_TARGET: http://watcher:9090
+      KUBE_INSIGHT_WEB_ALLOWED_HOSTS: ${KUBE_INSIGHT_WEB_ALLOWED_HOSTS:-}
+      CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
+    volumes:
+      - ./web:/workspace/web
+      - web-node-modules:/workspace/web/node_modules
+    ports:
+      - "${KUBE_INSIGHT_WEB_PORT:-5173}:5173"
+
+
 volumes:
   clickhouse-data:
+  web-node-modules:

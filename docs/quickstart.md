@@ -12,7 +12,7 @@ storage-efficiency metrics, and low-cost cold object-storage tiering experiments
 Use a version from the [release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
-KI_VERSION=0.0.1
+KI_VERSION=0.1.1
 KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 KI_ARCH="$(uname -m)"
 case "${KI_ARCH}" in
@@ -190,10 +190,11 @@ The combined command supports these components:
 - `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
-- `--webui`: web UI listener. The current build exposes only a placeholder until
-  the UI is implemented.
+- `--webui`: embedded Web UI listener for the React app built from `web/`.
+  The first formal UI milestone is the agent-first chat surface described in
+  [Agent-First Web UI Design](product/agent-first-web-ui.md).
 
-Example with all current and planned service surfaces:
+Example with all service surfaces:
 
 ```bash
 ./kube-insight serve --watch --api --mcp --webui \
@@ -221,7 +222,9 @@ curl http://127.0.0.1:8080/api/v1/schema
 curl -X POST http://127.0.0.1:8080/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 5","maxRows":5}'
-curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&limit=20'
+curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&problemLimit=20'
+# Full per-resource stream details for debugging only:
+curl 'http://127.0.0.1:8080/api/v1/health?detail=full&limit=500'
 curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&maxVersions=5&maxObservations=20'
 ```
 
@@ -269,12 +272,22 @@ started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
 Agents should call `kube_insight_schema` first because SQLite and
 ClickHouse-compatible backends expose different SQL table names.
 
+When the built-in Web UI/API chat agent runs against a SQLite DB, kube-insight
+adds a small runtime orientation message before each run. It includes collector
+coverage, compact object counts, a few high-signal Service hints, and routing
+rules such as using `kube_insight_service_investigation` for exact Service
+questions. This context is not evidence; answers still need tool-backed
+artifacts and citations.
+
 MCP currently exposes:
 
 - `kube_insight_schema`
 - `kube_insight_sql`
 - `kube_insight_health`
+- `kube_insight_search`
 - `kube_insight_history`
+- `kube_insight_topology`
+- `kube_insight_service_investigation`
 
 It also exposes prompts for common agent workflows:
 

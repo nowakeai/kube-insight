@@ -37,6 +37,8 @@ type ResourceHealthSummary struct {
 
 type ResourceHealthRecord struct {
 	ClusterID       string     `json:"clusterId"`
+	ClusterUID      string     `json:"clusterUid,omitempty"`
+	ClusterSource   string     `json:"clusterSource,omitempty"`
 	Group           string     `json:"group,omitempty"`
 	Version         string     `json:"version"`
 	Resource        string     `json:"resource"`

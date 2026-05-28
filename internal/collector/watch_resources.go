@@ -283,6 +283,8 @@ func prepareWatchResourceClientGo(ctx context.Context, opts WatchOptions) (prepa
 			}
 		}
 		watchLog(opts.Logf, "resolved cluster", "context", opts.Context, "clusterId", opts.ClusterID, "uid", emptyLabel(identity.UID))
+	} else if err := upsertConfiguredCluster(ctx, opts.Store, opts.ClusterID, opts.Context); err != nil {
+		watchLog(opts.Logf, "cluster metadata unavailable", "context", opts.Context, "clusterId", opts.ClusterID, "error", err)
 	}
 	resolved, err := resolveResourceClientGo(ctx, opts.Context, opts.Resource)
 	if err != nil {

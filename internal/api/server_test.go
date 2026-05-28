@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kube-insight/internal/ingest"
 	"kube-insight/internal/storage"
@@ -46,9 +47,12 @@ func TestServerReadOnlyAgentEndpoints(t *testing.T) {
 	defer server.Close()
 
 	assertGETContains(t, server.URL+"/healthz", `"ok": true`)
+	assertGETContains(t, server.URL+"/api/v1/server/info", `"storage"`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"name": "latest_index"`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"relationships":`)
 	assertGETContains(t, server.URL+"/api/v1/schema", `"recipes":`)
+	assertGETContains(t, server.URL+"/api/v1/storage/stats", `"compressionRatio"`)
+	assertGETContains(t, server.URL+"/api/v1/storage/stats", `"objectKinds"`)
 	assertPOSTContains(t, server.URL+"/api/v1/sql", `{"sql":"select name from latest_index where name = 'api-0'","maxRows":5}`, `"name": "api-0"`)
 	assertPOSTContains(t, server.URL+"/api/v1/sql", `{"sql":"delete from latest_index"}`, `"error":`)
 	assertGETContains(t, server.URL+"/api/v1/health?limit=5", `"summary":`)
@@ -58,6 +62,57 @@ func TestServerReadOnlyAgentEndpoints(t *testing.T) {
 	assertGETContains(t, server.URL+"/api/v1/services/default/api/investigation?maxEvidenceObjects=5&maxVersionsPerObject=2", `"endpointSlices": 1`)
 	assertGETContains(t, server.URL+"/api/v1/services/default/api/investigation?maxEvidenceObjects=5&maxVersionsPerObject=2", `"pods": 1`)
 	assertGETContains(t, server.URL+"/api/v1/topology?kind=Pod&namespace=default&name=api-0", `"pod_on_node"`)
+}
+
+func TestServerInfoEndpointRedactsSecrets(t *testing.T) {
+	handler, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			closed := false
+			return fakeReadStore{closed: &closed}, nil
+		},
+		ServerInfo: ServerInfo{
+			Storage: ServerStorageInfo{Driver: "clickhouse", Target: "clickhouse:ki"},
+			Components: map[string]ServerComponentInfo{
+				"api":     {Enabled: true, Listen: "127.0.0.1:8080", URL: "http://127.0.0.1:8080"},
+				"metrics": {Enabled: false, Listen: "127.0.0.1:9090"},
+			},
+			Chat: ServerChatInfo{
+				Enabled:           true,
+				Provider:          "openai-compatible",
+				Model:             "mimo-v2.5-pro",
+				MaxIterations:     32,
+				APIKeyEnv:         "MIMO_API_KEY",
+				APIKeyConfigured:  true,
+				BaseURLEnv:        "MIMO_OPENAI_BASEURL",
+				BaseURLConfigured: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	body := getBody(t, server.URL+"/api/v1/server/info", http.StatusOK)
+	for _, want := range []string{
+		`"driver": "clickhouse"`,
+		`"target": "clickhouse:ki"`,
+		`"provider": "openai-compatible"`,
+		`"model": "mimo-v2.5-pro"`,
+		`"maxIterations": 32`,
+		`"apiKeyEnv": "MIMO_API_KEY"`,
+		`"apiKeyConfigured": true`,
+		`"baseUrlEnv": "MIMO_OPENAI_BASEURL"`,
+		`"baseUrlConfigured": true`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("server info missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "tp-") || strings.Contains(body, "secret") {
+		t.Fatalf("server info leaked a secret-looking value: %s", body)
+	}
 }
 
 func assertGETContains(t *testing.T, url string, want string) {
@@ -107,6 +162,60 @@ func (f fakeReadStore) QuerySchema(context.Context) (storage.SQLSchema, error) {
 
 func (f fakeReadStore) QuerySQL(context.Context, storage.SQLQueryOptions) (storage.SQLQueryResult, error) {
 	return storage.SQLQueryResult{Columns: []string{"name"}, Rows: []map[string]any{{"name": "from-injected-store"}}, RowCount: 1}, nil
+}
+
+func (f fakeReadStore) ResourceHealth(context.Context, storage.ResourceHealthOptions) (storage.ResourceHealthReport, error) {
+	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
+	longError := strings.Repeat("watch stream internal error ", 20)
+	return storage.ResourceHealthReport{
+		CheckedAt: now,
+		Summary: storage.ResourceHealthSummary{
+			Resources: 3,
+			Healthy:   1,
+			Unstable:  2,
+			Warnings:  []string{"2 resource stream(s) are retrying"},
+		},
+		ByStatus: map[string]int{"watching": 1, "retrying": 2},
+		Resources: []storage.ResourceHealthRecord{
+			{ClusterID: "c1", Resource: "pods", Version: "v1", Kind: "Pod", Status: "watching", LatestObjects: 3},
+			{ClusterID: "c1", Resource: "jobs", Group: "batch", Version: "v1", Kind: "Job", Status: "retrying", Error: longError},
+			{ClusterID: "c1", Resource: "deployments", Group: "apps", Version: "v1", Kind: "Deployment", Status: "retrying", Error: longError},
+		},
+	}, nil
+}
+
+func TestResourceHealthDefaultsToCompactResponse(t *testing.T) {
+	closed := false
+	handler, err := NewServer(ServerOptions{OpenStore: func(context.Context) (ReadStore, error) {
+		return fakeReadStore{closed: &closed}, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	body := getBody(t, server.URL+"/api/v1/health?problemLimit=1", http.StatusOK)
+	for _, want := range []string{`"detail": "compact"`, `"resourcesOmitted": 1`, `"resource": "jobs"`, `"error": "watch stream internal error`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("compact health response missing %q: %s", want, body)
+		}
+	}
+	for _, unwanted := range []string{`"resource": "pods"`, strings.Repeat("watch stream internal error ", 8)} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("compact health response unexpectedly contains %q: %s", unwanted, body)
+		}
+	}
+
+	full := getBody(t, server.URL+"/api/v1/health?detail=full", http.StatusOK)
+	for _, want := range []string{`"resource": "pods"`, `"resource": "jobs"`, `"resource": "deployments"`} {
+		if !strings.Contains(full, want) {
+			t.Fatalf("full health response missing %q: %s", want, full)
+		}
+	}
+	if strings.Contains(full, `"detail": "compact"`) {
+		t.Fatalf("full health response should not be compact wrapper: %s", full)
+	}
 }
 
 func TestServerUsesInjectedReadStore(t *testing.T) {

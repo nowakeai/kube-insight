@@ -336,8 +336,16 @@ server:
     listen: 127.0.0.1:8081
   chat:
     enabled: false
-    openaiApiKeyEnv: OPENAI_API_KEY
+    provider: openai
+    apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
     model: gpt-5.2
+    maxIterations: 32
+  agentRetention:
+    # Server-side cleanup for hidden retry branches and unreferenced agent artifacts.
+    enabled: true
+    intervalSeconds: 600
+    runOnStart: true
 
 mcp:
   enabled: false

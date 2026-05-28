@@ -212,6 +212,46 @@ Supported roles:
 - `writer`: discovery/watch/ingest only; API/Web/MCP listeners disabled.
 - `api`: query/API/Web/MCP only; collection/watch disabled.
 
+Agent chat configuration is server-side. The first Web UI milestone uses a
+server-owned agent runtime, so provider and model defaults live under
+`server.chat`:
+
+```yaml
+server:
+  chat:
+    enabled: true
+    provider: openai
+    apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
+    model: gpt-5.2
+    maxIterations: 32
+```
+
+The deprecated `openaiApiKeyEnv` key is still accepted for compatibility, but new
+configs should use `apiKeyEnv` so non-OpenAI-compatible providers can share the
+same shape later. `baseUrlEnv` is optional for OpenAI-compatible endpoints and
+points to the environment variable containing the API base URL; the URL value is
+not exposed by server info responses. `maxIterations` caps autonomous agent loop iterations. It defaults to `32`; set it higher for long-running investigation sessions or lower in deterministic tests. It is still a guardrail, not the primary way to fix repeated low-signal tool calls.
+
+Agent session retention is also server-side. The API server periodically removes
+completed retry branches that the chat projection can no longer reach and
+terminal-run artifact events that the final answer did not cite. Keep this
+enabled for Web UI development so retries and LLM-selected evidence do not leave
+unbounded transient rows behind:
+
+```yaml
+server:
+  agentRetention:
+    enabled: true
+    intervalSeconds: 600
+    runOnStart: true
+```
+
+The same compaction can be run manually with
+`POST /api/v1/agent/retention/compact`; the periodic job uses the default
+non-dry-run options. In-progress runs are not artifact-compacted because
+citations may be emitted after artifacts.
+
 ## Supported Running Modes
 
 Kube-insight supports these operational shapes:

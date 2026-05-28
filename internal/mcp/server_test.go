@@ -97,7 +97,7 @@ func TestSDKMCPTools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		toolNames += tool.Name + "\n"
 	}
-	for _, want := range []string{"kube_insight_schema", "kube_insight_sql", "kube_insight_history"} {
+	for _, want := range []string{"kube_insight_schema", "kube_insight_sql", "kube_insight_search", "kube_insight_history", "kube_insight_topology", "kube_insight_service_investigation"} {
 		if !strings.Contains(toolNames, want) {
 			t.Fatalf("tools missing %q: %s", want, toolNames)
 		}
@@ -183,11 +183,128 @@ func (f *fakeMCPReadStore) ResourceHealth(context.Context, storage.ResourceHealt
 	}, nil
 }
 
+func (f *fakeMCPReadStore) SearchEvidence(_ context.Context, opts storage.EvidenceSearchOptions) (storage.EvidenceSearchResult, error) {
+	return storage.EvidenceSearchResult{
+		Input:   opts,
+		Summary: storage.EvidenceSearchSummary{Matches: 1},
+		Matches: []storage.EvidenceSearchMatch{{
+			Object:  storage.ObjectRecord{ClusterID: "c1", Version: "v1", Resource: "pods", Kind: "Pod", Namespace: "default", Name: "api-1"},
+			Score:   2,
+			Reasons: []string{"fact:status=Running"},
+		}},
+	}, nil
+}
+
 func (f *fakeMCPReadStore) ObjectHistory(context.Context, storage.ObjectTarget, storage.ObjectHistoryOptions) (storage.ObjectHistory, error) {
 	return storage.ObjectHistory{
 		Object:  storage.ObjectRecord{ClusterID: "c1", Kind: "Pod", Namespace: "default", Name: "api-1"},
 		Summary: storage.ObjectHistorySummary{Versions: 1, Observations: 1},
 	}, nil
+}
+
+func (f *fakeMCPReadStore) Topology(context.Context, storage.ObjectTarget) (storage.TopologyGraph, error) {
+	return storage.TopologyGraph{
+		Root:    storage.ObjectRecord{ClusterID: "c1", Version: "v1", Resource: "pods", Kind: "Pod", Namespace: "default", Name: "api-1"},
+		Summary: storage.TopologySummary{Nodes: 1, Edges: 0},
+	}, nil
+}
+
+func (f *fakeMCPReadStore) InvestigateServiceWithOptions(context.Context, storage.ObjectTarget, storage.InvestigationOptions) (storage.ServiceInvestigation, error) {
+	return storage.ServiceInvestigation{
+		Service: storage.EvidenceBundle{Object: storage.ObjectRecord{ClusterID: "c1", Version: "v1", Resource: "services", Kind: "Service", Namespace: "default", Name: "api"}},
+		Summary: storage.ServiceInvestigationSummary{Objects: 1, Pods: 1},
+	}, nil
+}
+
+type countingHealthReadStore struct {
+	healthCalls int
+	closeCalls  int
+}
+
+func (f *countingHealthReadStore) Close() error {
+	f.closeCalls++
+	return nil
+}
+
+func (f *countingHealthReadStore) ResourceHealth(context.Context, storage.ResourceHealthOptions) (storage.ResourceHealthReport, error) {
+	f.healthCalls++
+	return storage.ResourceHealthReport{
+		Summary:   storage.ResourceHealthSummary{Resources: 1, Healthy: f.healthCalls, Complete: true},
+		ByStatus:  map[string]int{"watching": f.healthCalls},
+		Resources: []storage.ResourceHealthRecord{{ClusterID: "c1", Version: "v1", Resource: "pods", Kind: "Pod", Status: "watching"}},
+	}, nil
+}
+
+func TestQueryHealthCachesDefaultHealthReport(t *testing.T) {
+	var opened int
+	store := &countingHealthReadStore{}
+	server, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			opened++
+			return store, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	textValue, err := server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textValue.(string)
+	if !strings.Contains(text, "healthy=1") {
+		t.Fatalf("first health output missing healthy=1: %s", text)
+	}
+	if opened != 1 || store.healthCalls != 1 || store.closeCalls != 1 {
+		t.Fatalf("after first query opened=%d healthCalls=%d closeCalls=%d", opened, store.healthCalls, store.closeCalls)
+	}
+
+	textValue, err = server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = textValue.(string)
+	if !strings.Contains(text, "healthy=1") {
+		t.Fatalf("cached health output missing healthy=1: %s", text)
+	}
+	if opened != 1 || store.healthCalls != 1 || store.closeCalls != 1 {
+		t.Fatalf("cache miss: opened=%d healthCalls=%d closeCalls=%d", opened, store.healthCalls, store.closeCalls)
+	}
+}
+
+func TestRefreshHealthCacheUpdatesRegisteredReports(t *testing.T) {
+	store := &countingHealthReadStore{}
+	server, err := NewServer(ServerOptions{
+		OpenStore: func(context.Context) (ReadStore, error) {
+			return store, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	if _, err := server.queryHealth(context.Background(), healthArguments{}); err != nil {
+		t.Fatal(err)
+	}
+	server.refreshHealthCache(context.Background())
+	if store.healthCalls != 2 {
+		t.Fatalf("healthCalls after refresh = %d, want 2", store.healthCalls)
+	}
+
+	textValue, err := server.queryHealth(context.Background(), healthArguments{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textValue.(string)
+	if !strings.Contains(text, "healthy=2") {
+		t.Fatalf("refreshed health output missing healthy=2: %s", text)
+	}
+	if store.healthCalls != 2 {
+		t.Fatalf("refreshed cache was not reused, healthCalls=%d", store.healthCalls)
+	}
 }
 
 func TestStreamableHTTPMCPTransport(t *testing.T) {
@@ -244,7 +361,65 @@ func TestSSEMCPTransport(t *testing.T) {
 	}
 }
 
-func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
+func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
+	descriptions := map[string]string{}
+	for _, tool := range tools() {
+		descriptions[tool.Name] = tool.Description
+	}
+	cases := map[string][]string{
+		"kube_insight_sql": {
+			"Always call kube_insight_schema first",
+			"ClickHouse-compatible tables",
+			"first inspect kube_insight_health without a cluster filter",
+			"Keep maxRows bounded",
+			"timestamp predicates",
+			"indexed fact/change/edge fields",
+		},
+		"kube_insight_health": {
+			"current-state claims",
+			"Do not pass a user fragment",
+			"Do not call this again",
+			"answer-ready SQL/JS/tool result",
+			"compact DSL",
+			"/api/v1/health endpoint is much larger",
+		},
+		"kube_insight_search": {
+			"broad discovery",
+			"includeBundles=false",
+			"includeBundles=true only for top targets",
+			"from/to time",
+			"client context",
+		},
+		"kube_insight_history": {
+			"one known object's",
+			"includeDocs=false",
+			"raw YAML/JSON proof",
+		},
+		"kube_insight_topology": {
+			"one known Kubernetes object",
+			"do not use it for broad discovery",
+		},
+		"kube_insight_service_investigation": {
+			"exact Service namespace/name",
+			"Start with low limits",
+		},
+	}
+	for name, wants := range cases {
+		t.Run(name, func(t *testing.T) {
+			description := descriptions[name]
+			if description == "" {
+				t.Fatalf("missing description for %s", name)
+			}
+			for _, want := range wants {
+				if !strings.Contains(description, want) {
+					t.Fatalf("%s description missing %q:\n%s", name, want, description)
+				}
+			}
+		})
+	}
+}
+
+func TestPromptsGuideCoverageFirstInvestigation(t *testing.T) {
 	cases := []struct {
 		name string
 		want []string
@@ -252,8 +427,10 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_coverage_first",
 			want: []string{
-				"Default to SQL after schema detection",
-				"kube_insight_sql",
+				"Start with collector coverage",
+				"kube_insight_health is required coverage evidence",
+				"Call kube_insight_health first",
+				"Do not pass the user fragment as the first health cluster argument",
 				"ingestion_offsets is append-only",
 				"argMax(status, updated_at)",
 				"facts and changes",
@@ -264,7 +441,8 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_event_history",
 			want: []string{
-				"kube_insight_sql as the primary interface",
+				"kube_insight_health for collector coverage",
+				"Call kube_insight_health first",
 				"object_facts",
 				"ClickHouse-compatible backends use facts",
 				"object_edges",
@@ -275,8 +453,9 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_object_history",
 			want: []string{
-				"kube_insight_schema first",
-				"kube_insight_sql as the primary investigation interface",
+				"kube_insight_health for collector coverage",
+				"Call kube_insight_health first",
+				"Call kube_insight_schema before writing SQL",
 				"object_facts/object_edges/object_observations/latest_index",
 				"facts/edges/changes/observations/versions",
 				"argMax(status, updated_at)",
@@ -326,7 +505,10 @@ func TestServerUsesInjectedReadStore(t *testing.T) {
 		{name: "kube_insight_schema", args: map[string]any{}},
 		{name: "kube_insight_sql", args: map[string]any{"sql": "select kind from versions", "maxRows": 1}},
 		{name: "kube_insight_health", args: map[string]any{"cluster": "c1"}},
+		{name: "kube_insight_search", args: map[string]any{"query": "api", "limit": 999, "maxVersionsPerObject": 999}},
 		{name: "kube_insight_history", args: map[string]any{"kind": "Pod", "namespace": "default", "name": "api-1"}},
+		{name: "kube_insight_topology", args: map[string]any{"kind": "Pod", "namespace": "default", "name": "api-1"}},
+		{name: "kube_insight_service_investigation", args: map[string]any{"namespace": "default", "name": "api", "maxEvidenceObjects": 999}},
 	}
 	var output string
 	for _, call := range calls {
@@ -339,7 +521,7 @@ func TestServerUsesInjectedReadStore(t *testing.T) {
 	if opened != len(calls) {
 		t.Fatalf("open count = %d, want %d", opened, len(calls))
 	}
-	for _, want := range []string{`clickhouse`, `fake injected backend`, `"kind": "Pod"`, `"healthy": 1`, `"observations": 1`} {
+	for _, want := range []string{`clickhouse`, `fake injected backend`, `"kind": "Pod"`, `healthy=1`, `"matches": 1`, `"observations": 1`, `"nodes": 1`, `"pods": 1`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q: %s", want, output)
 		}

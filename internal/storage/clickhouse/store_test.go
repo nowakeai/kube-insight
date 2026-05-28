@@ -130,13 +130,13 @@ func TestStoreBuffersUntilBatchSizeAndFlushes(t *testing.T) {
 	}
 }
 
-func TestStoreOptionalControlPlaneInterfacesAreNotAdvertised(t *testing.T) {
+func TestStoreOptionalControlPlaneInterfaces(t *testing.T) {
 	store := &Store{}
 	if _, ok := any(store).(storage.RawLatestStore); ok {
 		t.Fatal("clickhouse store should not advertise raw latest support")
 	}
-	if _, ok := any(store).(storage.ClusterStore); ok {
-		t.Fatal("clickhouse store should not advertise cluster metadata upsert support")
+	if _, ok := any(store).(storage.ClusterStore); !ok {
+		t.Fatal("clickhouse store should advertise cluster metadata upsert support")
 	}
 }
 

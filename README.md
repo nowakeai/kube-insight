@@ -1,3 +1,5 @@
+
+
 <p align="center">
   <img src="assets/brand/kube-insight-logo.svg" alt="kube-insight" width="680">
 </p>
@@ -8,13 +10,74 @@
 </p>
 
 <p align="center">
-  <strong>Stop losing Kubernetes incident evidence before the investigation starts.</strong><br>
+  <strong>The missing history layer for Kubernetes AIOps.</strong><br>
   kube-insight captures sanitized list/watch history, extracts facts and topology,
   and exposes read-only SQL, API, and MCP tools so humans and agents can
   investigate from retained proof instead of broad live <code>kubectl</code> access.
 </p>
 
 ---
+
+## Built-in Agent Demo
+
+https://github.com/user-attachments/assets/dc847c9f-5bd9-4f50-a06b-8424ebb4a3bb
+
+Demo scenario: ask the built-in agent whether the `gcp cluster 2` node pool
+changed in the last 3 days. The answer uses retained Node lifecycle history,
+SQL aggregation, current node capacity, and citations.
+
+## Quick Start
+
+Download a release binary. Replace `0.1.1` with the version you want from the
+[release page](https://github.com/nowakeai/kube-insight/releases):
+
+```bash
+KI_VERSION=0.1.1
+KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+KI_ARCH="$(uname -m)"
+case "${KI_ARCH}" in
+  x86_64) KI_ARCH=amd64 ;;
+  aarch64) KI_ARCH=arm64 ;;
+esac
+
+curl -L -o kube-insight.tar.gz \
+  "https://github.com/nowakeai/kube-insight/releases/download/v${KI_VERSION}/kube-insight_${KI_VERSION}_${KI_OS}_${KI_ARCH}.tar.gz"
+tar -xzf kube-insight.tar.gz kube-insight
+chmod +x kube-insight
+```
+
+Take a bounded first capture from the current kubeconfig context into a local
+SQLite database:
+
+```bash
+./kube-insight watch pods services \
+  --db kubeinsight.db \
+  --timeout 30s
+```
+
+Check collector coverage before trusting an investigation:
+
+```bash
+./kube-insight db resources health --db kubeinsight.db --stale-after 10m
+./kube-insight db resources health --db kubeinsight.db --errors-only
+```
+
+Start SQL investigations by selecting a cluster:
+
+```bash
+./kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
+  "select id, name, source from clusters order by id"
+```
+
+For a continuous local agent service, keep the watcher running with API and MCP
+enabled:
+
+```bash
+./kube-insight serve --watch --api --mcp --db kubeinsight.db
+```
+
+See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
+history examples.
 
 ## The Problem
 
@@ -148,59 +211,6 @@ flowchart LR
   I --> L
 ```
 
-## Quick Start
-
-Download a release binary. Replace `0.0.1` with the version you want from the
-[release page](https://github.com/nowakeai/kube-insight/releases):
-
-```bash
-KI_VERSION=0.0.1
-KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-KI_ARCH="$(uname -m)"
-case "${KI_ARCH}" in
-  x86_64) KI_ARCH=amd64 ;;
-  aarch64) KI_ARCH=arm64 ;;
-esac
-
-curl -L -o kube-insight.tar.gz \
-  "https://github.com/nowakeai/kube-insight/releases/download/v${KI_VERSION}/kube-insight_${KI_VERSION}_${KI_OS}_${KI_ARCH}.tar.gz"
-tar -xzf kube-insight.tar.gz kube-insight
-chmod +x kube-insight
-```
-
-Take a bounded first capture from the current kubeconfig context into a local
-SQLite database:
-
-```bash
-./kube-insight watch pods services \
-  --db kubeinsight.db \
-  --timeout 30s
-```
-
-Check collector coverage before trusting an investigation:
-
-```bash
-./kube-insight db resources health --db kubeinsight.db --stale-after 10m
-./kube-insight db resources health --db kubeinsight.db --errors-only
-```
-
-Start SQL investigations by selecting a cluster:
-
-```bash
-./kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
-  "select id, name, source from clusters order by id"
-```
-
-For a continuous local agent service, keep the watcher running with API and MCP
-enabled:
-
-```bash
-./kube-insight serve --watch --api --mcp --db kubeinsight.db
-```
-
-See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
-history examples.
-
 ## Agent Investigation Loop
 
 ```mermaid
@@ -235,8 +245,14 @@ MCP tools:
 - `kube_insight_sql`: read-only `SELECT`, `WITH`, and `EXPLAIN` queries for the
   configured backend.
 - `kube_insight_health`: collector coverage, staleness, and resource errors.
+- `kube_insight_search`: candidate discovery from symptoms, names, labels,
+  statuses, facts, changes, retained documents, and indexed evidence.
 - `kube_insight_history`: retained versions, observations, and diffs for one
   object.
+- `kube_insight_topology`: related objects and topology edges around one chosen
+  root object.
+- `kube_insight_service_investigation`: compact Service investigation bundles
+  for exact Service namespace/name targets.
 
 MCP prompts:
 
@@ -283,12 +299,15 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Documentation
 
+- [Product brief](docs/requirements/product-brief.md)
 - [Quickstart](docs/quickstart.md)
+- [Full documentation index](docs/README.md)
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)
-- [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
-- [kube-insight agent skill](docs/agent/kube-insight-skill/SKILL.md)
 - [Storage modes and performance](docs/validation/storage-mode-comparison.md)
+- [Roadmap](docs/roadmap/roadmap.md)
+- [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
+- [kube-insight agent skill](kube-insight-skill/SKILL.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
@@ -296,7 +315,27 @@ Facts and edges are the candidate path. Versions are the proof.
 - [Maintainers](MAINTAINERS.md)
 - [Code of conduct](CODE_OF_CONDUCT.md)
 - [Release process](RELEASE.md)
-- [Full documentation index](docs/README.md)
+
+## Roadmap
+
+The current roadmap is tracked in [Roadmap](docs/roadmap/roadmap.md). In short:
+
+- SQLite default local mode, the chDB-enabled local variant, and the core MCP
+  read surface are complete for the MVP baseline;
+- the agent-first Web UI foundation adds server-managed sessions, streamed
+  runs, evidence citations, and Kubernetes artifacts on top of the API/MCP read
+  surfaces;
+- the next major milestone is Kubernetes RBAC support for authz-aware API, MCP,
+  and UI reads;
+- ClickHouse cold object-storage tiering and opt-in JSON/index experiments stay
+  measured follow-ups before promotion;
+- production readiness follows after the UI and RBAC service boundaries are in
+  place.
+
+See the detailed [Roadmap And Open Questions](docs/roadmap/roadmap-open-questions.md),
+[Multi Backend Roadmap](docs/data/multi-backend-roadmap.md), and
+[Agent And UI Roadmap](docs/product/agent-and-ui-roadmap.md) for the underlying
+workstreams.
 
 ## Release Status
 

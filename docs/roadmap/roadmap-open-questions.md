@@ -44,11 +44,11 @@ Success:
 - reconstruction bounded by `max_delta_chain`,
 - diffs are useful for Deployment/Pod/Node changes.
 
-## Milestone 3: ClickHouse Evidence Backend MVP
+## Milestone 3: Evidence Backend And MCP MVP
 
-Status: mostly implemented for the local MVP path; keep validating storage
-cost, merge behavior, and cold-tier operations before treating it as production
-ready.
+Status: complete for the local MVP baseline across SQLite default mode,
+ClickHouse central evidence mode, chDB-enabled local mode, and the core MCP read
+surface.
 
 Deliverables:
 
@@ -60,7 +60,11 @@ Deliverables:
 - live profiling and Prometheus storage-efficiency metrics,
 - JSON payload experiment comparing compressed `String` and new `JSON` type,
 - hot/cold storage policy moving old parts to S3-compatible object storage,
-- backend comparison report against SQLite local mode.
+- backend comparison report against SQLite local mode,
+- chDB-enabled local variant using the ClickHouse-compatible schema and read
+  path,
+- MCP tools for backend-aware schema, read-only SQL, health, and retained object
+  history.
 
 Success:
 
@@ -70,7 +74,9 @@ Success:
 - service investigation latency remains interactive,
 - cold S3-tiered proof reconstruction is acceptable for incident workflows.
 
-## Milestone 4: UI Prototype
+## Milestone 4: Web UI
+
+Status: next milestone.
 
 Deliverables:
 
@@ -78,18 +84,37 @@ Deliverables:
 - investigation result page,
 - evidence timeline,
 - topology-at-time graph,
-- resource diff view.
+- resource diff view,
+- links from facts, changes, and topology edges to retained proof versions.
 
 Success:
 
 - user can start from a symptom and inspect evidence without writing SQL.
 
-## Milestone 5: Production Readiness
+## Milestone 5: Kubernetes RBAC Support
+
+Status: next milestone after Web UI.
+
+Deliverables:
+
+- Kubernetes-authenticated service mode,
+- authorization checks for API, MCP, and UI reads,
+- audit records for denied or filtered evidence access,
+- predictable handling for historical evidence when live Kubernetes permissions
+  have changed,
+- tests for namespace-scoped and cluster-scoped resource access.
+
+Success:
+
+- a caller only receives evidence they are authorized to inspect, while retained
+  proof and investigation indexes remain usable through constrained read
+  surfaces.
+
+## Milestone 6: Production Readiness
 
 Deliverables:
 
 - in-cluster deployment,
-- RBAC and audit,
 - retention policies,
 - redaction policies,
 - rebuild/repair jobs,
@@ -145,8 +170,12 @@ Deliverables:
 
 ## Current Recommendation
 
-Build the local PoC first with SQLite and real `staging` data.
+Treat the SQLite, chDB-enabled, and MCP MVP baseline as complete. Build the Web
+UI next so humans can inspect retained evidence without writing SQL, then add
+Kubernetes RBAC support so API, MCP, and UI reads are constrained by the caller's
+cluster permissions.
 
-Do not start with a general-purpose distributed backend. The highest-risk
-assumption is not storage backend choice; it is whether the topology and fact
-model can answer real troubleshooting questions better than existing tools.
+Keep backend hardening and storage experiments measured behind those product
+milestones. The highest-risk assumption has moved from storage viability to
+whether the retained evidence model is usable and safe through service-mode UI
+and agent surfaces.

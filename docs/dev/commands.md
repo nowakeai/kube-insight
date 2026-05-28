@@ -55,11 +55,115 @@ Watch a selected resource set:
 ./bin/kube-insight watch pods services 'apps/v1/*' --db kubeinsight.db
 ```
 
-Run local service surfaces:
+Run local service surfaces for backend-only tests or isolated smoke runs:
 
 ```bash
 ./bin/kube-insight serve --watch --api --mcp --metrics --db kubeinsight.db
 ```
+
+For Web UI or frontend development, do not start a separate host
+`kube-insight serve` process, and do not run Vite directly on the host. Use the
+Docker compose dev environment; it runs ClickHouse, the watcher/API, and the
+Vite Web UI service together:
+
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+```
+
+The Web UI is served on `http://127.0.0.1:5173` and proxies API requests to the
+compose `watcher` service. Stop one-off host `serve` processes after backend
+tests finish. Stop the compose environment with `make dev-compose-down` when the
+shared dev environment should be shut down.
+
+### Full Docker Compose Dev Loop
+
+Use this loop for normal Web UI, agent UI, and live-cluster development:
+
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+make dev-compose-logs
+```
+
+The compose stack owns these local surfaces:
+
+- `web`: Vite dev server on `http://127.0.0.1:5173`.
+- `watcher`: kube-insight watcher/API on `http://127.0.0.1:8080` and metrics on
+  `http://127.0.0.1:9090`.
+- `clickhouse`: local ClickHouse HTTP endpoint on `http://127.0.0.1:8123`.
+
+Frontend source files are bind-mounted from `./web` into the `web` container.
+Vite hot module reload is enabled there, and `CHOKIDAR_USEPOLLING=true` is the
+compose default so file changes are detected reliably from remote workspaces and
+Docker-backed filesystems. After editing React, CSS, Vite config, or other
+frontend source files, keep the browser on `http://127.0.0.1:5173`; the page
+should reload without restarting any host process.
+
+If frontend dependencies change, rebuild the compose Web UI service so the
+container-managed `node_modules` volume matches `web/package-lock.json`:
+
+```bash
+make dev-compose-rebuild-web
+```
+
+If dependency state is still stale after a package-lock change, remove only the
+compose `web-node-modules` volume and start again. The default volume name is
+`kube-insight_web-node-modules`; replace the project prefix if Docker Compose is
+using a different project name. Do not remove the ClickHouse volume unless you
+intentionally want to discard the local evidence database:
+
+```bash
+make dev-compose-down
+docker volume rm kube-insight_web-node-modules
+make dev-compose-up-detached
+```
+
+Backend Go code and config are baked into the `watcher` image. After backend
+changes, use the safe default target so Docker rebuilds images and recreates
+services that need updating:
+
+```bash
+make dev-compose-up-detached
+```
+
+For a targeted backend rebuild while leaving ClickHouse data intact:
+
+```bash
+make dev-compose-rebuild-watcher
+```
+
+Use service-scoped logs while iterating:
+
+```bash
+make dev-compose-logs-web
+make dev-compose-logs-watcher
+make dev-compose-logs-clickhouse
+```
+
+Quick health checks:
+
+```bash
+curl -fsS http://127.0.0.1:5173/healthz
+curl -fsS 'http://127.0.0.1:5173/api/v1/agent/sessions?limit=1'
+curl -fsS http://127.0.0.1:8080/healthz
+```
+
+Use host `./bin/kube-insight serve` only for backend-only tests or isolated
+smoke runs. When you do that, stop the host process before returning to Web UI
+development so port 8080 and API behavior are not split across multiple
+backends.
+
+When the dev server is exposed through a remote workspace domain, configure Vite
+host checking in the gitignored root `.env` file:
+
+```dotenv
+KUBE_INSIGHT_WEB_ALLOWED_HOSTS=<MY HOSTNAME>
+```
+
+Use a comma or whitespace separated list for multiple hosts. `VITE_ALLOWED_HOSTS`
+is also accepted for local Vite compatibility, but
+`KUBE_INSIGHT_WEB_ALLOWED_HOSTS` is the preferred project variable.
 
 Query schema and read-only SQL:
 
@@ -75,6 +179,20 @@ Inspect storage and collector health:
 ./bin/kube-insight db resources health --db kubeinsight.db
 ./bin/kube-insight db compact --db kubeinsight.db
 ```
+
+Inspect the exact provider-facing model context recorded for an agent run:
+
+```bash
+./bin/kube-insight --db kubeinsight.db db agent-context run_abc123
+./bin/kube-insight --db kubeinsight.db db agent-context run_abc123 --all --output json
+```
+
+Use this when debugging follow-up drift, retry rewind behavior, or provider
+prompt-cache friendliness. The command reads `completion.request` events and
+shows the ordered messages actually sent to the model.
+Older runs may predate `completion.request`; in that case the command prints a
+warning plus the legacy visible user/final-answer events, but exact provider
+request reconstruction is unavailable.
 
 Run a long-lived local ClickHouse container for development:
 
@@ -97,8 +215,8 @@ tables without dropping them. `make clickhouse-clean-system-logs` flushes and
 truncates local ClickHouse `system.*_log` diagnostic tables without touching the
 `kube_insight` database. Use `make clickhouse-serve-dev` to run the local
 ClickHouse watcher/API/metrics loop. Use `make dev-compose-up-detached` to run
-both ClickHouse and the watcher in containers, and `make dev-compose-ps` to
-inspect their status. See [ClickHouse Local Workflow](clickhouse-local-workflow.md) for
+ClickHouse, the watcher/API, and the Vite Web UI in containers, and
+`make dev-compose-ps` to inspect their status. See [ClickHouse Local Workflow](clickhouse-local-workflow.md) for
 the full profile loop.
 
 `make clickhouse-smoke` starts a separate temporary container on `127.0.0.1:18123`
@@ -170,6 +288,217 @@ Rebuild derived facts, edges, and changes after extractor/profile changes:
 ```bash
 ./bin/kube-insight db reindex --db kubeinsight.db
 ./bin/kube-insight db reindex --db kubeinsight.db --yes
+```
+
+Run the stable built-in agent evaluation tests. These score replayable
+`agent.RunEvent` transcripts for tool choice, candidate evidence artifacts,
+verified answer citation coverage, answer terms, failed tools, tool-call count,
+and latency without calling a live model:
+
+```bash
+go test ./internal/agent
+```
+
+Run the opt-in live LLM agent evaluation against one or more
+OpenAI-compatible models. This uses real models with controlled kube-insight
+fake tools and writes an optional JSON report:
+
+```bash
+KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODELS='gpt52|gpt-5.2|OPENAI_API_KEY|OPENAI_BASE_URL;mimo|mimo-v2.5-pro|MIMO_API_KEY|MIMO_OPENAI_BASEURL' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS=12 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-live" \
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -v
+```
+
+Real cluster agent prompt convergence should use a small mixed case set before
+committing prompt changes. Prefer prompt/tool-contract fixes over precomputing
+large context caches or storing duplicate space-for-time summaries. Use the
+compose API service, not an extra host `serve`, so the Web UI and API see the
+same backend:
+
+| Case | Example user prompt | Expected path | Budget |
+| --- | --- | --- | --- |
+| OOM existence | `最近有没有 oom 现象？` | health + exactly one Pod OOMKilled/restart search with bundles; no parallel synonym searches | <=2 tools |
+| OOM ranking | `过去 24 小时哪些 Pod 有 OOMKilled，按次数排序。` | health + schema + one facts SQL | <=3 tools |
+| Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
+| Service health | exact Service health question | health + service investigation | <=2 tools |
+| Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-4 independent branches | avoid for exact Service or exact object-change prompts |
+| JS interpreter | dependent profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON extraction, unit normalization, SQL rows plus grouping, or reshaping bounded input JSON | schema + `kube_insight_js` planning | bounded read-only SQL and bounded input only; prefer over repeated SQL plus separate broad transforms |
+| Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
+
+For exact recent-change prompts, the SQL should be a rollup over `changes`
+grouped by `cluster_id`, `change_family`, `path`, and severity with
+`count()`, `min(ts)`, and `max(ts)`. If the rollup only shows status rows, the
+agent should answer that only status changes were observed in the retained
+window instead of launching Pod, topology, or root-cause follow-up queries.
+
+When using `evidence_condenser`, include source artifact IDs/titles and
+relevant row or snippet excerpts in the request. Do not ask the condenser to
+re-summarize only the main agent's prose.
+
+For multi-cluster answers, verify that the first health result exposes a
+`clusters:` display map and that final answers use the readable context/display
+name plus the stable `cluster_id` when needed. For runs started from the Web UI,
+verify that final-answer timestamps are shown in the client time zone; SQL and
+tool time bounds should still use UTC.
+
+For Web UI retry changes, run the retry projection tests. Retry should rewind to
+the retried run checkpoint, replace that branch, and never append a duplicate
+user/assistant turn after the old answer. If the original run has already been
+removed by retention, the fallback replacement run must still carry
+`retryOfRunId` metadata instead of becoming a plain append:
+
+```bash
+npm --prefix web run test -- src/lib/agent-retry-branches.spec.ts src/lib/agent-retry-policy.spec.ts src/lib/agent-store.spec.ts
+```
+
+Run the synthetic live LLM matrix first when adding a new model endpoint. This
+uses fake kube-insight tool data and validates tool-calling compatibility without
+sending real cluster evidence:
+
+```bash
+KUBE_INSIGHT_AGENT_LIVE_EVAL=1 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODELS='name|model|API_KEY_ENV|BASE_URL_ENV' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MAX_ITERATIONS=16 \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_TIMEOUT=3m \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-synthetic" \
+go test ./internal/agent -run TestLiveLLMEvaluation -count=1 -timeout 25m -v
+```
+
+Run the opt-in real DB prompt-context comparison when evaluating whether a
+larger system prompt reduces discovery calls. This sends selected evidence DB
+content and user questions to the configured live model endpoint, so use only
+with approved data/export boundaries:
+
+```bash
+KUBE_INSIGHT_AGENT_REAL_PROMPT_EVAL=1 \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_ENDPOINT="$KUBE_INSIGHT_CLICKHOUSE_DSN" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CLICKHOUSE_DATABASE="kube_insight" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_CONTEXT_FILE="$PWD/testdata/generated/real-cluster/context.md" \
+KUBE_INSIGHT_AGENT_REAL_EVAL_QUESTIONS='最近有没有 oom 现象？;;看看 gcp cluster 2 集群资源分配情况，不是实际使用;;过去24小时哪些 namespace 的 Pod 重启最多？' \
+KUBE_INSIGHT_AGENT_REAL_EVAL_MODES='baseline,rich' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_MODEL='mimo-v2.5-pro' \
+KUBE_INSIGHT_AGENT_LIVE_EVAL_OUTPUT="$PWD/testdata/generated/agent-eval-real" \
+go test ./internal/agent -run TestRealDBPromptContextEvaluation -count=1 -timeout 30m -v
+```
+
+Run the no-LLM ClickHouse case smoke before sending real evidence to a live
+model. This uses the compose API and writes JSON outputs for schema, health, and
+representative SQL/profile cases:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
+```
+
+Run the ClickHouse-backed aggregation agent cases when checking whether prompt
+changes generalize beyond the Node inventory case. Use non-strict mode for a
+baseline so all traces are captured even if some checks fail:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_SET=aggregation \
+KUBE_INSIGHT_AGENT_CASE_PARALLEL=3 \
+KUBE_INSIGHT_AGENT_CASE_STRICT=0 \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-aggregation" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
+For one-off reruns while tuning a case, use `KUBE_INSIGHT_AGENT_CASE_SET=custom`
+with `KUBE_INSIGHT_AGENT_CASE_QUESTION`, `KUBE_INSIGHT_AGENT_CASE_SLUG`, and
+case-specific answer/tool checks. `KUBE_INSIGHT_AGENT_CASE_PARALLEL` only affects
+multi-case sets such as `aggregation` and `all`.
+
+When black-box testing `kube-insight-skill` with `codex exec`, start from a
+fresh empty temporary working directory. Copy only `kube-insight-skill/` into
+that directory, then run the child agent there and point it at the running
+compose dev API/MCP/ClickHouse data. The child should not start in the
+repository checkout. This keeps the test closer to a real external-agent
+environment and prevents accidental shortcuts such as reading `git status`,
+local tests, or repo-private context. Do not let the test fall back to SQLite
+fixture or sample databases; those are useful for deterministic unit smoke
+tests but do not validate external-agent behavior on the real dev evidence
+store.
+
+Allow the child Codex process to use normal analysis tools. It may run shell
+commands, `curl`, Python, `jq`, DuckDB, or similar processors, and it may write
+temporary exports or scripts under `/tmp`. The restriction is on data source and
+repo mutation, not on tool use: it should not edit repository files, read host
+Codex memory, or mine `internal/agent/*` built-in prompts/tests. `kubectl` is
+allowed when it reflects a realistic user workflow, such as port-forwarding to a
+cluster-hosted kube-insight instance, validating live current state, or
+interacting with related cluster services. It must not replace kube-insight as
+the historical evidence source for claims that require retained history,
+coverage, or ClickHouse-scale aggregation. Chrome/Next DevTools should stay out
+of these tests unless the case is explicitly about the Web UI.
+
+Use a prompt shape like this:
+
+```bash
+WORKDIR="$(mktemp -d /tmp/kube-insight-skill-blackbox.XXXXXX)"
+cp -a "$PWD/kube-insight-skill" "$WORKDIR/"
+codex exec -c features.use_legacy_landlock=false \
+  --ephemeral --skip-git-repo-check --sandbox danger-full-access -C "$WORKDIR" \
+  'Black-box evaluate kube-insight-skill as an external agent. Do not edit files.
+   You may use shell, curl, Python, jq, DuckDB, and temporary files under /tmp
+   for analysis. Use the running compose dev kube-insight API/MCP/ClickHouse
+   data, not SQLite fixture/sample databases. You may use kubectl only for
+   realistic live validation, port-forwarding, or cluster interaction; do not
+   use it as a replacement for kube-insight historical evidence. Do not use
+   Chrome/Next DevTools, local agent memory files, or internal/agent
+   prompt/test files.
+   Read kube-insight-skill/SKILL.md and referenced skill files only as needed.
+   Do not inspect the kube-insight repository checkout.
+   Investigate: 看看 gcp2 半天内集群的节点是否有变化？一共有多少节点，有哪些类型？
+   总的 CPU 内存量是多少。'
+```
+
+On this dev host, `workspace-write` plus the inherited legacy Landlock setting
+can prevent child shell startup, and `workspace-write` may also block loopback
+access to `127.0.0.1:8080`. Use the explicit `features.use_legacy_landlock=false`
+override and `danger-full-access` only for this already-isolated temporary
+black-box harness. If `127.0.0.1:8080` still fails, fix the test environment or
+use the compose service network; do not accept a SQLite fallback as a passing
+skill evaluation. If raw ClickHouse HTTP on `127.0.0.1:8123` returns
+`401 Unauthorized`, use kube-insight's `POST /api/v1/sql` read-only endpoint
+instead of mining repo config for credentials.
+
+When validating the session scratch/VFS path, add
+`KUBE_INSIGHT_AGENT_CASE_REQUIRE_SCRATCH_HANDLES=1`. The smoke report will then
+fail a case unless at least one tool-call artifact promoted `scratchHandles`, and
+the generated Markdown report includes the scratch-handle count.
+For cases that combine multiple proof surfaces, use
+`KUBE_INSIGHT_AGENT_CASE_MIN_CITATIONS=N`; for example Node inventory plus
+recent lifecycle changes should cite both capacity snapshot evidence and
+lifecycle evidence.
+The smoke script also fails common JS anti-patterns by default: `const sql = ...`
+shadowing the helper, and returning broad raw arrays such as
+`{history: history}` or `{rows: rows}`. It also flags `max(updated_at) AS
+updated_at` aggregate alias reuse inside JS SQL because ClickHouse can rewrite
+that into nested aggregate expressions, and flags SQL-side Kubernetes quantity
+parsing where `JSONExtractString`/`replaceAll` string expressions are divided by
+`1000`, `1024`, or `1048576` inside JS SQL. Fetch raw quantity strings in SQL
+and parse units in JavaScript. Set
+`KUBE_INSIGHT_AGENT_CASE_FORBID_JS_ANTIPATTERNS=0` only when inspecting a known
+bad trace.
+
+Run the isolated API live smoke when changing session replay, retry behavior, or
+prompt/tool budgets. It builds a temporary SQLite fixture DB, starts a temporary
+API/MCP server, sends UTC client context for relative-time prompts, records
+`completion.request` context, and can enforce both initial and follow-up tool
+budgets:
+
+```bash
+KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
+KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
+KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='最近有没有 OOM 现象？;;最近1小时内呢' \
+KUBE_INSIGHT_AGENT_API_SMOKE_MAX_INITIAL_TOOL_CALLS=2 \
+KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS=3 \
+KUBE_INSIGHT_AGENT_API_SMOKE_RETRY_FIRST=1 \
+KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-oom-tight" \
+scripts/agent-api-live-smoke.sh
 ```
 
 Run the local agent-vs-kubectl benchmark. Refresh the evidence database first
@@ -307,6 +636,36 @@ footprint gauges such as `kube_insight_storage_compression_ratio`,
 `kube_insight_storage_compressed_bytes_per_row`, active/inactive
 `kube_insight_storage_bytes` labels, and `kube_insight_storage_parts` labels for
 ClickHouse database part state.
+
+
+### Agent Retention Compaction
+
+Run a dry-run from the compose/dev API before deleting hidden retry branches or
+unreferenced transient artifacts:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact \
+  -H "content-type: application/json" \
+  -d "{\"dryRun\":true}"
+```
+
+Apply the default compaction:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact -d "{}"
+```
+
+The API server also runs this retention job periodically when
+`server.agentRetention.enabled` is true. The default interval is 600 seconds and
+`runOnStart` is enabled in `config/kube-insight.example.yaml`; change
+`server.agentRetention.intervalSeconds` for faster or slower cleanup in a local
+dev config.
+
+The default job prunes completed retry branches that are no longer visible in the
+chat projection and removes terminal-run artifact events that are not referenced
+by final citations. It intentionally skips in-progress runs because citations can
+arrive after artifacts. ClickHouse cleanup is mutation-based and completes
+asynchronously.
 
 More user-facing examples live in `docs/quickstart.md` and
 `docs/configuration/configuration.md`.

@@ -24,7 +24,7 @@ Read these in order when evaluating or using kube-insight:
 4. [Data Model](data/data-model.md)
 5. [Storage Modes And Performance](validation/storage-mode-comparison.md)
 6. [Agent SQL Cookbook](workflows/agent-sql-cookbook.md)
-7. [kube-insight Agent Skill](agent/kube-insight-skill/SKILL.md)
+7. [kube-insight Agent Skill](../kube-insight-skill/SKILL.md)
 8. [Real-World Troubleshooting Cases](workflows/real-world-cases.md)
 9. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
 10. [Security, Privacy, And Retention](security/security-retention.md)
@@ -33,15 +33,18 @@ Read these in order when evaluating or using kube-insight:
 
 These documents explain the system shape and current implementation direction:
 
+- [Roadmap](roadmap/roadmap.md)
 - [System Architecture](architecture/system-architecture.md)
 - [Technology Stack](architecture/technology-stack.md)
 - [Storage, Index, And Query Design](data/storage-index-query.md)
 - [Efficient History Storage V2](data/efficient-history-storage-v2.md)
+- [Facts Catalog](data/facts-catalog.md)
 - [Multi Backend Roadmap](data/multi-backend-roadmap.md)
 - [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
 - [Global Watcher Design](ingestion/global-watcher-design.md)
 - [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md)
 - [Agent And UI Roadmap](product/agent-and-ui-roadmap.md)
+- [Agent-First Web UI Design](product/agent-first-web-ui.md)
 - [Kubernetes RBAC Inheritance](security/kubernetes-rbac-inheritance.md)
 - [Agent SQL RBAC Filtering](security/agent-rbac-sql-filtering.md)
 - [Backend Strategy](research/backend-strategy.md)
@@ -73,12 +76,15 @@ Development-stage checklists, closeout notes, validation plans, and local
 workflow records live under `docs/dev/` so user-facing docs stay focused.
 
 - [Development Commands](dev/commands.md)
+- [Background Tasks](dev/background-tasks.md)
+- [Agent Evaluation](dev/agent-evaluation.md)
 - [ClickHouse Local Workflow](dev/clickhouse-local-workflow.md)
 - [MVP Dev Checklist](dev/mvp-dev-checklist.md)
 - [MVP PR Summary](dev/mvp-pr-summary.md)
 - [PoC And Benchmark Plan](dev/poc-and-benchmark-plan.md)
 - [Test Acceptance Plan](dev/test-acceptance-plan.md)
 - [ClickHouse MVP Closeout](dev/clickhouse-mvp-closeout.md)
+- [Agent-First Web UI Checklist](dev/agent-first-web-ui-checklist.md)
 - [Open Source Readiness](dev/open-source-readiness.md)
 
 ## Community And Release
@@ -99,7 +105,7 @@ workflow records live under `docs/dev/` so user-facing docs stay focused.
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
 | `dev/` | Development commands, local workflows, PR checklists, validation plans, and closeout notes. |
-| `agent/` | Agent skill instructions and backend-detection rules for MCP/CLI use. |
+| `kube-insight-skill/` | Agent skill instructions and backend-detection rules for MCP/CLI use. |
 | `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |

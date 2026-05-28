@@ -48,7 +48,19 @@ case "${page}" in
     ;;
 esac
 
-api_info="$(curl -fsS "http://${MCP_WEBUI_LISTEN}/api/v1/server/info")"
+api_info=""
+for _ in $(seq 1 60); do
+  if api_info="$(curl -fsS "http://${MCP_WEBUI_LISTEN}/api/v1/server/info" 2>/dev/null)"; then
+    break
+  fi
+  if ! kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
+    cat "${LOG}" >&2 || true
+    echo "kube-insight serve exited before the Web UI API proxy became ready" >&2
+    exit 1
+  fi
+  sleep 0.25
+done
+
 case "${api_info}" in
   *'"storage"'*'"components"'*) ;;
   *)

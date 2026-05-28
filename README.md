@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Stop losing Kubernetes incident evidence before the investigation starts.</strong><br>
+  <strong>The missing history layer for Kubernetes AIOps.</strong><br>
   kube-insight captures sanitized list/watch history, extracts facts and topology,
   and exposes read-only SQL, API, and MCP tools so humans and agents can
   investigate from retained proof instead of broad live <code>kubectl</code> access.

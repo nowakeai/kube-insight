@@ -25,11 +25,13 @@ import (
 )
 
 type serveOptions struct {
+	App           bool
 	API           bool
 	MCP           bool
 	WebUI         bool
 	Metrics       bool
 	Watch         bool
+	AppListen     string
 	APIListen     string
 	MCPListen     string
 	WebUIListen   string
@@ -58,25 +60,28 @@ func serveCommand(ctx context.Context, stdout, stderr io.Writer, state *cliState
 		Long: `Run long-lived kube-insight services.
 
 Examples:
+  kube-insight serve --watch --app
+  kube-insight serve --app --listen 0.0.0.0:8090
+  kube-insight serve --watch pods events.events.k8s.io --app
   kube-insight serve --watch --api --mcp
-  kube-insight serve --watch --api --mcp --metrics
-  kube-insight serve --watch --api --mcp --webui
-  kube-insight serve --watch pods events.events.k8s.io --api
 
 With no component flags, serve uses enabled services from the config file. The
-MCP component on the combined serve command exposes MCP Streamable HTTP at /mcp
-and legacy SDK SSE at /sse. Use
-"kube-insight serve mcp" for stdio MCP.`,
+recommended local agent path is --app, which enables the API, MCP HTTP, and the
+embedded Web UI together. The shared app listener serves the Web UI at /, MCP
+Streamable HTTP at /mcp, and legacy SDK SSE at /sse. Use "kube-insight serve mcp"
+only for stdio MCP.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runServeCommand(ctx, stdout, stderr, state, cmd, args, opts)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.App, "app", false, "Run the local agent app: API, MCP HTTP, and embedded Web UI")
 	cmd.Flags().BoolVar(&opts.Watch, "watch", false, "Run Kubernetes discovery/list/watch writers")
-	cmd.Flags().BoolVar(&opts.API, "api", false, "Run the read-only HTTP API")
-	cmd.Flags().BoolVar(&opts.MCP, "mcp", false, "Run the HTTP MCP server with Streamable HTTP at /mcp and legacy SSE at /sse")
-	cmd.Flags().BoolVar(&opts.WebUI, "webui", false, "Run the web UI server")
+	cmd.Flags().BoolVar(&opts.API, "api", false, "Run only the read-only HTTP API, or add API to a custom component set")
+	cmd.Flags().BoolVar(&opts.MCP, "mcp", false, "Run only the HTTP MCP server, or add MCP to a custom component set")
+	cmd.Flags().BoolVar(&opts.WebUI, "webui", false, "Run only the embedded Web UI, or add Web UI to a custom component set")
 	cmd.Flags().BoolVar(&opts.Metrics, "metrics", false, "Run the Prometheus metrics server at /metrics")
+	cmd.Flags().StringVar(&opts.AppListen, "listen", "", "Shared MCP/Web UI listen address for --app; defaults to 127.0.0.1:8090")
 	cmd.Flags().StringVar(&opts.APIListen, "api-listen", "", "API listen address; defaults to server.api.listen")
 	cmd.Flags().StringVar(&opts.MCPListen, "mcp-listen", "", "MCP HTTP listen address; defaults to mcp.listen")
 	cmd.Flags().StringVar(&opts.WebUIListen, "webui-listen", "", "Web UI listen address; defaults to the MCP HTTP listen address")
@@ -85,6 +90,8 @@ and legacy SDK SSE at /sse. Use
 	cmd.Flags().IntVar(&opts.WatchOpts.MaxRetries, "retries", -1, "Maximum watch retries; -1 retries forever")
 	cmd.Flags().DurationVar(&opts.WatchOpts.Timeout, "timeout", 0, "Watch timeout; 0 runs until interrupted")
 	addOutputFlag(cmd, &opts.Output, outputTable)
+	_ = cmd.Flags().MarkHidden("mcp-listen")
+	_ = cmd.Flags().MarkHidden("webui-listen")
 	cmd.AddCommand(serveAPICommand(ctx, stdout, stderr, state))
 	cmd.AddCommand(serveMCPCommand(ctx, stdout, stderr, state))
 	return cmd
@@ -210,9 +217,9 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 	flagMode := serveFlagChanged(cmd) || serveConfiguredByEnv()
 	out := serveSelection{}
 	if flagMode {
-		out.API = opts.API || rt.Config.Server.API.Enabled
-		out.MCP = opts.MCP || rt.Config.MCP.Enabled
-		out.WebUI = opts.WebUI || rt.Config.Server.Web.Enabled
+		out.API = opts.App || opts.API || rt.Config.Server.API.Enabled
+		out.MCP = opts.App || opts.MCP || rt.Config.MCP.Enabled
+		out.WebUI = opts.App || opts.WebUI || rt.Config.Server.Web.Enabled
 		out.Metrics = opts.Metrics || rt.Config.Server.Metrics.Enabled
 		out.Watch = opts.Watch || (!cmd.Flags().Changed("watch") && envIsSet("KUBE_INSIGHT_COLLECTION_ENABLED") && rt.Config.Collection.Enabled)
 	} else if rt.ConfigProvided {
@@ -225,10 +232,10 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 		return out, false
 	}
 	out.APIListen = firstNonEmpty(opts.APIListen, rt.Config.Server.API.Listen, "127.0.0.1:8080")
-	out.MCPListen = firstNonEmpty(opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
+	out.MCPListen = firstNonEmpty(opts.AppListen, opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
 	out.WebUIListen = firstNonEmpty(opts.WebUIListen)
 	if out.WebUIListen == "" {
-		if cmd.Flags().Changed("mcp-listen") {
+		if opts.AppListen != "" || cmd.Flags().Changed("mcp-listen") {
 			out.WebUIListen = out.MCPListen
 		} else {
 			out.WebUIListen = firstNonEmpty(rt.Config.Server.Web.Listen, out.MCPListen, "127.0.0.1:8090")
@@ -258,7 +265,7 @@ func serviceStorageTarget(cfg appconfig.Config, dbPath string) string {
 }
 
 func serveFlagChanged(cmd *cobra.Command) bool {
-	for _, name := range []string{"api", "mcp", "webui", "metrics", "watch"} {
+	for _, name := range []string{"app", "api", "mcp", "webui", "metrics", "watch"} {
 		if cmd.Flags().Changed(name) {
 			return true
 		}

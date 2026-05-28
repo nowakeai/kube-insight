@@ -185,12 +185,11 @@ binary, so using the UI does not require a separate frontend checkout or Node.js
 runtime:
 
 ```bash
-./kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
+./kube-insight serve --watch --app --db kubeinsight.db
 ```
 
-The combined command supports these components:
+`--app` enables the local agent app surfaces together:
 
-- `--watch`: discovery, list/watch, extraction, and writes.
 - `--api`: read-only HTTP API.
 - `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
 - `--webui`: embedded Web UI listener for the React app built from `web/`.
@@ -203,13 +202,16 @@ listener as the MCP HTTP server, so the UI is available at `/` while MCP stays a
 listener proxies `/api/*` to the API listener, so browser requests stay
 same-origin from the UI.
 
+`--watch` is independent from the app surfaces. Add it when this process should
+also collect Kubernetes history; omit it when another writer already owns
+collection.
+
 Example with all service surfaces:
 
 ```bash
-./kube-insight serve --watch --api --mcp --webui \
+./kube-insight serve --watch --app \
   --db kubeinsight.db \
-  --api-listen 127.0.0.1:8080 \
-  --mcp-listen 127.0.0.1:8090
+  --listen 127.0.0.1:8090
 ```
 
 `serve --mcp` is the preferred service deployment mode for agents that support

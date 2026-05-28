@@ -73,7 +73,7 @@ For a continuous local agent service, keep the watcher running with API, MCP,
 and the built-in Web UI enabled:
 
 ```bash
-./kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
+./kube-insight serve --watch --app --db kubeinsight.db
 ```
 
 Open the embedded UI at <http://127.0.0.1:8090>. Release binaries include the

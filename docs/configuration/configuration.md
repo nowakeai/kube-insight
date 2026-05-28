@@ -260,12 +260,13 @@ Kube-insight supports these operational shapes:
 | --- | --- | --- | --- | --- |
 | One-shot ingest | `kube-insight ingest --file/--dir ...` | yes | no | Offline samples, CI, fixture import |
 | Watcher only | `kube-insight watch [RESOURCE_PATTERN ...]` | yes | no | Dedicated collector process |
+| Local agent app | `kube-insight serve --app` | no | HTTP API, HTTP MCP, Web UI | Built-in Web UI and agent read surfaces |
 | API only | `kube-insight serve --api` or `serve api` | no | HTTP API | Read-only query service |
 | Metrics only | `kube-insight serve --metrics` | no | Prometheus `/metrics` | Scrape storage, filter, and watch health metrics |
 | MCP stdio | `kube-insight serve mcp` | no | stdio MCP | Local agent process launch |
 | MCP HTTP | `kube-insight serve --mcp` | no | Streamable HTTP `/mcp`, legacy SSE `/sse` | Long-running service deployment |
 | Web UI | `kube-insight serve --webui` | no | Embedded HTTP Web UI | Agent chat and dashboard surface |
-| All-in-one local | `kube-insight serve --watch --api --mcp --metrics --webui` | yes | HTTP API, HTTP MCP, Metrics, Web UI | Local PoC or small single-instance deployment |
+| All-in-one local | `kube-insight serve --watch --app --metrics` | yes | HTTP API, HTTP MCP, Metrics, Web UI | Local PoC or small single-instance deployment |
 | Split production | one `--watch` writer plus N `--api/--mcp/--metrics/--webui` readers | writer only | readers only | HA/scale-out with one writer owner |
 
 In production, prefer one writer instance and multiple read-only instances
@@ -275,9 +276,9 @@ history writes while still allowing API/MCP/WebUI scale-out.
 Compact service examples:
 
 ```bash
-kube-insight serve --watch --api --mcp --db kubeinsight.db
-kube-insight serve --watch --api --mcp --metrics --db kubeinsight.db
-kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
+kube-insight serve --app --db kubeinsight.db
+kube-insight serve --watch --app --db kubeinsight.db
+kube-insight serve --watch --app --metrics --db kubeinsight.db
 kube-insight serve --watch pods events.events.k8s.io --api --db kubeinsight.db
 ```
 
@@ -385,9 +386,8 @@ kube-insight db retention --profile event_rollup --max-age 168h --yes
 Service listen flags:
 
 ```bash
-kube-insight serve --api --mcp --webui \
-  --api-listen 0.0.0.0:8080 \
-  --mcp-listen 0.0.0.0:8090 \
+kube-insight serve --app \
+  --listen 0.0.0.0:8090 \
   --metrics-listen 0.0.0.0:9090
 ```
 
@@ -395,9 +395,10 @@ Release binaries embed the built Web UI assets. Open the UI at the configured
 MCP HTTP address, for example <http://127.0.0.1:8090>. By default, `--webui`
 shares the MCP listener: Web UI is served from `/`, MCP Streamable HTTP remains
 at `/mcp`, and legacy SSE remains at `/sse`. Pass `--webui-listen` only when you
-intentionally want a separate Web UI port. When `--api` or `--metrics` are
-enabled in the same process, the Web UI listener proxies `/api/*` and `/metrics`
-to those listeners so browser requests stay same-origin.
+intentionally want a separate Web UI port; pass `--api-listen` or `--mcp-listen`
+only for split listeners. When `--api` or `--metrics` are enabled in the same
+process, the Web UI listener proxies `/api/*` and `/metrics` to those listeners
+so browser requests stay same-origin.
 
 Metrics are exposed in Prometheus text format at `/metrics`. The metrics server
 uses the official Prometheus Go client and currently exports storage row counts,

@@ -17,12 +17,10 @@ cleanup() {
 trap cleanup EXIT
 
 "${BIN}" serve \
-  --api \
-  --mcp \
-  --webui \
+  --app \
   --db "${DB}" \
   --api-listen "${API_LISTEN}" \
-  --mcp-listen "${MCP_WEBUI_LISTEN}" \
+  --listen "${MCP_WEBUI_LISTEN}" \
   >"${LOG}" 2>&1 &
 SERVER_PID="$!"
 

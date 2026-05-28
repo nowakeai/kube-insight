@@ -23,14 +23,14 @@ func TestRunServeHelpShowsCombinedServiceFlags(t *testing.T) {
 	out := stdout.String()
 	for _, want := range []string{
 		"serve [RESOURCE_PATTERN ...]",
+		"--app",
+		"--listen",
 		"--watch",
 		"--api",
 		"--mcp",
 		"--webui",
 		"--metrics",
 		"--api-listen",
-		"--mcp-listen",
-		"--webui-listen",
 		"--metrics-listen",
 		"kube-insight serve mcp",
 	} {
@@ -71,6 +71,29 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 	cfg.Storage.Driver = "sqlite"
 	if got := serviceStorageTarget(cfg, "custom.db"); got != "custom.db" {
 		t.Fatalf("sqlite target = %q", got)
+	}
+}
+
+func TestBuildServeSelectionAppEnablesAgentSurfaces(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("app", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("listen", "127.0.0.1:19090"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{App: true, AppListen: "127.0.0.1:19090"})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if !selection.API || !selection.MCP || !selection.WebUI {
+		t.Fatalf("app selection = api %v mcp %v webui %v, want all true", selection.API, selection.MCP, selection.WebUI)
+	}
+	if selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
+		t.Fatalf("app listen = mcp %q webui %q, want shared override", selection.MCPListen, selection.WebUIListen)
 	}
 }
 

@@ -206,16 +206,18 @@ history examples.
 <!--
 Replace this placeholder with the GitHub user-attachments `.mp4` URL after
 recording. Recommended prompt for the first demo:
-"What happened to Service default/api before it recovered? Use retained history
-and cite the evidence."
+"Did the gcp cluster 2 node pool change in the last 3 days? Use retained
+history and SQL aggregation to show added/deleted node counts, current node
+types, and total CPU and memory capacity. Cite the evidence."
 
-This keeps the recording short while showing the advantage over live kubectl:
-the agent can explain a recovered incident from retained Pod/Event/version
-history, not just current state.
+This shows the advantage over live kubectl: the agent reconstructs retained Node
+lifecycle history, resolves a human cluster name, runs SQL-backed aggregation,
+and combines historical churn with current capacity.
 -->
 
-> Built-in agent demo video placeholder: explain what happened to Service
-> `default/api` before it recovered, using retained history and citations.
+> Built-in agent demo video placeholder: explain whether the `gcp cluster 2`
+> node pool changed in the last 3 days, using retained history, SQL aggregation,
+> and citations.
 
 ## Agent Investigation Loop
 

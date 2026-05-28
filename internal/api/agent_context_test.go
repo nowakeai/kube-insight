@@ -277,7 +277,7 @@ func TestAgentMessagesPlaceVolatileClientContextAfterStableHistory(t *testing.T)
 	if messages[0].Content != "最近有没有 OOM 现象？" || messages[1].Content != "发现 1 个 OOMKilled Pod。" {
 		t.Fatalf("stable history order changed: %#v", messages)
 	}
-	if messages[2].Role != agent.RoleSystem || !strings.Contains(messages[2].Content, "Client context for this run") || !strings.Contains(messages[2].Content, "Asia/Shanghai") {
+	if messages[2].Role != agent.RoleSystem || !strings.Contains(messages[2].Content, "Client context for this run") || !strings.Contains(messages[2].Content, "Asia/Shanghai") || !strings.Contains(messages[2].Content, "Detected current prompt language: Chinese") {
 		t.Fatalf("client context should be late system message: %#v", messages[2])
 	}
 	if messages[3].Role != agent.RoleUser || messages[3].Content != "最近1小时内呢" {
@@ -538,7 +538,7 @@ func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing
 		t.Fatalf("request provider/model = %#v", request)
 	}
 	joined := completionRequestMessageText(request.Messages)
-	for _, want := range []string{"Stable instruction.", "最近有没有 OOM 现象？", "发现 OOMKilled Pod", "Client context for this run", "2026-05-26T10:00:00Z", "2026-05-26T18:00:00+08:00", "Asia/Shanghai", "480", "zh-CN", "current time base", "最近1小时内呢"} {
+	for _, want := range []string{"Stable instruction.", "最近有没有 OOM 现象？", "发现 OOMKilled Pod", "Client context for this run", "2026-05-26T10:00:00Z", "2026-05-26T18:00:00+08:00", "Asia/Shanghai", "480", "zh-CN", "current time base", "Detected current prompt language: Chinese", "Response language for this run: Chinese", "最近1小时内呢"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("completion request missing %q: %#v", want, request.Messages)
 		}

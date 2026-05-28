@@ -15,7 +15,7 @@ const maxHistoricalToolReplayContentRunes = 4000
 
 func (s *Server) agentMessagesForRun(ctx context.Context, run agent.Run) []agent.Message {
 	messages := agentConversationMessagesForRun(ctx, s.agentStore, run)
-	if context := agentRunClientContextMessage(run.Metadata); context != "" {
+	if context := agentRunClientContextMessage(run.Metadata, run.Input); context != "" {
 		messages = append(messages, agent.Message{Role: agent.RoleSystem, Content: context})
 	}
 	messages = append(messages, agent.Message{Role: agent.RoleUser, Content: run.Input})
@@ -689,7 +689,7 @@ func finalAnswerForRunContext(ctx context.Context, store agent.Store, runID stri
 	return answer
 }
 
-func agentRunClientContextMessage(metadata json.RawMessage) string {
+func agentRunClientContextMessage(metadata json.RawMessage, input string) string {
 	if len(metadata) == 0 || !json.Valid(metadata) {
 		return ""
 	}
@@ -706,6 +706,13 @@ func agentRunClientContextMessage(metadata json.RawMessage) string {
 	b.WriteString("- Treat Client sent at/local time/time zone as the current time base for this run. Use this, not server time, model training time, or tool checked_at timestamps, to interpret relative user dates/times such as today, yesterday, last 10 minutes, or this week. It is not proof about Kubernetes state. Compute absolute from/to bounds before the first data tool call. Use UTC for tool arguments and SQL predicates, but render final-answer timestamps in the client time zone when provided, preferably with the IANA time zone name or numeric offset instead of ambiguous abbreviations; include UTC only as a secondary reference when useful.\n")
 	b.WriteString("- Final answers that include any query window, observation timestamp, change timestamp, or lookback window must include the client-local time zone label when provided. If a tool returns only UTC, convert or restate the same window with the client time zone next to it before answering.\n")
 	b.WriteString("- Client locale and languages are UI formatting context only. Do not use them to choose the response language, even when they are values such as zh-CN; answer in the language of the user's current prompt unless the user explicitly asks for another language.\n")
+	if language := detectedPromptLanguage(input); language != "" {
+		b.WriteString("- Detected current prompt language: ")
+		b.WriteString(language)
+		b.WriteString(". Response language for this run: ")
+		b.WriteString(language)
+		b.WriteString(". Do not answer in a different language because of browser locale or client languages.\n")
+	}
 	writeClientContextLine(&b, "Client sent at", contextString(contextRecord, "sentAt"))
 	writeClientContextLine(&b, "Client local time", contextString(contextRecord, "localTime"))
 	writeClientContextLine(&b, "Client time zone", contextString(contextRecord, "timeZone"))
@@ -718,6 +725,26 @@ func agentRunClientContextMessage(metadata json.RawMessage) string {
 		return ""
 	}
 	return value
+}
+
+func detectedPromptLanguage(input string) string {
+	han := 0
+	latin := 0
+	for _, r := range input {
+		switch {
+		case r >= '\u4e00' && r <= '\u9fff':
+			han++
+		case (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z'):
+			latin++
+		}
+	}
+	if han > 0 {
+		return "Chinese"
+	}
+	if latin > 0 {
+		return "English"
+	}
+	return ""
 }
 
 func writeClientContextLine(b *strings.Builder, key, value string) {

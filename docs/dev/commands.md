@@ -58,12 +58,12 @@ Watch a selected resource set:
 Run local service surfaces for backend-only tests or isolated smoke runs:
 
 ```bash
-./bin/kube-insight serve --watch --api --mcp --metrics --db kubeinsight.db
+./bin/kube-insight serve --watch --app --metrics --db kubeinsight.db
 ```
 
 For Web UI or frontend development, do not start a separate host
 `kube-insight serve` process, and do not run Vite directly on the host. Use the
-Docker compose dev environment; it runs ClickHouse, the watcher/API, and the
+Docker compose dev environment; it runs ClickHouse, the watcher/app server, and the
 Vite Web UI service together:
 
 ```bash
@@ -89,8 +89,8 @@ make dev-compose-logs
 The compose stack owns these local surfaces:
 
 - `web`: Vite dev server on `http://127.0.0.1:5173`.
-- `watcher`: kube-insight watcher/API on `http://127.0.0.1:8080` and metrics on
-  `http://127.0.0.1:9090`.
+- `watcher`: kube-insight watcher/app server on `http://127.0.0.1:8090` with
+  API at `/api/v1/*`, MCP at `/mcp`, and metrics at `/metrics`.
 - `clickhouse`: local ClickHouse HTTP endpoint on `http://127.0.0.1:8123`.
 
 Frontend source files are bind-mounted from `./web` into the `web` container.
@@ -146,12 +146,12 @@ Quick health checks:
 ```bash
 curl -fsS http://127.0.0.1:5173/healthz
 curl -fsS 'http://127.0.0.1:5173/api/v1/agent/sessions?limit=1'
-curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:8090/healthz
 ```
 
 Use host `./bin/kube-insight serve` only for backend-only tests or isolated
 smoke runs. When you do that, stop the host process before returning to Web UI
-development so port 8080 and API behavior are not split across multiple
+development so port 8090 and API behavior are not split across multiple
 backends.
 
 When the dev server is exposed through a remote workspace domain, configure Vite
@@ -214,8 +214,8 @@ drift. `make clickhouse-cleanup-repair-artifacts` lists empty repair scratch
 tables without dropping them. `make clickhouse-clean-system-logs` flushes and
 truncates local ClickHouse `system.*_log` diagnostic tables without touching the
 `kube_insight` database. Use `make clickhouse-serve-dev` to run the local
-ClickHouse watcher/API/metrics loop. Use `make dev-compose-up-detached` to run
-ClickHouse, the watcher/API, and the Vite Web UI in containers, and
+ClickHouse watcher/app loop. Use `make dev-compose-up-detached` to run
+ClickHouse, the watcher/app server, and the Vite Web UI in containers, and
 `make dev-compose-ps` to inspect their status. See [ClickHouse Local Workflow](clickhouse-local-workflow.md) for
 the full profile loop.
 
@@ -388,7 +388,7 @@ model. This uses the compose API and writes JSON outputs for schema, health, and
 representative SQL/profile cases:
 
 ```bash
-KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8090 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
 ```
 
 Run the ClickHouse-backed aggregation agent cases when checking whether prompt
@@ -396,7 +396,7 @@ changes generalize beyond the Node inventory case. Use non-strict mode for a
 baseline so all traces are captured even if some checks fail:
 
 ```bash
-KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8090 \
 KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
 KUBE_INSIGHT_AGENT_CASE_SET=aggregation \
 KUBE_INSIGHT_AGENT_CASE_PARALLEL=3 \
@@ -456,9 +456,9 @@ codex exec -c features.use_legacy_landlock=false \
 
 On this dev host, `workspace-write` plus the inherited legacy Landlock setting
 can prevent child shell startup, and `workspace-write` may also block loopback
-access to `127.0.0.1:8080`. Use the explicit `features.use_legacy_landlock=false`
+access to `127.0.0.1:8090`. Use the explicit `features.use_legacy_landlock=false`
 override and `danger-full-access` only for this already-isolated temporary
-black-box harness. If `127.0.0.1:8080` still fails, fix the test environment or
+black-box harness. If `127.0.0.1:8090` still fails, fix the test environment or
 use the compose service network; do not accept a SQLite fallback as a passing
 skill evaluation. If raw ClickHouse HTTP on `127.0.0.1:8123` returns
 `401 Unauthorized`, use kube-insight's `POST /api/v1/sql` read-only endpoint
@@ -547,7 +547,7 @@ Smoke-test the ClickHouse-backed API against live watcher data:
 
 ```bash
 make clickhouse-api-smoke
-CLICKHOUSE_API_SMOKE_API=http://127.0.0.1:8080 make clickhouse-api-smoke
+CLICKHOUSE_API_SMOKE_API=http://127.0.0.1:8090 make clickhouse-api-smoke
 ```
 
 The smoke test selects a real Pod and Service from ClickHouse, calls health,
@@ -562,7 +562,7 @@ Profile the live ClickHouse database written by a running watcher:
 ```bash
 make clickhouse-live-profile
 CLICKHOUSE_LIVE_DATABASE=kube_insight make clickhouse-live-profile
-CLICKHOUSE_LIVE_PROFILE_API=http://127.0.0.1:8080 make clickhouse-live-profile
+CLICKHOUSE_LIVE_PROFILE_API=http://127.0.0.1:8090 make clickhouse-live-profile
 ```
 
 Run a same-dataset storage-mode benchmark across the local backends that are
@@ -627,7 +627,7 @@ make open-source-check
 Scrape metrics:
 
 ```bash
-curl http://127.0.0.1:9090/metrics
+curl http://127.0.0.1:8090/metrics
 ```
 
 When `storage.driver: clickhouse` is selected, `serve --metrics` reads from the
@@ -644,7 +644,7 @@ Run a dry-run from the compose/dev API before deleting hidden retry branches or
 unreferenced transient artifacts:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact \
+curl -sS -X POST http://127.0.0.1:8090/api/v1/agent/retention/compact \
   -H "content-type: application/json" \
   -d "{\"dryRun\":true}"
 ```
@@ -652,7 +652,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact \
 Apply the default compaction:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/agent/retention/compact -d "{}"
+curl -sS -X POST http://127.0.0.1:8090/api/v1/agent/retention/compact -d "{}"
 ```
 
 The API server also runs this retention job periodically when

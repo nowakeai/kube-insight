@@ -46,19 +46,16 @@ services:
       - ${KUBECONFIG_PATH:-${HOME}/.kube/config}:/home/kube-insight/.kube/config:ro
       - ${GCLOUD_CONFIG_PATH:-${HOME}/.config/gcloud}:/home/kube-insight/.config/gcloud
     ports:
-      - "${KUBE_INSIGHT_API_PORT:-8080}:8080"
-      - "${KUBE_INSIGHT_METRICS_PORT:-9090}:9090"
+      - "${KUBE_INSIGHT_APP_PORT:-8090}:8090"
     command:
       - serve
       - --config
       - /workspace/config/kube-insight.clickhouse.example.yaml
       - --watch
-      - --api
-      - --api-listen
-      - 0.0.0.0:8080
+      - --app
       - --metrics
-      - --metrics-listen
-      - 0.0.0.0:9090
+      - --listen
+      - 0.0.0.0:8090
 
   web:
     build:
@@ -69,8 +66,8 @@ services:
       watcher:
         condition: service_started
     environment:
-      KUBE_INSIGHT_API_PROXY_TARGET: http://watcher:8080
-      KUBE_INSIGHT_METRICS_PROXY_TARGET: http://watcher:9090
+      KUBE_INSIGHT_API_PROXY_TARGET: http://watcher:8090
+      KUBE_INSIGHT_METRICS_PROXY_TARGET: http://watcher:8090
       KUBE_INSIGHT_WEB_ALLOWED_HOSTS: ${KUBE_INSIGHT_WEB_ALLOWED_HOSTS:-}
       CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
     volumes:

@@ -1,5 +1,9 @@
 # Reverse Delta Query And Indexing
 
+Audience: historical research readers. This archive may describe older product
+names or discarded approaches; use current docs for setup and supported
+behavior.
+
 Reverse-delta storage should not be queried by scanning compressed patches.
 The query model is split into latest indexes and version reconstruction.
 

@@ -1,5 +1,9 @@
 # Agent And UI Roadmap
 
+Audience: product and contributor planning. Use
+[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md) for a
+hands-on user workflow.
+
 Kube-insight is for human operators and for agents. The same evidence API should
 power CLI, web, MCP, and skill integrations.
 

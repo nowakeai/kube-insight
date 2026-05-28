@@ -1,5 +1,8 @@
 # KubeChronicle Product Design
 
+Audience: historical research readers. This archive uses an earlier product
+name; use current kube-insight docs for setup and supported behavior.
+
 ## 1. Product Definition
 
 KubeChronicle is a historical evidence store for Kubernetes clusters.

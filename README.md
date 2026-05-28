@@ -305,6 +305,8 @@ Facts and edges are the candidate path. Versions are the proof.
 
 - [Product brief](docs/requirements/product-brief.md)
 - [Quickstart](docs/quickstart.md)
+- [Built-in Web UI agent tutorial](docs/tutorials/builtin-webui-agent.md)
+- [External agent skill tutorial](docs/tutorials/external-agent-skill.md)
 - [Full documentation index](docs/README.md)
 - [Configuration](docs/configuration/configuration.md)
 - [Data model](docs/data/data-model.md)

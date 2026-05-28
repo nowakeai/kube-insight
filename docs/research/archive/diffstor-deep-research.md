@@ -1,5 +1,9 @@
 # DiffStor Deep Research Notes
 
+Audience: historical research readers. This archive may describe older product
+names or discarded approaches; use current docs for setup and supported
+behavior.
+
 ## Executive Conclusion
 
 DiffStor should not be designed as "JSON Patch plus compression". That is too

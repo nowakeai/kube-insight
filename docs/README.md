@@ -14,24 +14,51 @@ which objects were related, what changed nearby, and what evidence still exists
 after Kubernetes Events and live state have moved on.
 ```
 
-## User Documentation
+## Start Here
 
 Read these in order when evaluating or using kube-insight:
 
 1. [Product Brief](requirements/product-brief.md)
 2. [Quickstart](quickstart.md)
-3. [Configuration](configuration/configuration.md)
-4. [Data Model](data/data-model.md)
-5. [Storage Modes And Performance](validation/storage-mode-comparison.md)
-6. [Agent SQL Cookbook](workflows/agent-sql-cookbook.md)
-7. [kube-insight Agent Skill](../kube-insight-skill/SKILL.md)
-8. [Real-World Troubleshooting Cases](workflows/real-world-cases.md)
-9. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
-10. [Security, Privacy, And Retention](security/security-retention.md)
+3. [Built-in Web UI Agent Tutorial](tutorials/builtin-webui-agent.md)
+4. [External Agent Skill Tutorial](tutorials/external-agent-skill.md)
+5. [Configuration](configuration/configuration.md)
+6. [Storage Modes And Performance](validation/storage-mode-comparison.md)
+7. [Troubleshooting Workflows](workflows/troubleshooting-workflows.md)
+8. [Security, Privacy, And Retention](security/security-retention.md)
 
-## Design References
+## User Guides And Tutorials
 
-These documents explain the system shape and current implementation direction:
+- [Built-in Web UI Agent Tutorial](tutorials/builtin-webui-agent.md): configure
+  the server-side LLM provider, start `serve --app`, open the browser UI, and
+  run a history-first investigation.
+- [External Agent Skill Tutorial](tutorials/external-agent-skill.md): connect
+  Codex, Claude, or another external agent to kube-insight through MCP or the
+  read-only HTTP API.
+- [Agent SQL Cookbook](workflows/agent-sql-cookbook.md): schema-first SQL
+  patterns for agents and operators.
+- [Real-World Troubleshooting Cases](workflows/real-world-cases.md): example
+  incident questions and the evidence kube-insight should return.
+- [Validated Troubleshooting Scenarios](workflows/validated-troubleshooting-scenarios.md):
+  tested scenarios and expected investigation signals.
+
+## Operator Reference
+
+Use these when configuring or operating kube-insight:
+
+- [Configuration](configuration/configuration.md)
+- [Processing Configuration Model](configuration/processing-model.md)
+- [Data Model](data/data-model.md)
+- [Facts Catalog](data/facts-catalog.md)
+- [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
+- [Security, Privacy, And Retention](security/security-retention.md)
+- [Storage Modes And Performance](validation/storage-mode-comparison.md)
+
+## Contributor And Design References
+
+These documents are not required for normal use. They are for contributors,
+operators evaluating internals, and maintainers who need the system design,
+roadmap history, or unresolved design context:
 
 - [Roadmap](roadmap/roadmap.md)
 - [System Architecture](architecture/system-architecture.md)
@@ -50,6 +77,20 @@ These documents explain the system shape and current implementation direction:
 - [Backend Strategy](research/backend-strategy.md)
 - [Storage Cost And Compression Notes](research/storage-cost-and-compression-notes.md)
 - [Roadmap And Open Questions](roadmap/roadmap-open-questions.md)
+
+## Research Archive
+
+Historical design and storage research from the DiffStor and KubeChronicle phase
+is kept under [research/archive](research/archive/). These documents are useful
+background for maintainers, but they are not user tutorials and may describe
+older product names or discarded approaches:
+
+- [Backend Comparison: SQLite+Zstd vs TimescaleDB](research/archive/backend-comparison.md)
+- [DiffStor Deep Research Notes](research/archive/diffstor-deep-research.md)
+- [DiffStor PoC Plan](research/archive/diffstor-poc-plan.md)
+- [Reverse Delta Query And Indexing](research/archive/diffstor-query-indexing.md)
+- [KubeChronicle Product Design](research/archive/kubechronicle-product-design.md)
+- [KubeChronicle Storage, Index, And Query Design](research/archive/kubechronicle-storage-index-query-design.md)
 
 ## nowake.ai Docs Site Source Contract
 
@@ -101,6 +142,7 @@ workflow records live under `docs/dev/` so user-facing docs stay focused.
 | Category | Contents |
 | --- | --- |
 | `requirements/` | Product definition, target users, core use cases, MVP boundary. |
+| `tutorials/` | User tutorials for the built-in Web UI agent and external agent skill. |
 | `architecture/` | System-level components, deployment shape, and technology stack. |
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
@@ -113,10 +155,3 @@ workflow records live under `docs/dev/` so user-facing docs stay focused.
 | `research/` | Backend strategy and supporting research. |
 | `validation/` | User-facing benchmark, performance, and storage-mode validation summaries. |
 | `roadmap/` | Product roadmap, implementation phases, and unresolved questions. |
-
-## Research Archive
-
-Historical design and storage research from the DiffStor and KubeChronicle phase
-is kept under [research/archive](research/archive/). These documents are useful
-background, but the main kube-insight design docs above are the current source
-of truth.

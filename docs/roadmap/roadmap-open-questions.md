@@ -1,5 +1,8 @@
 # Roadmap And Open Questions
 
+Audience: maintainers and contributors tracking unresolved product and design
+questions. Start with [Roadmap](roadmap.md) for the stable public roadmap.
+
 ## Milestone 0: Design Freeze For PoC
 
 Deliverables:

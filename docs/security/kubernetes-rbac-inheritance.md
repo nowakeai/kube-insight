@@ -1,5 +1,9 @@
 # Kubernetes RBAC Inheritance
 
+Audience: security and service-auth contributors. Start with
+[Security, Privacy, And Retention](security-retention.md) for current
+user-facing security guidance.
+
 ## Goal
 
 `kube-insight` must not become a privilege escalation path.

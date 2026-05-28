@@ -1,5 +1,8 @@
 # KubeChronicle Storage, Index, And Query Design
 
+Audience: historical research readers. This archive uses an earlier product
+name; use current kube-insight docs for setup and supported behavior.
+
 This document turns the product shape into an implementation-oriented storage
 and query design.
 

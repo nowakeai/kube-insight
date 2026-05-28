@@ -1,5 +1,8 @@
 # Storage, Index, And Query Design
 
+Audience: contributors working on storage internals and query surfaces. Start
+with [Data Model](data-model.md) for the user-facing schema explanation.
+
 ## Storage Rules
 
 ### Resource Versions

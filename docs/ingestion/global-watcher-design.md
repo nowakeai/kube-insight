@@ -1,5 +1,8 @@
 # Global Watcher Design
 
+Audience: contributors working on discovery, watches, and collection internals.
+Start with [Quickstart](../quickstart.md) for normal collection commands.
+
 ## Goal
 
 `kube-insight` should automatically watch and persist all Kubernetes resources

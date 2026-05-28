@@ -21,13 +21,13 @@ The same primitives are available over the read-only HTTP API and MCP. Both
 follow the configured `storage.driver`:
 
 ```bash
-kube-insight serve api --db kubeinsight.db --listen 127.0.0.1:8080
-curl http://127.0.0.1:8080/api/v1/schema
-curl -X POST http://127.0.0.1:8080/api/v1/sql \
+kube-insight serve --app --db kubeinsight.db --listen 127.0.0.1:8090
+curl http://127.0.0.1:8090/api/v1/schema
+curl -X POST http://127.0.0.1:8090/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 10","maxRows":10}'
-curl http://127.0.0.1:8080/api/v1/health
-curl 'http://127.0.0.1:8080/api/v1/history?kind=Pod&namespace=default&name=api-1&maxVersions=5&maxObservations=20'
+curl http://127.0.0.1:8090/api/v1/health
+curl 'http://127.0.0.1:8090/api/v1/history?kind=Pod&namespace=default&name=api-1&maxVersions=5&maxObservations=20'
 ```
 
 `schema` returns more than raw columns:

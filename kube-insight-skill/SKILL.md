@@ -82,8 +82,8 @@ Supported access paths:
 
 1. Remote MCP service: ask for a Streamable HTTP MCP URL such as
    `http://HOST:8090/mcp`. This is the preferred path for external agents when
-   kube-insight is already running with `serve --mcp`.
-2. HTTP API service: ask for an API base URL such as `http://HOST:8080`. Verify
+   kube-insight is already running with `serve --app`.
+2. HTTP API service: ask for an API base URL such as `http://HOST:8090`. Verify
    with `GET /healthz` and `GET /api/v1/server/info`, then use
    `GET /api/v1/health?detail=full&limit=500`, `GET /api/v1/schema`, and
    `POST /api/v1/sql`.
@@ -92,16 +92,16 @@ Supported access paths:
    and/or MCP port locally. After port-forwarding, use the same MCP or HTTP
    paths above.
 4. Local SQLite service: if the user has a local `kubeinsight.db`, ask them to
-   run `kube-insight serve --api --mcp --db kubeinsight.db`, or
-   `kube-insight serve --watch --api --mcp --db kubeinsight.db` when they also
+   run `kube-insight serve --app --db kubeinsight.db`, or
+   `kube-insight serve --watch --app --db kubeinsight.db` when they also
    want to collect from the current kubeconfig context.
 5. Local chDB service: if the user uses the chDB-enabled binary and config, ask
-   them to run the chDB build with its config and `serve --api --mcp`; the MCP
+   them to run the chDB build with its config and `serve --app`; the MCP
    and HTTP surfaces are the same, but agents must read schema because the SQL
    contract is ClickHouse-compatible rather than SQLite.
 6. ClickHouse-backed service: for team or continuous history deployments, ask
    for the existing API/MCP URL, or ask the user to start kube-insight with the
-   ClickHouse config plus `serve --watch --api --mcp`.
+   ClickHouse config plus `serve --watch --app`.
 7. Stdio MCP only when the agent runtime explicitly requires a local subprocess:
    `kube-insight serve mcp --db kubeinsight.db`, or the equivalent command with
    the user's chDB/ClickHouse config.
@@ -110,11 +110,11 @@ If no access path is available yet, tell the user the smallest useful local
 setup from the quickstart:
 
 ```bash
-kube-insight serve --watch --api --mcp --db kubeinsight.db
+kube-insight serve --watch --app --db kubeinsight.db
 ```
 
 Then connect MCP clients to `http://127.0.0.1:8090/mcp`, or use the HTTP API at
-`http://127.0.0.1:8080` if MCP is not available. If
+`http://127.0.0.1:8090` if MCP is not available. If
 `GET /api/v1/server/info` says MCP is disabled, continue through the HTTP API
 instead of probing MCP paths. Legacy SSE may exist at `/sse` for older clients,
 but new remote-agent setups should use Streamable HTTP `/mcp`.

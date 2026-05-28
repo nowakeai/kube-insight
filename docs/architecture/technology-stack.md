@@ -1,5 +1,8 @@
 # Technology Stack
 
+Audience: contributors and evaluators comparing implementation choices. Start
+with [Quickstart](../quickstart.md) for normal usage.
+
 ## Decision
 
 Build the first implementation around Go, SQLite default local storage, ClickHouse central evidence storage, optional chDB local storage, and a React UI.

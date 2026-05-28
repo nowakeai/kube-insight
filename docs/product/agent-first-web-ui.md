@@ -1,5 +1,9 @@
 # Agent-First Web UI Design
 
+Audience: product and implementation contributors. Use
+[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md) for the
+user tutorial.
+
 Status date: 2026-05-22
 
 This document records the first Web UI milestone direction. The product shape is

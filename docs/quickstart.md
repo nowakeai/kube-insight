@@ -228,7 +228,9 @@ Supported provider values are `openai` and `openai-compatible`. Omit
 OpenAI endpoint. The API reports whether the key/base URL variables are
 configured, but never returns the secret values. See
 [Configuration](configuration/configuration.md#roles-and-service-mode) for the
-full `server.chat` schema.
+full `server.chat` schema, or follow the
+[Built-in Web UI Agent Tutorial](tutorials/builtin-webui-agent.md) for an
+end-to-end browser workflow.
 
 `--watch` is independent from the app surfaces. Add it when this process should
 also collect Kubernetes history; omit it when another writer already owns
@@ -242,7 +244,7 @@ Example with all service surfaces:
   --listen 127.0.0.1:8090
 ```
 
-`serve --mcp` is the preferred service deployment mode for agents that support
+`serve --app` is the preferred service deployment mode for agents that support
 remote MCP over Streamable HTTP. Use `serve mcp` only when an agent runtime
 explicitly expects stdio MCP.
 
@@ -274,10 +276,9 @@ SQLite, chDB, and ClickHouse access owned by the long-lived kube-insight service
 process:
 
 ```bash
-./kube-insight serve --watch --api --mcp \
+./kube-insight serve --watch --app \
   --db kubeinsight.db \
-  --api-listen 127.0.0.1:8080 \
-  --mcp-listen 127.0.0.1:8090
+  --listen 127.0.0.1:8090
 ```
 
 Configure an MCP client that supports Streamable HTTP with the service endpoint:
@@ -309,6 +310,10 @@ MCP follows the configured `storage.driver`: SQLite by default, ClickHouse when
 started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
 Agents should call `kube_insight_schema` first because SQLite and
 ClickHouse-compatible backends expose different SQL table names.
+
+If you want to use kube-insight from Codex, Claude, or another external agent
+instead of the built-in Web UI agent, follow the
+[External Agent Skill Tutorial](tutorials/external-agent-skill.md).
 
 When the built-in Web UI/API chat agent runs against a SQLite DB, kube-insight
 adds a small runtime orientation message before each run. It includes collector

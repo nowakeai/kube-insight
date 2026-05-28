@@ -1,5 +1,8 @@
 # Backend Comparison: SQLite+Zstd vs TimescaleDB
 
+Audience: historical research readers. This archive may describe older
+assumptions; use current docs for setup and supported behavior.
+
 ## Scope
 
 This test evaluates two ready-made storage approaches for:

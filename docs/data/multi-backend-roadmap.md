@@ -1,5 +1,9 @@
 # Multi Backend Roadmap
 
+Audience: contributors planning storage backend evolution. Start with
+[Storage Modes And Performance](../validation/storage-mode-comparison.md) for
+user-facing backend choices.
+
 SQLite is the default local single-file backend in the pure-Go artifact and the
 deterministic test backend. The chDB-enabled local variant gives embedded runs
 the same ClickHouse-compatible table/query contract as the central ClickHouse

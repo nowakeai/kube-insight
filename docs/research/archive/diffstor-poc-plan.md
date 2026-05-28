@@ -1,5 +1,9 @@
 # DiffStor PoC Plan
 
+Audience: historical research readers. This archive may describe older product
+names or discarded approaches; use current docs for setup and supported
+behavior.
+
 ## PoC 1: Reverse Delta For Versioned JSON
 
 Goal: prove latest reads stay O(1) while historical storage approaches delta

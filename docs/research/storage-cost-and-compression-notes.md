@@ -1,5 +1,9 @@
 # Storage Cost And Compression Notes
 
+Audience: maintainers evaluating storage cost models and compression direction.
+Start with [Storage Modes And Performance](../validation/storage-mode-comparison.md)
+for user-facing tradeoffs.
+
 This note intentionally defers compression implementation. It records the
 current decision so the PoC can focus on real troubleshooting scenarios first.
 

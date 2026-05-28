@@ -1,5 +1,9 @@
 # Backend Strategy
 
+Audience: maintainers evaluating storage strategy. Start with
+[Storage Modes And Performance](../validation/storage-mode-comparison.md) for
+the user-facing backend guide.
+
 ## Decision
 
 Keep the product model backend-agnostic, but optimize the MVP evidence backend

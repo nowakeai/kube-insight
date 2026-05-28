@@ -244,26 +244,35 @@ group by status`)
 
 func (s *Store) UpdateRunStatus(ctx context.Context, id string, status agent.RunStatus, message string) (agent.Run, error) {
 	now := time.Now().UTC()
-	run, err := s.GetRun(ctx, id)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return agent.Run{}, err
+	}
+	defer rollback(tx)
+	run, err := scanAgentRun(tx.QueryRowContext(ctx, `
+select id, session_id, status, input, provider, model, created_at, started_at, completed_at, error, metadata
+from agent_runs
+where id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return agent.Run{}, agent.ErrRunNotFound
+	}
+	if err != nil {
+		return agent.Run{}, err
+	}
+	if agent.IsTerminalRunStatus(run.Status) {
+		return run, nil
 	}
 	startedAt := nullTime(run.StartedAt)
 	completedAt := nullTime(run.CompletedAt)
 	if status == agent.RunRunning && run.StartedAt == nil {
 		startedAt = sql.NullInt64{Int64: millis(now), Valid: true}
 	}
-	if agentStatusTerminal(status) && run.CompletedAt == nil {
+	if agent.IsTerminalRunStatus(status) && run.CompletedAt == nil {
 		completedAt = sql.NullInt64{Int64: millis(now), Valid: true}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return agent.Run{}, err
-	}
-	defer rollback(tx)
 	res, err := tx.ExecContext(ctx, `
-update agent_runs
-set status = ?, started_at = ?, completed_at = ?, error = ?
+	update agent_runs
+	set status = ?, started_at = ?, completed_at = ?, error = ?
 where id = ?`, status, startedAt, completedAt, nullable(message), id)
 	if err != nil {
 		return agent.Run{}, err
@@ -540,15 +549,6 @@ func agentRunExists(ctx context.Context, tx *sql.Tx, runID string) (bool, error)
 	var exists bool
 	err := tx.QueryRowContext(ctx, `select exists(select 1 from agent_runs where id = ?)`, runID).Scan(&exists)
 	return exists, err
-}
-
-func agentStatusTerminal(status agent.RunStatus) bool {
-	switch status {
-	case agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
-		return true
-	default:
-		return false
-	}
 }
 
 func nullTime(value *time.Time) sql.NullInt64 {

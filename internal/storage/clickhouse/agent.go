@@ -188,12 +188,17 @@ ORDER BY created_at DESC, id DESC%s`, q(s.database()), where, limit))
 }
 
 func (s *Store) UpdateRunStatus(ctx context.Context, id string, status agent.RunStatus, message string) (agent.Run, error) {
+	s.agentRunMu.Lock()
+	defer s.agentRunMu.Unlock()
 	if err := s.ensureAgentSchema(ctx); err != nil {
 		return agent.Run{}, err
 	}
 	run, err := s.GetRun(ctx, id)
 	if err != nil {
 		return agent.Run{}, err
+	}
+	if agent.IsTerminalRunStatus(run.Status) {
+		return run, nil
 	}
 	now := time.Now().UTC()
 	run.Status = status
@@ -202,7 +207,7 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id string, status agent.Run
 		startedAt := now
 		run.StartedAt = &startedAt
 	}
-	if agentStatusTerminal(status) && run.CompletedAt == nil {
+	if agent.IsTerminalRunStatus(status) && run.CompletedAt == nil {
 		completedAt := now
 		run.CompletedAt = &completedAt
 	}
@@ -219,6 +224,8 @@ func (s *Store) UpdateRunStatus(ctx context.Context, id string, status agent.Run
 }
 
 func (s *Store) AppendRunEvent(ctx context.Context, runID string, input agent.AppendEventInput) (agent.RunEvent, error) {
+	s.agentRunMu.Lock()
+	defer s.agentRunMu.Unlock()
 	if err := s.ensureAgentSchema(ctx); err != nil {
 		return agent.RunEvent{}, err
 	}
@@ -530,13 +537,4 @@ func cloneRawMessage(value json.RawMessage) json.RawMessage {
 	out := make([]byte, len(value))
 	copy(out, value)
 	return out
-}
-
-func agentStatusTerminal(status agent.RunStatus) bool {
-	switch status {
-	case agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
-		return true
-	default:
-		return false
-	}
 }

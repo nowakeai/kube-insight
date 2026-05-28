@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,6 +87,28 @@ func TestAgentSessionRunLifecycleEndpoints(t *testing.T) {
 	body = getBody(t, server.URL+"/api/v1/agent/sessions?limit=5", http.StatusOK)
 	if strings.Contains(body, session.ID) {
 		t.Fatalf("deleted session still listed: %s", body)
+	}
+}
+
+func TestWriteServerSentEventsUsesSequenceAndIDCursor(t *testing.T) {
+	events := []agent.RunEvent{
+		{ID: "event_a", RunID: "run_1", Sequence: 1, Type: agent.EventRunStarted},
+		{ID: "event_b", RunID: "run_1", Sequence: 1, Type: agent.EventMessageDelta},
+		{ID: "event_c", RunID: "run_1", Sequence: 2, Type: agent.EventRunCompleted},
+	}
+	var first bytes.Buffer
+	cursor, ok := writeServerSentEvents(&first, events[:1], agentRunEventCursor{})
+	if !ok {
+		t.Fatal("first write failed")
+	}
+	var second bytes.Buffer
+	cursor, ok = writeServerSentEvents(&second, events, cursor)
+	if !ok {
+		t.Fatal("second write failed")
+	}
+	body := second.String()
+	if strings.Contains(body, "event_a") || !strings.Contains(body, "event_b") || !strings.Contains(body, "event_c") {
+		t.Fatalf("unexpected replay body after cursor %#v: %s", cursor, body)
 	}
 }
 

@@ -100,7 +100,7 @@ function dispatchCompleteFrames(
     const frame = parseSSEFrame(frameText)
     if (!frame.data) continue
     const event = parseAgentRunEvent(JSON.parse(frame.data))
-    const key = event.sequence ? `${event.runId}:${event.sequence}` : event.id
+    const key = event.id
     if (seen.has(key)) continue
     seen.add(key)
     onEvent(event)

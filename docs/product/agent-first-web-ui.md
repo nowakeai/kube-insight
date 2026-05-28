@@ -424,7 +424,9 @@ clients need it.
 
 Decision:
 
-- Visual system follows `/home/coder/code/nowake-ai/website/DESIGN.md`: Cloud Index palette, calm technical surfaces, evidence-oriented hierarchy, restrained AI treatment, 6-8px radii, and accessible 44px interactive targets.
+- Visual system follows the nowake.ai Cloud Index direction: calm technical
+  surfaces, evidence-oriented hierarchy, restrained AI treatment, 6-8px radii,
+  and accessible 44px interactive targets.
 - App framework: React + TypeScript + Vite.
 - UI system: shadcn/ui + Tailwind + Radix primitives.
 - Chat UI: assistant-ui.

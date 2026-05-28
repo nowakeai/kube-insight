@@ -15,6 +15,15 @@ const (
 	RunCancelled RunStatus = "cancelled"
 )
 
+func IsTerminalRunStatus(status RunStatus) bool {
+	switch status {
+	case RunCompleted, RunFailed, RunCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 type MessageRole string
 
 const (

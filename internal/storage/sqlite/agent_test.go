@@ -76,6 +76,37 @@ func TestAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	}
 }
 
+func TestAgentStoreTerminalRunStatusCannotBeOverwritten(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{Title: "terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "cancel me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = store.UpdateRunStatus(ctx, run.ID, agent.RunCancelled, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != agent.RunCancelled {
+		t.Fatalf("cancelled run = %#v", run)
+	}
+	run, err = store.UpdateRunStatus(ctx, run.ID, agent.RunCompleted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != agent.RunCancelled {
+		t.Fatalf("terminal run was overwritten: %#v", run)
+	}
+}
+
 func TestAgentStoreDeleteSessionCascadesRunsAndEvents(t *testing.T) {
 	ctx := context.Background()
 	store, err := Open(filepath.Join(t.TempDir(), "kube-insight.db"))

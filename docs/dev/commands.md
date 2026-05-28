@@ -446,7 +446,7 @@ codex exec -c features.use_legacy_landlock=false \
    data, not SQLite fixture/sample databases. You may use kubectl only for
    realistic live validation, port-forwarding, or cluster interaction; do not
    use it as a replacement for kube-insight historical evidence. Do not use
-   Chrome/Next DevTools, /home/coder/.codex/memories, or internal/agent
+   Chrome/Next DevTools, local agent memory files, or internal/agent
    prompt/test files.
    Read kube-insight-skill/SKILL.md and referenced skill files only as needed.
    Do not inspect the kube-insight repository checkout.

@@ -321,7 +321,7 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	lastSequence, ok := writeServerSentEvents(w, events, 0)
+	cursor, ok := writeServerSentEvents(w, events, agentRunEventCursor{})
 	if !ok {
 		return
 	}
@@ -330,7 +330,7 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if agentRunStatusTerminal(run.Status) {
-		flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, lastSequence)
+		flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, cursor)
 		return
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -345,7 +345,7 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
-		lastSequence, ok = writeServerSentEvents(w, events, lastSequence)
+		cursor, ok = writeServerSentEvents(w, events, cursor)
 		if !ok {
 			return
 		}
@@ -355,13 +355,13 @@ func (s *Server) handleAgentRunEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		flushServerSentEvents(w)
 		if agentRunStatusTerminal(run.Status) {
-			flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, lastSequence)
+			flushFinalAgentRunEvents(r.Context(), w, s.agentStore, runID, cursor)
 			return
 		}
 	}
 }
 
-func flushFinalAgentRunEvents(ctx context.Context, w http.ResponseWriter, store agent.Store, runID string, lastSequence int64) {
+func flushFinalAgentRunEvents(ctx context.Context, w http.ResponseWriter, store agent.Store, runID string, cursor agentRunEventCursor) {
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(25 * time.Millisecond)
@@ -372,7 +372,7 @@ func flushFinalAgentRunEvents(ctx context.Context, w http.ResponseWriter, store 
 			return
 		}
 		var ok bool
-		lastSequence, ok = writeServerSentEvents(w, events, lastSequence)
+		cursor, ok = writeServerSentEvents(w, events, cursor)
 		if !ok {
 			return
 		}
@@ -573,6 +573,9 @@ func (s *Server) recordAgentRunFailure(ctx context.Context, runID string, runErr
 	if err != nil {
 		return
 	}
+	if failed.Status != agent.RunFailed {
+		return
+	}
 	_, _ = s.agentStore.AppendRunEvent(ctx, run.ID, agent.AppendEventInput{
 		Type: agent.EventRunFailed,
 		Data: mustJSON(agent.RunStatusEventData{RunID: run.ID, SessionID: failed.SessionID, Status: failed.Status, Error: message}),
@@ -589,12 +592,7 @@ func agentRunEventsShouldFollow(r *http.Request) bool {
 }
 
 func agentRunStatusTerminal(status agent.RunStatus) bool {
-	switch status {
-	case agent.RunCompleted, agent.RunFailed, agent.RunCancelled:
-		return true
-	default:
-		return false
-	}
+	return agent.IsTerminalRunStatus(status)
 }
 
 func (s *Server) handleCancelAgentRun(w http.ResponseWriter, r *http.Request) {
@@ -612,6 +610,10 @@ func (s *Server) handleCancelAgentRun(w http.ResponseWriter, r *http.Request) {
 	run, err = s.agentStore.UpdateRunStatus(r.Context(), runID, agent.RunCancelled, "")
 	if err != nil {
 		writeAgentStoreError(w, err)
+		return
+	}
+	if run.Status != agent.RunCancelled {
+		writeJSON(w, http.StatusOK, run)
 		return
 	}
 	_, err = s.agentStore.AppendRunEvent(r.Context(), run.ID, agent.AppendEventInput{
@@ -649,20 +651,35 @@ func writeAgentStoreError(w http.ResponseWriter, err error) {
 	}
 }
 
-func writeServerSentEvents(w io.Writer, events []agent.RunEvent, afterSequence int64) (int64, bool) {
-	lastSequence := afterSequence
+type agentRunEventCursor struct {
+	Sequence int64
+	ID       string
+}
+
+func writeServerSentEvents(w io.Writer, events []agent.RunEvent, after agentRunEventCursor) (agentRunEventCursor, bool) {
+	cursor := after
 	for _, event := range events {
-		if event.Sequence <= afterSequence {
+		if !agentRunEventAfter(event, after) {
 			continue
 		}
 		if err := writeServerSentEvent(w, event); err != nil {
-			return lastSequence, false
+			return cursor, false
 		}
-		if event.Sequence > lastSequence {
-			lastSequence = event.Sequence
+		if agentRunEventAfter(event, cursor) {
+			cursor = agentRunEventCursor{Sequence: event.Sequence, ID: event.ID}
 		}
 	}
-	return lastSequence, true
+	return cursor, true
+}
+
+func agentRunEventAfter(event agent.RunEvent, cursor agentRunEventCursor) bool {
+	if event.Sequence > cursor.Sequence {
+		return true
+	}
+	if event.Sequence < cursor.Sequence {
+		return false
+	}
+	return cursor.ID == "" || event.ID > cursor.ID
 }
 
 func writeServerSentEvent(w io.Writer, event agent.RunEvent) error {

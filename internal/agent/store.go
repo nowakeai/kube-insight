@@ -226,6 +226,9 @@ func (s *MemoryStore) UpdateRunStatus(ctx context.Context, id string, status Run
 	if !ok {
 		return Run{}, ErrRunNotFound
 	}
+	if IsTerminalRunStatus(run.Status) {
+		return cloneRun(run), nil
+	}
 	run.Status = status
 	run.Error = message
 	if status == RunRunning && run.StartedAt == nil {
@@ -286,12 +289,7 @@ func sortRunsOldestFirst(runs []Run) {
 }
 
 func statusTerminal(status RunStatus) bool {
-	switch status {
-	case RunCompleted, RunFailed, RunCancelled:
-		return true
-	default:
-		return false
-	}
+	return IsTerminalRunStatus(status)
 }
 
 func newID(prefix string) string {

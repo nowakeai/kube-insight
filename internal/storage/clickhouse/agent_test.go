@@ -65,6 +65,34 @@ func TestClickHouseAgentStorePersistsSessionsRunsAndEvents(t *testing.T) {
 	}
 }
 
+func TestClickHouseAgentStoreTerminalRunStatusCannotBeOverwritten(t *testing.T) {
+	client := newFakeAgentClickHouseClient()
+	store := &Store{Client: client, Database: "ki"}
+	ctx := context.Background()
+	session, err := store.CreateSession(ctx, agent.CreateSessionInput{Title: "terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, agent.CreateRunInput{Input: "cancel me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = store.UpdateRunStatus(ctx, run.ID, agent.RunCancelled, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != agent.RunCancelled {
+		t.Fatalf("cancelled run = %#v", run)
+	}
+	run, err = store.UpdateRunStatus(ctx, run.ID, agent.RunCompleted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != agent.RunCancelled {
+		t.Fatalf("terminal run was overwritten: %#v", run)
+	}
+}
+
 func TestClickHouseAgentStoreDeleteSessionPlansMutations(t *testing.T) {
 	client := newFakeAgentClickHouseClient()
 	store := &Store{Client: client, Database: "ki"}

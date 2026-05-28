@@ -317,11 +317,19 @@ func (r einoRunRecorder) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if run.Status != RunRunning {
+		return nil
+	}
 	return r.append(ctx, EventRunStarted, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status})
 }
 
 func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error {
 	if !r.enabled() {
+		return nil
+	}
+	if run, err := r.store.GetRun(ctx, r.runID); err != nil {
+		return err
+	} else if IsTerminalRunStatus(run.Status) {
 		return nil
 	}
 	if finalAnswer != "" {
@@ -349,11 +357,19 @@ func (r einoRunRecorder) Complete(ctx context.Context, finalAnswer string) error
 	if err != nil {
 		return err
 	}
+	if run.Status != RunCompleted {
+		return nil
+	}
 	return r.append(ctx, EventRunCompleted, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status})
 }
 
 func (r einoRunRecorder) Fail(ctx context.Context, runErr error) error {
 	if !r.enabled() {
+		return nil
+	}
+	if run, err := r.store.GetRun(ctx, r.runID); err != nil {
+		return err
+	} else if IsTerminalRunStatus(run.Status) {
 		return nil
 	}
 	message := ""
@@ -366,6 +382,9 @@ func (r einoRunRecorder) Fail(ctx context.Context, runErr error) error {
 	run, err := r.store.UpdateRunStatus(ctx, r.runID, RunFailed, message)
 	if err != nil {
 		return err
+	}
+	if run.Status != RunFailed {
+		return nil
 	}
 	return r.append(ctx, EventRunFailed, RunStatusEventData{RunID: r.runID, SessionID: run.SessionID, Status: run.Status, Error: message})
 }

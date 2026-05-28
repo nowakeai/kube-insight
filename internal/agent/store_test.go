@@ -96,6 +96,32 @@ func TestMemoryStoreSessionRunAndEvents(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreTerminalRunStatusCannotBeOverwritten(t *testing.T) {
+	store := NewMemoryStore()
+	session, err := store.CreateSession(context.Background(), CreateSessionInput{Title: "terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(context.Background(), session.ID, CreateRunInput{Input: "cancel me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = store.UpdateRunStatus(context.Background(), run.ID, RunCancelled, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunCancelled {
+		t.Fatalf("cancelled run = %#v", run)
+	}
+	run, err = store.UpdateRunStatus(context.Background(), run.ID, RunCompleted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunCancelled {
+		t.Fatalf("terminal run was overwritten: %#v", run)
+	}
+}
+
 func TestMemoryStoreListRunsSummaryAndFilters(t *testing.T) {
 	store := NewMemoryStore()
 	current := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)

@@ -388,14 +388,16 @@ Service listen flags:
 kube-insight serve --api --mcp --webui \
   --api-listen 0.0.0.0:8080 \
   --mcp-listen 0.0.0.0:8090 \
-  --metrics-listen 0.0.0.0:9090 \
-  --webui-listen 0.0.0.0:8081
+  --metrics-listen 0.0.0.0:9090
 ```
 
 Release binaries embed the built Web UI assets. Open the UI at the configured
-`--webui-listen` address, for example <http://127.0.0.1:8081>. When `--api` or
-`--metrics` are enabled in the same process, the Web UI listener proxies `/api/*`
-and `/metrics` to those listeners so browser requests stay same-origin.
+MCP HTTP address, for example <http://127.0.0.1:8090>. By default, `--webui`
+shares the MCP listener: Web UI is served from `/`, MCP Streamable HTTP remains
+at `/mcp`, and legacy SSE remains at `/sse`. Pass `--webui-listen` only when you
+intentionally want a separate Web UI port. When `--api` or `--metrics` are
+enabled in the same process, the Web UI listener proxies `/api/*` and `/metrics`
+to those listeners so browser requests stay same-origin.
 
 Metrics are exposed in Prometheus text format at `/metrics`. The metrics server
 uses the official Prometheus Go client and currently exports storage row counts,

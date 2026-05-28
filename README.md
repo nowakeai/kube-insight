@@ -76,7 +76,7 @@ and the built-in Web UI enabled:
 ./kube-insight serve --watch --api --mcp --webui --db kubeinsight.db
 ```
 
-Open the embedded UI at <http://127.0.0.1:8081>. Release binaries include the
+Open the embedded UI at <http://127.0.0.1:8090>. Release binaries include the
 prebuilt React app; no separate frontend checkout or Node.js runtime is needed
 to use it.
 

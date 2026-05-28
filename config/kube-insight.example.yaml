@@ -333,7 +333,7 @@ server:
     listen: 127.0.0.1:9090
   web:
     enabled: false
-    listen: 127.0.0.1:8081
+    listen: 127.0.0.1:8090
   chat:
     enabled: false
     provider: openai

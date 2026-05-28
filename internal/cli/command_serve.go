@@ -79,7 +79,7 @@ and legacy SDK SSE at /sse. Use
 	cmd.Flags().BoolVar(&opts.Metrics, "metrics", false, "Run the Prometheus metrics server at /metrics")
 	cmd.Flags().StringVar(&opts.APIListen, "api-listen", "", "API listen address; defaults to server.api.listen")
 	cmd.Flags().StringVar(&opts.MCPListen, "mcp-listen", "", "MCP HTTP listen address; defaults to mcp.listen")
-	cmd.Flags().StringVar(&opts.WebUIListen, "webui-listen", "", "Web UI listen address; defaults to server.web.listen")
+	cmd.Flags().StringVar(&opts.WebUIListen, "webui-listen", "", "Web UI listen address; defaults to the MCP HTTP listen address")
 	cmd.Flags().StringVar(&opts.MetricsListen, "metrics-listen", "", "Metrics listen address; defaults to server.metrics.listen")
 	cmd.Flags().IntVar(&opts.WatchOpts.MaxEvents, "max-events", 0, "Stop watcher after N events")
 	cmd.Flags().IntVar(&opts.WatchOpts.MaxRetries, "retries", -1, "Maximum watch retries; -1 retries forever")
@@ -135,6 +135,7 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 		}()
 	}
 	services := []serveStatusRow{}
+	sharedMCPWebUI := selection.MCP && selection.WebUI && selection.MCPListen == selection.WebUIListen
 	if selection.API {
 		addr := selection.APIListen
 		logger.Info("serving api", "listen", addr)
@@ -143,24 +144,37 @@ func runServeCommand(ctx context.Context, stdout, stderr io.Writer, state *cliSt
 			return api.ListenAndServe(serviceCtx, addr, apiServerOptions(rt.Config, dbPath, selection))
 		})
 	}
-	if selection.MCP {
+	if sharedMCPWebUI {
 		addr := selection.MCPListen
-		logger.Info("serving mcp http", "listen", addr)
+		logger.Info("serving mcp http and webui", "listen", addr)
 		services = append(services, serveStatusRow{"mcp", "serving", "http://" + addr + "/mcp"})
-		start("mcp", func() error {
-			return mcp.ListenAndServe(serviceCtx, addr, mcpServerOptions(rt.Config, dbPath))
-		})
-	}
-	if selection.WebUI {
-		addr := selection.WebUIListen
-		logger.Info("serving webui", "listen", addr)
 		services = append(services, serveStatusRow{"webui", "serving", "http://" + addr})
-		start("webui", func() error {
-			return serveWebUI(serviceCtx, addr, webUIProxyTargets{
+		start("mcp+webui", func() error {
+			return serveMCPAndWebUI(serviceCtx, addr, mcpServerOptions(rt.Config, dbPath), webUIProxyTargets{
 				APIListen:     listenIfEnabled(selection.API, selection.APIListen),
 				MetricsListen: listenIfEnabled(selection.Metrics, selection.MetricsListen),
 			})
 		})
+	} else {
+		if selection.MCP {
+			addr := selection.MCPListen
+			logger.Info("serving mcp http", "listen", addr)
+			services = append(services, serveStatusRow{"mcp", "serving", "http://" + addr + "/mcp"})
+			start("mcp", func() error {
+				return mcp.ListenAndServe(serviceCtx, addr, mcpServerOptions(rt.Config, dbPath))
+			})
+		}
+		if selection.WebUI {
+			addr := selection.WebUIListen
+			logger.Info("serving webui", "listen", addr)
+			services = append(services, serveStatusRow{"webui", "serving", "http://" + addr})
+			start("webui", func() error {
+				return serveWebUI(serviceCtx, addr, webUIProxyTargets{
+					APIListen:     listenIfEnabled(selection.API, selection.APIListen),
+					MetricsListen: listenIfEnabled(selection.Metrics, selection.MetricsListen),
+				})
+			})
+		}
 	}
 	if selection.Metrics {
 		addr := selection.MetricsListen
@@ -212,7 +226,14 @@ func buildServeSelection(cmd *cobra.Command, rt runtimeSettings, opts serveOptio
 	}
 	out.APIListen = firstNonEmpty(opts.APIListen, rt.Config.Server.API.Listen, "127.0.0.1:8080")
 	out.MCPListen = firstNonEmpty(opts.MCPListen, rt.Config.MCP.Listen, "127.0.0.1:8090")
-	out.WebUIListen = firstNonEmpty(opts.WebUIListen, rt.Config.Server.Web.Listen, "127.0.0.1:8081")
+	out.WebUIListen = firstNonEmpty(opts.WebUIListen)
+	if out.WebUIListen == "" {
+		if cmd.Flags().Changed("mcp-listen") {
+			out.WebUIListen = out.MCPListen
+		} else {
+			out.WebUIListen = firstNonEmpty(rt.Config.Server.Web.Listen, out.MCPListen, "127.0.0.1:8090")
+		}
+	}
 	out.MetricsListen = firstNonEmpty(opts.MetricsListen, rt.Config.Server.Metrics.Listen, "127.0.0.1:9090")
 	return out, out.API || out.MCP || out.WebUI || out.Metrics || out.Watch
 }
@@ -270,14 +291,38 @@ type webUIProxyTargets struct {
 	MetricsListen string
 }
 
+func serveMCPAndWebUI(ctx context.Context, listen string, mcpOpts mcp.ServerOptions, proxyTargets webUIProxyTargets) error {
+	if listen == "" {
+		listen = "127.0.0.1:8090"
+	}
+	mcpServer, err := mcp.NewServer(mcpOpts)
+	if err != nil {
+		return err
+	}
+	defer mcpServer.Close()
+	mux := http.NewServeMux()
+	mcpServer.MountHTTP(mux)
+	if err := mountWebUIRoutes(mux, proxyTargets); err != nil {
+		return err
+	}
+	return listenAndServeHTTP(ctx, listen, mux)
+}
+
 func serveWebUI(ctx context.Context, listen string, proxyTargets webUIProxyTargets) error {
 	if listen == "" {
-		listen = "127.0.0.1:8081"
+		listen = "127.0.0.1:8090"
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writePlain(w, http.StatusOK, "ok\n")
 	})
+	if err := mountWebUIRoutes(mux, proxyTargets); err != nil {
+		return err
+	}
+	return listenAndServeHTTP(ctx, listen, mux)
+}
+
+func mountWebUIRoutes(mux *http.ServeMux, proxyTargets webUIProxyTargets) error {
 	if proxyTargets.APIListen != "" {
 		proxy, err := reverseProxyForListen(proxyTargets.APIListen)
 		if err != nil {
@@ -293,9 +338,13 @@ func serveWebUI(ctx context.Context, listen string, proxyTargets webUIProxyTarge
 		mux.Handle("/metrics", proxy)
 	}
 	mux.Handle("/", webui.Handler())
+	return nil
+}
+
+func listenAndServeHTTP(ctx context.Context, listen string, handler http.Handler) error {
 	server := &http.Server{
 		Addr:              listen,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	done := make(chan error, 1)
@@ -514,7 +563,7 @@ func configuredServerInfoSelection(cfg appconfig.Config) serveSelection {
 		Watch:         cfg.Collection.Enabled,
 		APIListen:     firstNonEmpty(cfg.Server.API.Listen, "127.0.0.1:8080"),
 		MCPListen:     firstNonEmpty(cfg.MCP.Listen, "127.0.0.1:8090"),
-		WebUIListen:   firstNonEmpty(cfg.Server.Web.Listen, "127.0.0.1:8081"),
+		WebUIListen:   firstNonEmpty(cfg.Server.Web.Listen, firstNonEmpty(cfg.MCP.Listen, "127.0.0.1:8090")),
 		MetricsListen: firstNonEmpty(cfg.Server.Metrics.Listen, "127.0.0.1:9090"),
 	}
 }

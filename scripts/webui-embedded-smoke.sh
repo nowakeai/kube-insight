@@ -4,7 +4,7 @@ set -euo pipefail
 BIN="${BIN:-bin/kube-insight}"
 DB="${TMPDIR:-/tmp}/kube-insight-webui-smoke-$$.db"
 API_LISTEN="${KUBE_INSIGHT_WEBUI_SMOKE_API_LISTEN:-127.0.0.1:18080}"
-WEBUI_LISTEN="${KUBE_INSIGHT_WEBUI_SMOKE_WEBUI_LISTEN:-127.0.0.1:18081}"
+MCP_WEBUI_LISTEN="${KUBE_INSIGHT_WEBUI_SMOKE_MCP_WEBUI_LISTEN:-127.0.0.1:18090}"
 LOG="${TMPDIR:-/tmp}/kube-insight-webui-smoke-$$.log"
 
 cleanup() {
@@ -18,15 +18,16 @@ trap cleanup EXIT
 
 "${BIN}" serve \
   --api \
+  --mcp \
   --webui \
   --db "${DB}" \
   --api-listen "${API_LISTEN}" \
-  --webui-listen "${WEBUI_LISTEN}" \
+  --mcp-listen "${MCP_WEBUI_LISTEN}" \
   >"${LOG}" 2>&1 &
 SERVER_PID="$!"
 
 for _ in $(seq 1 60); do
-  if curl -fsS "http://${WEBUI_LISTEN}/healthz" >/dev/null 2>&1; then
+  if curl -fsS "http://${MCP_WEBUI_LISTEN}/healthz" >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "${SERVER_PID}" >/dev/null 2>&1; then
@@ -37,7 +38,7 @@ for _ in $(seq 1 60); do
   sleep 0.25
 done
 
-page="$(curl -fsS "http://${WEBUI_LISTEN}/")"
+page="$(curl -fsS "http://${MCP_WEBUI_LISTEN}/")"
 case "${page}" in
   *'<div id="root"></div>'* | *'/assets/index-'*) ;;
   *)
@@ -47,7 +48,7 @@ case "${page}" in
     ;;
 esac
 
-api_info="$(curl -fsS "http://${WEBUI_LISTEN}/api/v1/server/info")"
+api_info="$(curl -fsS "http://${MCP_WEBUI_LISTEN}/api/v1/server/info")"
 case "${api_info}" in
   *'"storage"'*'"components"'*) ;;
   *)
@@ -57,4 +58,4 @@ case "${api_info}" in
     ;;
 esac
 
-echo "embedded web UI smoke passed at http://${WEBUI_LISTEN}"
+echo "embedded web UI smoke passed at http://${MCP_WEBUI_LISTEN}"

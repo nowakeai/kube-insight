@@ -197,9 +197,11 @@ The combined command supports these components:
   The first formal UI milestone is the agent-first chat surface described in
   [Agent-First Web UI Design](product/agent-first-web-ui.md).
 
-Open the Web UI at <http://127.0.0.1:8081>. When `--api` is enabled in the same
-process, the Web UI listener proxies `/api/*` to the API listener, so browser
-requests stay same-origin from the UI.
+Open the Web UI at <http://127.0.0.1:8090>. By default, `--webui` uses the same
+listener as the MCP HTTP server, so the UI is available at `/` while MCP stays at
+`/mcp` and `/sse`. When `--api` is enabled in the same process, the shared
+listener proxies `/api/*` to the API listener, so browser requests stay
+same-origin from the UI.
 
 Example with all service surfaces:
 
@@ -207,8 +209,7 @@ Example with all service surfaces:
 ./kube-insight serve --watch --api --mcp --webui \
   --db kubeinsight.db \
   --api-listen 127.0.0.1:8080 \
-  --mcp-listen 127.0.0.1:8090 \
-  --webui-listen 127.0.0.1:8081
+  --mcp-listen 127.0.0.1:8090
 ```
 
 `serve --mcp` is the preferred service deployment mode for agents that support

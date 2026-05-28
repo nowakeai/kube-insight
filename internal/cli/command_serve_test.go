@@ -74,6 +74,46 @@ func TestServiceStorageTargetUsesConfiguredBackend(t *testing.T) {
 	}
 }
 
+func TestBuildServeSelectionDefaultsWebUIToMCPListen(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("webui", "true"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{WebUI: true})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if selection.WebUIListen != selection.MCPListen || selection.WebUIListen != "127.0.0.1:8090" {
+		t.Fatalf("webui listen = %q, mcp listen = %q; want shared 127.0.0.1:8090", selection.WebUIListen, selection.MCPListen)
+	}
+}
+
+func TestBuildServeSelectionMCPListenOverrideMovesDefaultWebUI(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := serveCommand(context.Background(), &stdout, &stderr, &cliState{})
+	if err := cmd.Flags().Set("mcp", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("webui", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("mcp-listen", "127.0.0.1:19090"); err != nil {
+		t.Fatal(err)
+	}
+	rt := runtimeSettings{Config: appconfig.Default()}
+
+	selection, ok := buildServeSelection(cmd, rt, serveOptions{MCP: true, WebUI: true, MCPListen: "127.0.0.1:19090"})
+	if !ok {
+		t.Fatal("serve selection was not enabled")
+	}
+	if selection.MCPListen != "127.0.0.1:19090" || selection.WebUIListen != "127.0.0.1:19090" {
+		t.Fatalf("mcp/webui listen = %q/%q, want shared override", selection.MCPListen, selection.WebUIListen)
+	}
+}
+
 func TestAPIServerOptionsIncludesSecretSafeServerInfo(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-secret-value")
 	t.Setenv("MIMO_OPENAI_BASEURL", "https://example.invalid/v1")

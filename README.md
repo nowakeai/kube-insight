@@ -150,11 +150,11 @@ flowchart LR
 
 ## Quick Start
 
-Download a release binary. Replace `0.0.1` with the version you want from the
+Download a release binary. Replace `0.1.1` with the version you want from the
 [release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
-KI_VERSION=0.0.1
+KI_VERSION=0.1.1
 KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 KI_ARCH="$(uname -m)"
 case "${KI_ARCH}" in
@@ -305,10 +305,11 @@ The current roadmap is tracked in [Roadmap](docs/roadmap/roadmap.md). In short:
 
 - SQLite default local mode, the chDB-enabled local variant, and the core MCP
   read surface are complete for the MVP baseline;
-- the next milestone is the Web UI for service/workload search, investigation
-  pages, timelines, topology-at-time, and diffs;
-- the following milestone is Kubernetes RBAC support for authz-aware API, MCP,
-  and future UI reads;
+- the agent-first Web UI foundation adds server-managed sessions, streamed
+  runs, evidence citations, and Kubernetes artifacts on top of the API/MCP read
+  surfaces;
+- the next major milestone is Kubernetes RBAC support for authz-aware API, MCP,
+  and UI reads;
 - ClickHouse cold object-storage tiering and opt-in JSON/index experiments stay
   measured follow-ups before promotion;
 - production readiness follows after the UI and RBAC service boundaries are in

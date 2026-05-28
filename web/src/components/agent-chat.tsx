@@ -14,6 +14,7 @@ import { LocalMessageConversation, RunComposerStats, SessionConversation, type A
 import { ChatComposer } from "@/components/chat-composer"
 import { isPanelDockArtifact } from "@/components/agent-chat-stream-model"
 import { Button } from "@/components/ui/button"
+import { appendMessageText, assistantMessage, delay, errorMessageFromEvent, hydrateSiblingRunEvents, isActiveRunStatus, isTerminalRunStatus, latestRunningRunID, messageUpdateFromEvent, newMessageID, openRunPage, queuedRunMessage, readRouteRun, runStatusFromHydration, statusFromServerEvent, threadMessagesFromHydratedRun, threadMessagesFromRun, userMessage, userMessageWithID } from "@/components/agent-chat-helpers"
 import { AgentAPIError, cancelAgentRun, createAgentRun, createAgentSession, deleteAgentSession, getAgentRunEvents, getAgentSession, listAgentSessions, retryAgentRun } from "@/lib/agent-api"
 import { streamAgentRunEvents, type AgentRunEventSubscription } from "@/lib/agent-events"
 import { demoAgentAnswer, demoK8sDiffArtifact, demoK8sHistoryArtifact, demoK8sResourceArtifact, demoK8sResourceListArtifact, demoK8sTopologyArtifact } from "@/lib/demo-agent"
@@ -21,7 +22,7 @@ import { useAgentProjectionStore, type AgentArtifact, type AgentRun, type AgentR
 import { displayRunIdsForRetryBranches, parentRunId } from "@/lib/agent-retry-branches"
 import { formatPromptWithContextBlocks, type ComposerContextBlock } from "@/lib/composer-context"
 import { retryErrorMessage, retryReplacementMetadata, shouldCreateReplacementRunForRetryError } from "@/lib/agent-retry-policy"
-import type { AgentRunDTO, AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
+import type { AgentRunEventDTO, AgentSessionDTO } from "@/lib/agent-schemas"
 import { followUpSuggestionsForRun } from "@/lib/follow-up-suggestions"
 import { randomStarterPrompts } from "@/lib/starter-prompts"
 
@@ -721,69 +722,6 @@ async function runDemoPrompt(prompt: string, options: RunDemoPromptOptions) {
   options.setIsRunning(false)
 }
 
-function statusFromServerEvent(event: AgentRunEventDTO) {
-  if (event.type === "answer.final") return "completed"
-  const data = event.data && typeof event.data === "object" ? event.data as { status?: unknown } : {}
-  return typeof data.status === "string" ? data.status : undefined
-}
-
-function isTerminalRunStatus(status: string) {
-  return status === "completed" || status === "failed" || status === "cancelled"
-}
-
-function isActiveRunStatus(status: string) {
-  return status === "queued" || status === "running"
-}
-
-async function hydrateSiblingRunEvents(
-  runs: AgentRunDTO[],
-  activeRunID: string,
-  signal: AbortSignal,
-  applyServerEvents: (events: AgentRunEventDTO[]) => void,
-) {
-  const pendingRuns = runs.filter((run) => run.id !== activeRunID && !runHydrationLooksComplete(run.id))
-  const concurrency = 4
-  for (let index = 0; index < pendingRuns.length && !signal.aborted; index += concurrency) {
-    const batch = pendingRuns.slice(index, index + concurrency)
-    const results = await Promise.allSettled(batch.map((run) => getAgentRunEvents(run.id, { signal })))
-    for (const result of results) {
-      if (signal.aborted) return
-      if (result.status === "rejected") continue
-      applyServerEvents(result.value)
-    }
-  }
-}
-
-function runHydrationLooksComplete(runID: string) {
-  const run = useAgentProjectionStore.getState().runs[runID]
-  if (!run || !isTerminalRunStatus(run.status)) return false
-  return Boolean(run.finalAnswer || run.eventIds.length > 0)
-}
-
-function messageUpdateFromEvent(event: AgentRunEventDTO) {
-  if (event.type !== "message.created" && event.type !== "message.delta" && event.type !== "message.completed" && event.type !== "answer.final") return {}
-  const data = event.data && typeof event.data === "object" ? event.data as { role?: unknown; content?: unknown; delta?: unknown } : {}
-  if (data.role && data.role !== "assistant") return {}
-  return {
-    content: typeof data.content === "string" ? data.content : undefined,
-    delta: typeof data.delta === "string" ? data.delta : undefined,
-  }
-}
-
-function errorMessageFromEvent(event: AgentRunEventDTO) {
-  const data = event.data && typeof event.data === "object" ? event.data as { error?: unknown; message?: unknown } : {}
-  if (typeof data.error === "string" && data.error) return data.error
-  if (event.type === "error" && typeof data.message === "string" && data.message) return data.message
-  return undefined
-}
-
-function queuedRunMessage(status: string, error?: string) {
-  if (status === "failed") return error ? `Run failed: ${error}` : "Run failed before an answer was produced."
-  if (status === "cancelled") return "Run cancelled."
-  return "Run accepted by the server. Backend agent execution is not connected yet, so this run is waiting for the next server-side agent loop step."
-}
-
-
 function RouteRunLoading() {
   return (
     <div className="grid w-full grid-cols-[2rem_minmax(0,1fr)] gap-3 text-sm text-muted-foreground">
@@ -798,153 +736,4 @@ function RouteRunLoading() {
       </div>
     </div>
   )
-}
-
-function appendMessageText(message: AppendMessage) {
-  return message.content
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
-    .trim()
-}
-
-function threadMessagesFromRun(run: AgentRun): ThreadMessage[] {
-  const assistantStatus = assistantStatusFromRunStatus(run.status)
-  const assistantText = run.finalAnswer || (assistantStatus === "running" ? "" : queuedRunMessage(run.status, run.error))
-  return [
-    userMessageWithID(`user_${run.id}`, run.input, run.createdAt),
-    assistantMessage(`assistant_${run.id}`, assistantText, assistantStatus),
-  ]
-}
-
-function threadMessagesFromHydratedRun(
-  projectedRun: AgentRun | undefined,
-  serverRun: AgentRunDTO | undefined,
-  events: AgentRunEventDTO[],
-): ThreadMessage[] {
-  const runID = projectedRun?.id ?? serverRun?.id ?? "server"
-  const input = projectedRun?.input || serverRun?.input || ""
-  const createdAt = projectedRun?.createdAt ?? serverRun?.createdAt
-  const status = runStatusFromHydration(projectedRun, serverRun, events)
-  const error = latestErrorFromEvents(events) ?? projectedRun?.error ?? serverRun?.error
-  const answer = assistantTextFromEvents(events) || projectedRun?.finalAnswer || ""
-  const assistantStatus = assistantStatusFromRunStatus(status)
-  const assistantText = answer || (assistantStatus === "running" ? "" : queuedRunMessage(status, error))
-
-  return [
-    userMessageWithID(`user_${runID}`, input, createdAt),
-    assistantMessage(`assistant_${runID}`, assistantText, assistantStatus),
-  ]
-}
-
-function runStatusFromHydration(
-  projectedRun: AgentRun | undefined,
-  serverRun: AgentRunDTO | undefined,
-  events: AgentRunEventDTO[],
-) {
-  for (const event of [...events].reverse()) {
-    const status = statusFromServerEvent(event)
-    if (status) return status
-  }
-  return projectedRun?.status ?? serverRun?.status ?? "running"
-}
-
-function assistantTextFromEvents(events: AgentRunEventDTO[]) {
-  let text = ""
-  for (const event of events) {
-    const update = messageUpdateFromEvent(event)
-    if (update.content !== undefined) text = update.content
-    if (update.delta !== undefined) text += update.delta
-  }
-  return text
-}
-
-function latestErrorFromEvents(events: AgentRunEventDTO[]) {
-  for (const event of [...events].reverse()) {
-    const error = errorMessageFromEvent(event)
-    if (error) return error
-  }
-  return undefined
-}
-
-function assistantStatusFromRunStatus(status: string): "running" | "complete" | "cancelled" {
-  if (status === "cancelled") return "cancelled"
-  if (status === "running" || status === "queued") return "running"
-  return "complete"
-}
-
-function userMessage(text: string): ThreadMessage {
-  return userMessageWithID(newMessageID("user"), text)
-}
-
-function userMessageWithID(id: string, text: string, createdAt?: string): ThreadMessage {
-  return {
-    id,
-    role: "user",
-    createdAt: createdAt ? new Date(createdAt) : new Date(),
-    content: [{ type: "text", text }],
-    attachments: [],
-    metadata: { custom: {} },
-  }
-}
-
-function assistantMessage(
-  id: string,
-  text: string,
-  status: "running" | "complete" | "cancelled",
-): ThreadMessage {
-  return {
-    id,
-    role: "assistant",
-    createdAt: new Date(),
-    content: text ? [{ type: "text", text }] : [],
-    status:
-      status === "complete"
-        ? { type: "complete", reason: "stop" }
-        : status === "cancelled"
-          ? { type: "incomplete", reason: "cancelled" }
-          : { type: "running" },
-    metadata: {
-      unstable_state: null,
-      unstable_annotations: [],
-      unstable_data: [],
-      steps: [],
-      custom: {},
-    },
-  }
-}
-
-function latestRunningRunID() {
-  const state = useAgentProjectionStore.getState()
-  const activeSession = state.activeSessionId ? state.sessions[state.activeSessionId] : undefined
-  if (!activeSession) return undefined
-  for (const runID of [...activeSession.runIds].reverse()) {
-    const run = state.runs[runID]
-    if (run && isActiveRunStatus(run.status)) return runID
-  }
-  return undefined
-}
-
-function newMessageID(prefix: string) {
-  if (globalThis.crypto?.randomUUID) return `${prefix}_${globalThis.crypto.randomUUID()}`
-  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
-
-function readRouteRun(): AgentRunRoute | undefined {
-  const match = window.location.pathname.match(/^\/sessions\/([^/]+)\/runs\/([^/]+)$/)
-  if (!match) return undefined
-  return {
-    sessionID: decodeURIComponent(match[1]),
-    runID: decodeURIComponent(match[2]),
-  }
-}
-
-function openRunPage(sessionID: string, runID: string) {
-  const nextPath = `/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}`
-  if (window.location.pathname === nextPath) return
-  window.history.pushState({}, "", nextPath)
 }

@@ -105,7 +105,7 @@ workflow records live under `docs/dev/` so user-facing docs stay focused.
 | `data/` | Domain data model, storage layout, indexes, and query paths. |
 | `configuration/` | YAML configuration, filters, extractors, and plugin shape. |
 | `dev/` | Development commands, local workflows, PR checklists, validation plans, and closeout notes. |
-| `agent/` | Agent skill instructions and backend-detection rules for MCP/CLI use. |
+| `kube-insight-skill/` | Agent skill instructions and backend-detection rules for MCP/CLI use. |
 | `product/` | Human UI, agent, API, MCP, and skill roadmap. |
 | `ingestion/` | Kubernetes discovery, global watches, normalization, relationships, facts. |
 | `workflows/` | Incident investigation flows and expected evidence output. |

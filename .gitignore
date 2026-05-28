@@ -20,3 +20,4 @@ compose.dev.local.yaml
 *.chdb-wal
 RELEASE_NOTES.md
 code_references/
+tmp/

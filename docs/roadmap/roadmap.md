@@ -1,6 +1,6 @@
 # Roadmap
 
-Status date: 2026-05-20
+Status date: 2026-05-28
 
 This page is the consolidated roadmap for kube-insight. Detailed working notes
 remain in the linked documents; this page is the stable entry point for readers
@@ -17,10 +17,10 @@ ClickHouse-compatible local storage for users who accept the larger runtime
 dependency.
 
 The MVP baseline is complete for SQLite default local mode, the chDB-enabled
-local variant, and the core MCP read surface. The next Web UI milestone is
-agent-first: an embedded chat surface backed by a server-side autonomous agent,
-typed Kubernetes artifacts, and the existing read API. Kubernetes RBAC support
-remains the next major security milestone.
+local variant, and the core MCP read surface. The agent-first Web UI foundation
+adds an embedded chat surface backed by a server-side autonomous agent, typed
+Kubernetes artifacts, streamed run events, and the existing read API.
+Kubernetes RBAC support remains the next major security milestone.
 
 ## Completed Foundation
 
@@ -43,11 +43,11 @@ remains the next major security milestone.
 
 ## Next Milestones
 
-1. Web UI.
-   Build an agent-first human operator surface: a search-style chat entry,
-   server-managed sessions and runs, an autonomous Eino-backed agent using
-   kube-insight tools, Markdown answers with citations, Kubernetes resource
-   artifacts, topology artifacts, and resource/topology history travel.
+1. Web UI hardening.
+   Continue the agent-first human operator surface: richer tool-call
+   visibility, dashboard/runtime health, artifact drill-down, resource and
+   topology history travel, and frontend reliability work around retry and
+   session projection.
 
 2. Kubernetes RBAC support.
    Add Kubernetes authn/authz-aware service access so API, MCP, and future UI

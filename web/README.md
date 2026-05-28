@@ -1,73 +1,47 @@
-# React + TypeScript + Vite
+# kube-insight Web UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the React/Vite frontend that is embedded by
+`kube-insight serve --webui` and used by the Docker Compose development stack.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+For normal frontend work, use the repository-level Compose environment so the
+Web UI, API/watcher, metrics endpoint, and ClickHouse backend run together:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+make dev-compose-up-detached
+make dev-compose-ps
+make dev-compose-logs-web
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The Compose Web UI listens on `http://127.0.0.1:5173` by default and proxies:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- `/api/*` to `KUBE_INSIGHT_API_PROXY_TARGET` (default `http://watcher:8080`)
+- `/healthz` to the watcher/API service
+- `/metrics` to `KUBE_INSIGHT_METRICS_PROXY_TARGET` (default
+  `http://watcher:9090`)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+After dependency or Dockerfile changes, rebuild the web service:
+
+```bash
+make dev-compose-rebuild-web
 ```
+
+## Local Checks
+
+The repository `make test` and `make build` targets run the production frontend
+build before Go tests/builds. Frontend-only checks can be run directly:
+
+```bash
+npm --prefix web ci
+npm --prefix web run build
+npm --prefix web run lint
+npm --prefix web run test
+```
+
+## Runtime Shape
+
+The first Web UI milestone is agent-first. The UI consumes the server-side agent
+API for sessions, streamed runs, retry/cancel actions, evidence citations, and
+typed Kubernetes artifacts. It should not require browser-side LLM credentials;
+provider configuration lives on the kube-insight API server.

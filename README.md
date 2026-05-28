@@ -18,6 +18,67 @@
 
 ---
 
+## Built-in Agent Demo
+
+https://github.com/user-attachments/assets/dc847c9f-5bd9-4f50-a06b-8424ebb4a3bb
+
+Demo scenario: ask the built-in agent whether the `gcp cluster 2` node pool
+changed in the last 3 days. The answer uses retained Node lifecycle history,
+SQL aggregation, current node capacity, and citations.
+
+## Quick Start
+
+Download a release binary. Replace `0.1.1` with the version you want from the
+[release page](https://github.com/nowakeai/kube-insight/releases):
+
+```bash
+KI_VERSION=0.1.1
+KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+KI_ARCH="$(uname -m)"
+case "${KI_ARCH}" in
+  x86_64) KI_ARCH=amd64 ;;
+  aarch64) KI_ARCH=arm64 ;;
+esac
+
+curl -L -o kube-insight.tar.gz \
+  "https://github.com/nowakeai/kube-insight/releases/download/v${KI_VERSION}/kube-insight_${KI_VERSION}_${KI_OS}_${KI_ARCH}.tar.gz"
+tar -xzf kube-insight.tar.gz kube-insight
+chmod +x kube-insight
+```
+
+Take a bounded first capture from the current kubeconfig context into a local
+SQLite database:
+
+```bash
+./kube-insight watch pods services \
+  --db kubeinsight.db \
+  --timeout 30s
+```
+
+Check collector coverage before trusting an investigation:
+
+```bash
+./kube-insight db resources health --db kubeinsight.db --stale-after 10m
+./kube-insight db resources health --db kubeinsight.db --errors-only
+```
+
+Start SQL investigations by selecting a cluster:
+
+```bash
+./kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
+  "select id, name, source from clusters order by id"
+```
+
+For a continuous local agent service, keep the watcher running with API and MCP
+enabled:
+
+```bash
+./kube-insight serve --watch --api --mcp --db kubeinsight.db
+```
+
+See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
+history examples.
+
 ## The Problem
 
 `kubectl` is excellent for current state. Incident investigations often need the
@@ -149,69 +210,6 @@ flowchart LR
   H --> K
   I --> L
 ```
-
-## Quick Start
-
-Download a release binary. Replace `0.1.1` with the version you want from the
-[release page](https://github.com/nowakeai/kube-insight/releases):
-
-```bash
-KI_VERSION=0.1.1
-KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-KI_ARCH="$(uname -m)"
-case "${KI_ARCH}" in
-  x86_64) KI_ARCH=amd64 ;;
-  aarch64) KI_ARCH=arm64 ;;
-esac
-
-curl -L -o kube-insight.tar.gz \
-  "https://github.com/nowakeai/kube-insight/releases/download/v${KI_VERSION}/kube-insight_${KI_VERSION}_${KI_OS}_${KI_ARCH}.tar.gz"
-tar -xzf kube-insight.tar.gz kube-insight
-chmod +x kube-insight
-```
-
-Take a bounded first capture from the current kubeconfig context into a local
-SQLite database:
-
-```bash
-./kube-insight watch pods services \
-  --db kubeinsight.db \
-  --timeout 30s
-```
-
-Check collector coverage before trusting an investigation:
-
-```bash
-./kube-insight db resources health --db kubeinsight.db --stale-after 10m
-./kube-insight db resources health --db kubeinsight.db --errors-only
-```
-
-Start SQL investigations by selecting a cluster:
-
-```bash
-./kube-insight query sql --db kubeinsight.db --max-rows 20 --sql \
-  "select id, name, source from clusters order by id"
-```
-
-For a continuous local agent service, keep the watcher running with API and MCP
-enabled:
-
-```bash
-./kube-insight serve --watch --api --mcp --db kubeinsight.db
-```
-
-See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
-history examples.
-
-## Built-in Agent Demo
-
-
-https://github.com/user-attachments/assets/dc847c9f-5bd9-4f50-a06b-8424ebb4a3bb
-
-
-> Built-in agent demo video placeholder: explain whether the `gcp cluster 2`
-> node pool changed in the last 3 days, using retained history, SQL aggregation,
-> and citations.
 
 ## Agent Investigation Loop
 

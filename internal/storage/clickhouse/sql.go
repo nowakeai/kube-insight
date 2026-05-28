@@ -357,7 +357,9 @@ limit 5000`,
          observation_rows
   from window_events
   where first_present_at != toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
-    and uid not in (select uid from baseline)
+    and (cluster_id, namespace, name, uid) not in (
+      select cluster_id, namespace, name, uid from baseline
+    )
 )
 select cluster_id, namespace, name, uid, from_baseline,
        interval_start, interval_end, baseline_observed_at, observation_rows

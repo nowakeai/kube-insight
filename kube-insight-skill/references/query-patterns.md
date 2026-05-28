@@ -315,7 +315,7 @@ with baseline as (
     and observation_type in ('ADDED','MODIFIED','DELETED')
   group by cluster_id, namespace, name, uid
   having last_type != 'DELETED'
-), window_uid as (
+), window_events as (
   select cluster_id, namespace, name, uid,
          minIf(observed_at, observation_type in ('ADDED','MODIFIED')) as first_present_at,
          minIf(observed_at, observation_type = 'DELETED') as first_deleted_at,
@@ -326,23 +326,31 @@ with baseline as (
     and observed_at < toDateTime64('2026-05-28 00:00:00', 3, 'UTC')
     and observation_type in ('ADDED','MODIFIED','DELETED')
   group by cluster_id, namespace, name, uid
+), interval_rows as (
+  select cluster_id, namespace, name, uid,
+         1 as from_baseline,
+         toDateTime64('2026-05-21 00:00:00', 3, 'UTC') as interval_start,
+         nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+         baseline_observed_at,
+         observation_rows
+  from baseline
+  left join window_events using (cluster_id, namespace, name, uid)
+  union all
+  select cluster_id, namespace, name, uid,
+         0 as from_baseline,
+         first_present_at as interval_start,
+         nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
+         null as baseline_observed_at,
+         observation_rows
+  from window_events
+  where first_present_at != toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+    and (cluster_id, namespace, name, uid) not in (
+      select cluster_id, namespace, name, uid from baseline
+    )
 )
-select cluster_id, namespace, name, uid,
-       1 as from_baseline,
-       toDateTime64('2026-05-21 00:00:00', 3, 'UTC') as interval_start,
-       nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
-       observation_rows
-from baseline
-left join window_uid using (cluster_id, namespace, name, uid)
-union all
-select cluster_id, namespace, name, uid,
-       0 as from_baseline,
-       first_present_at as interval_start,
-       nullIf(first_deleted_at, toDateTime64('1970-01-01 00:00:00', 3, 'UTC')) as interval_end,
-       observation_rows
-from window_uid
-where first_present_at != toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
-  and uid not in (select uid from baseline)
+select cluster_id, namespace, name, uid, from_baseline,
+       interval_start, interval_end, baseline_observed_at, observation_rows
+from interval_rows
 order by interval_start, namespace, name
 limit 10000;
 ```

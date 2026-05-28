@@ -199,6 +199,9 @@ Plan:
 5. Optionally use `kubectl get endpointslice/service` as live validation, but
    cite kube-insight snapshots for the retained evidence path.
 
+Do not use a plain `arrayJoin(JSONExtractArrayRaw(doc, 'endpoints'))` as the
+primary proof shape. EndpointSlices with an empty `endpoints` array are still
+evidence for zero endpoints, and a plain array join drops those slice rows.
 Avoid showing empty 0-row evidence as a finding. A Service with no selector or
 an ExternalName Service needs a different interpretation from a selector-backed
 Service with zero ready endpoints.

@@ -403,7 +403,7 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 		t.Fatal("missing pod_count_peak_intervals_for_js recipe")
 	}
 	podIntervalRecipe := schema.Recipes[podIntervalRecipeIndex]
-	for _, want := range []string{"per-UID intervals", "interval_start", "interval_end", "from_baseline", "limit 10000"} {
+	for _, want := range []string{"per-UID intervals", "interval_start", "interval_end", "from_baseline", "baseline_observed_at", "(cluster_id, namespace, name, uid) not in", "limit 10000"} {
 		if !strings.Contains(podIntervalRecipe.Description+" "+podIntervalRecipe.SQL, want) {
 			t.Fatalf("pod interval recipe missing %q: %#v", want, podIntervalRecipe)
 		}

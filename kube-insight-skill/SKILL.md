@@ -61,6 +61,28 @@ harness details. Use this skill, its references, and the active tool schema.
 5. Answer from the returned evidence. Do not add broad scans or formatting-only
    tool calls after proof already exists.
 
+## Connect To kube-insight
+
+Use the connection surface that the user's environment exposes. Prefer the
+long-running kube-insight service over starting short-lived local processes:
+
+1. MCP Streamable HTTP when available: configure the agent's MCP client with
+   `type: "streamable-http"` and `url: "http://HOST:8090/mcp"` or the provided
+   kube-insight service URL. This is the preferred agent transport for a
+   running service.
+2. HTTP API when MCP is unavailable: call `GET /healthz`,
+   `GET /api/v1/server/info`, `GET /api/v1/health?detail=full&limit=500`,
+   `GET /api/v1/schema`, and `POST /api/v1/sql`.
+3. `kubectl port-forward` when kube-insight runs inside the target cluster and
+   no external Service/Ingress is available. Forward the API and/or MCP port,
+   then use the same MCP or HTTP paths above.
+4. Stdio MCP only when the agent runtime explicitly requires a local subprocess:
+   `kube-insight serve mcp --db kubeinsight.db`.
+
+If `GET /api/v1/server/info` says MCP is disabled, continue through the HTTP API
+instead of probing MCP paths. Legacy SSE may exist at `/sse` for older clients,
+but new remote-agent setups should use Streamable HTTP `/mcp`.
+
 ## Scenario Index
 
 | Scenario | Use When | Minimum Path |

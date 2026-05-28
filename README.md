@@ -201,6 +201,18 @@ enabled:
 See the full [quickstart](docs/quickstart.md) for API, MCP, compaction, and
 history examples.
 
+## Built-in Agent Demo
+
+<!--
+Replace this placeholder with the GitHub user-attachments `.mp4` URL after
+recording. Recommended first demo: ask the built-in Web UI agent to investigate
+Service `default/api`, then show collector coverage, the Service investigation
+tool call, cited artifacts, and the final evidence-backed answer.
+-->
+
+> Built-in agent demo video placeholder: investigate Service `default/api` from
+> retained Service, EndpointSlice, Pod, Event, and topology evidence.
+
 ## Agent Investigation Loop
 
 ```mermaid

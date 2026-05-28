@@ -36,6 +36,13 @@ harness details. Use this skill, its references, and the active tool schema.
   names, fields, labels, or fact keys.
 - Prefer the shortest terminal evidence path. Stop when the returned bundle,
   SQL rows, exported data, or computed result proves the answer.
+- Treat a complete new prompt as a new task even inside an existing chat
+  session. Inherit prior context only for elliptical follow-ups that omit the
+  object, symptom, metric, or time scope.
+- Do not use broad search or parallel branches for recipe-shaped aggregation
+  prompts such as Node inventory/capacity/lifecycle, Pod-count peak, PVC resize,
+  or namespace resource ranking/delta. Use coverage, schema, and bounded
+  SQL/export/JS instead.
 - Keep large intermediate data out of the model context. Export bounded rows to
   files or artifact/scratch handles, then process them outside the prompt when
   your agent environment supports Python, Bash, jq, DuckDB, R, notebooks, or

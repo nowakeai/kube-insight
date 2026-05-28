@@ -42,6 +42,12 @@ operational notes, and design details in `docs/`.
   constraint, validation prerequisite, or recurring pitfall, update this file
   or the appropriate `docs/` page in the same change. Do not leave durable
   process knowledge only in chat history or local scratch notes.
+- When the user proposes conceptual agent/product direction, preserve the intent
+  instead of turning examples into rigid bans. For external skill and black-box
+  agent tests, model realistic user environments where kube-insight works
+  alongside tools such as `kubectl`, port-forwarding, shell, Python, and cloud
+  CLIs; the goal is to prove kube-insight improves AIOps with retained history
+  and aggregation, not to exclude complementary tools.
 - For Web UI or frontend development, use the Docker compose dev environment
   (`make dev-compose-up-detached`) instead of starting another host
   `kube-insight serve` process or a host Vite dev server. Compose owns the

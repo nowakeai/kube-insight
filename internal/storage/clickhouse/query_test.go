@@ -358,7 +358,7 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 		t.Fatalf("queries=%#v schema=%#v", queries, schema)
 	}
 	joinedNotes := strings.Join(schema.Notes, "\n")
-	for _, want := range []string{"facts.ts", "Prefer sorted columns", "JSONExtractRaw", "do not use JSONExtract without an explicit return type"} {
+	for _, want := range []string{"facts.ts", "Prefer sorted columns", "kube_insight_js", "Do not use await", "JSONExtractRaw", "do not use JSONExtract without an explicit return type"} {
 		if !strings.Contains(joinedNotes, want) {
 			t.Fatalf("schema notes missing %q: %#v", want, schema.Notes)
 		}
@@ -367,7 +367,7 @@ func TestStoreQuerySchemaReturnsClickHouseTables(t *testing.T) {
 	for _, recipe := range schema.Recipes {
 		recipeNames += recipe.Name + "\n"
 	}
-	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "container_resource_allocation_rollup", "raw_doc_field_profile", "object_proof_after_candidate"} {
+	for _, want := range []string{"coverage_latest", "recent_fact_rollup", "recent_change_rollup", "container_resource_allocation_rollup", "pod_resource_rows_for_js", "namespace_resource_delta_for_js", "pod_lifecycle_hourly_events_for_js", "pvc_storage_history_for_js", "raw_doc_field_profile", "object_proof_after_candidate"} {
 		if !strings.Contains(recipeNames, want) {
 			t.Fatalf("schema recipes missing %q: %#v", want, schema.Recipes)
 		}

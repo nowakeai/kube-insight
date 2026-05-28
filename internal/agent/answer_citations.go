@@ -501,7 +501,7 @@ func addIdentityTokens(record map[string]any, add func(string)) {
 
 func importantCitationKey(key string) bool {
 	switch strings.ToLower(key) {
-	case "id", "uid", "clusterid", "kind", "namespace", "name", "versionid", "changeid", "factkey", "factvalue", "rowid", "rowids", "label", "source", "target", "artifactid":
+	case "id", "uid", "clusterid", "kind", "namespace", "name", "versionid", "changeid", "factkey", "factvalue", "rowid", "rowids", "label", "source", "target", "artifactid", "path", "sha256", "sessionid", "runid":
 		return true
 	default:
 		return false

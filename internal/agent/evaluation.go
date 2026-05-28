@@ -23,6 +23,7 @@ type EvaluationCase struct {
 	MaxToolCallDurationMS    int64
 	MaxTotalToolDurationMS   int64
 	AllowFailedTools         bool
+	RequireHealthBeforeData  bool
 }
 
 type EvaluationReport struct {
@@ -62,44 +63,48 @@ type EvaluationMissingDetails struct {
 func DefaultEvaluationCases() []EvaluationCase {
 	return []EvaluationCase{
 		{
-			ID:                    "service-health",
-			Question:              "Is the default/api Service healthy right now?",
-			RequiredTools:         []string{"kube_insight_health", "kube_insight_service_investigation"},
-			RequiredArtifactKinds: []string{ArtifactKindK8sResourceList, ArtifactKindK8sTopology},
-			RequiredAnswerTerms:   []string{"service", "endpoint"},
-			MinCitations:          1,
-			MaxToolCalls:          5,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "service-health",
+			Question:                "Is the default/api Service healthy right now?",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_service_investigation"},
+			RequiredArtifactKinds:   []string{ArtifactKindK8sResourceList, ArtifactKindK8sTopology},
+			RequiredAnswerTerms:     []string{"service", "endpoint"},
+			MinCitations:            1,
+			MaxToolCalls:            5,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "oom-restart",
-			Question:              "Find Pods with OOMKilled or restart evidence in default.",
-			RequiredTools:         []string{"kube_insight_search"},
-			RequiredArtifactKinds: []string{ArtifactKindK8sResourceList},
-			RequiredAnswerTerms:   []string{"oomkilled", "pod"},
-			MinCitations:          1,
-			MaxToolCalls:          4,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "oom-restart",
+			Question:                "Find Pods with OOMKilled or restart evidence in default.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_search"},
+			RequiredArtifactKinds:   []string{ArtifactKindK8sResourceList},
+			RequiredAnswerTerms:     []string{"oomkilled", "pod"},
+			MinCitations:            1,
+			MaxToolCalls:            4,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "oom-aggregate",
-			Question:              "Which Pods had OOMKilled facts in the last 24 hours? Rank by fact count.",
-			RequiredTools:         []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
-			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
-			RequiredAnswerTerms:   []string{"oomkilled", "pod"},
-			MinCitations:          1,
-			MaxToolCalls:          4,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "oom-aggregate",
+			Question:                "Which Pods had OOMKilled facts in the last 24 hours? Rank by fact count.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds:   []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:     []string{"oomkilled", "pod"},
+			MinCitations:            1,
+			MaxToolCalls:            4,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "allocation-followup",
-			Question:              "I meant allocated resources, not actual usage. Show the requests and limits distribution.",
-			RequiredTools:         []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
-			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
-			RequiredAnswerTerms:   []string{"request", "limit", "allocation"},
-			MinCitations:          1,
-			MaxToolCalls:          6,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "allocation-followup",
+			Question:                "I meant allocated resources, not actual usage. Show the requests and limits distribution.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds:   []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:     []string{"request", "limit", "allocation"},
+			MinCitations:            1,
+			MaxToolCalls:            6,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
 			ID:                       "node-capacity",
@@ -110,26 +115,29 @@ func DefaultEvaluationCases() []EvaluationCase {
 			MinCitations:             1,
 			MaxToolCalls:             5,
 			MaxToolCallDurationMS:    2000,
+			RequireHealthBeforeData:  true,
 		},
 		{
-			ID:                    "scripted-query-node-capacity",
-			Question:              "Use one bounded JS interpreter SQL plan to get Node count plus total capacity CPU and memory, then report the result.",
-			RequiredTools:         []string{"kube_insight_schema", scriptedQueryToolName},
-			RequiredArtifactKinds: []string{ArtifactKindToolCall},
-			RequiredAnswerTerms:   []string{"node", "cpu", "memory"},
-			MinCitations:          1,
-			MaxToolCalls:          4,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "scripted-query-node-capacity",
+			Question:                "Use one bounded JS interpreter SQL plan to get Node count plus total capacity CPU and memory, then report the result.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", scriptedQueryToolName},
+			RequiredArtifactKinds:   []string{ArtifactKindToolCall},
+			RequiredAnswerTerms:     []string{"node", "cpu", "memory"},
+			MinCitations:            1,
+			MaxToolCalls:            4,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
 			ID:                       "recent-changes",
 			Question:                 "Show recent changes for default/api.",
-			AlternativeRequiredTools: [][]string{{"kube_insight_search", "kube_insight_history"}, {"kube_insight_schema", "kube_insight_sql"}},
+			AlternativeRequiredTools: [][]string{{"kube_insight_health", "kube_insight_search", "kube_insight_history"}, {"kube_insight_health", "kube_insight_schema", "kube_insight_sql"}},
 			AlternativeArtifactKinds: [][]string{{ArtifactKindK8sHistory}, {ArtifactKindMarkdown}},
 			RequiredAnswerTerms:      []string{"change", "default/api"},
 			MinCitations:             1,
 			MaxToolCalls:             4,
 			MaxToolCallDurationMS:    2000,
+			RequireHealthBeforeData:  true,
 		},
 		{
 			ID:                    "history-diff",
@@ -142,44 +150,48 @@ func DefaultEvaluationCases() []EvaluationCase {
 			MaxToolCallDurationMS: 2000,
 		},
 		{
-			ID:                    "exact-recent-changes",
-			Question:              "What changed recently for Deployment default/api?",
-			RequiredTools:         []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
-			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
-			RequiredAnswerTerms:   []string{"change", "deployment", "default/api"},
-			MinCitations:          1,
-			MaxToolCalls:          3,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "exact-recent-changes",
+			Question:                "What changed recently for Deployment default/api?",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds:   []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:     []string{"change", "deployment", "default/api"},
+			MinCitations:            1,
+			MaxToolCalls:            3,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "schema-sql-evidence",
-			Question:              "Use schema then SQL to prove recent resource request or limit changes for Deployment default/api, and cite the SQL evidence.",
-			RequiredTools:         []string{"kube_insight_schema", "kube_insight_sql"},
-			RequiredArtifactKinds: []string{ArtifactKindMarkdown},
-			RequiredAnswerTerms:   []string{"deployment", "default/api", "memory", "change"},
-			MinCitations:          1,
-			MaxToolCalls:          4,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "schema-sql-evidence",
+			Question:                "Use schema then SQL to prove recent resource request or limit changes for Deployment default/api, and cite the SQL evidence.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", "kube_insight_sql"},
+			RequiredArtifactKinds:   []string{ArtifactKindMarkdown},
+			RequiredAnswerTerms:     []string{"deployment", "default/api", "memory", "change"},
+			MinCitations:            1,
+			MaxToolCalls:            4,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "topology-mapping",
-			Question:              "Map topology for namespace default.",
-			RequiredTools:         []string{"kube_insight_search", "kube_insight_topology"},
-			RequiredArtifactKinds: []string{ArtifactKindK8sTopology},
-			RequiredAnswerTerms:   []string{"topology", "default"},
-			MinCitations:          1,
-			MaxToolCalls:          5,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "topology-mapping",
+			Question:                "Map topology for namespace default.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_search", "kube_insight_topology"},
+			RequiredArtifactKinds:   []string{ArtifactKindK8sTopology},
+			RequiredAnswerTerms:     []string{"topology", "default"},
+			MinCitations:            1,
+			MaxToolCalls:            5,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 		{
-			ID:                    "js-transform-aggregation",
-			Question:              "Use the JS interpreter to run a bounded SQL query for recent OOMKilled Pod fact rows, group the rows by namespace, and report counts.",
-			RequiredTools:         []string{"kube_insight_schema", jsInterpreterToolName},
-			RequiredArtifactKinds: []string{ArtifactKindToolCall},
-			RequiredAnswerTerms:   []string{"oomkilled", "namespace", "count"},
-			MinCitations:          1,
-			MaxToolCalls:          6,
-			MaxToolCallDurationMS: 2000,
+			ID:                      "js-transform-aggregation",
+			Question:                "Use the JS interpreter to run a bounded SQL query for recent OOMKilled Pod fact rows, group the rows by namespace, and report counts.",
+			RequiredTools:           []string{"kube_insight_health", "kube_insight_schema", jsInterpreterToolName},
+			RequiredArtifactKinds:   []string{ArtifactKindToolCall},
+			RequiredAnswerTerms:     []string{"oomkilled", "namespace", "count"},
+			MinCitations:            1,
+			MaxToolCalls:            6,
+			MaxToolCallDurationMS:   2000,
+			RequireHealthBeforeData: true,
 		},
 	}
 }
@@ -222,6 +234,9 @@ func EvaluateRunEvents(tc EvaluationCase, events []RunEvent) EvaluationReport {
 
 	if !tc.AllowFailedTools {
 		report.addCheck("tool failures", len(failedTools) == 0, fmt.Sprintf("got %d failed tool calls", len(failedTools)))
+	}
+	if tc.RequireHealthBeforeData {
+		report.addCheck("health before data tools", healthBeforeDataTools(report.ToolCalls), "kube_insight_health was missing or appeared after a data tool")
 	}
 	if tc.MaxToolCalls > 0 {
 		report.addCheck("tool call count", report.ToolCallCount <= tc.MaxToolCalls, fmt.Sprintf("got %d tool calls, want at most %d", report.ToolCallCount, tc.MaxToolCalls))
@@ -369,6 +384,21 @@ func missingAnswerTerms(required []string, answer string) []string {
 		}
 	}
 	return missing
+}
+
+func healthBeforeDataTools(calls []EvaluationToolCall) bool {
+	seenHealth := false
+	for _, call := range calls {
+		switch call.Name {
+		case "kube_insight_health":
+			seenHealth = true
+		case "kube_insight_schema", "kube_insight_sql", jsInterpreterToolName, legacyScriptedQueryToolName, "kube_insight_search", "kube_insight_history", "kube_insight_topology", "kube_insight_service_investigation":
+			if !seenHealth {
+				return false
+			}
+		}
+	}
+	return seenHealth
 }
 
 func missingMessage(prefix string, missing []string) string {

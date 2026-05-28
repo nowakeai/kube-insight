@@ -530,7 +530,7 @@ func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing
 	var second struct {
 		ID string `json:"id"`
 	}
-	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"最近1小时内呢","provider":"openai-compatible","model":"test-model","metadata":{"clientContext":{"sentAt":"2026-05-26T10:00:00Z","timeZone":"Asia/Shanghai"}}}`, http.StatusCreated, &second)
+	postJSON(t, server.URL+"/api/v1/agent/sessions/"+session.ID+"/runs", `{"input":"最近1小时内呢","provider":"openai-compatible","model":"test-model","metadata":{"clientContext":{"sentAt":"2026-05-26T10:00:00Z","localTime":"2026-05-26T18:00:00+08:00","timeZone":"Asia/Shanghai","timezoneOffsetMinutes":480,"locale":"zh-CN"}}}`, http.StatusCreated, &second)
 	getBody(t, server.URL+"/api/v1/agent/runs/"+second.ID+"/events?follow=true", http.StatusOK)
 
 	request := completionRequestForRun(t, handler.agentStore, second.ID)
@@ -538,7 +538,7 @@ func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing
 		t.Fatalf("request provider/model = %#v", request)
 	}
 	joined := completionRequestMessageText(request.Messages)
-	for _, want := range []string{"Stable instruction.", "最近有没有 OOM 现象？", "发现 OOMKilled Pod", "Client context for this run", "Asia/Shanghai", "最近1小时内呢"} {
+	for _, want := range []string{"Stable instruction.", "最近有没有 OOM 现象？", "发现 OOMKilled Pod", "Client context for this run", "2026-05-26T10:00:00Z", "2026-05-26T18:00:00+08:00", "Asia/Shanghai", "480", "zh-CN", "current time base", "最近1小时内呢"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("completion request missing %q: %#v", want, request.Messages)
 		}
@@ -546,8 +546,13 @@ func TestCreateAgentRunProviderRequestPreservesPriorIntentForFollowUp(t *testing
 	if indexOfMessageContaining(request.Messages, "最近有没有 OOM 现象？") > indexOfMessageContaining(request.Messages, "最近1小时内呢") {
 		t.Fatalf("prior intent must appear before follow-up input: %#v", request.Messages)
 	}
-	if indexOfMessageContaining(request.Messages, "Client context for this run") < indexOfMessageContaining(request.Messages, "发现 OOMKilled Pod") {
+	clientContextIndex := indexOfMessageContaining(request.Messages, "Client context for this run")
+	if clientContextIndex < indexOfMessageContaining(request.Messages, "发现 OOMKilled Pod") {
 		t.Fatalf("volatile client context should stay after stable history: %#v", request.Messages)
+	}
+	currentUserIndex := indexOfMessageContaining(request.Messages, "最近1小时内呢")
+	if clientContextIndex+1 != currentUserIndex {
+		t.Fatalf("client context should immediately precede the relative-time follow-up input: %#v", request.Messages)
 	}
 }
 

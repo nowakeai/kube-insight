@@ -4,15 +4,25 @@ set -euo pipefail
 API_URL=${KUBE_INSIGHT_AGENT_CASE_API_URL:-http://127.0.0.1:8080}
 OUT_DIR=${KUBE_INSIGHT_AGENT_CASE_OUTPUT:-testdata/generated/agent-clickhouse-case-smoke}
 RUN_AGENT_CASE=${KUBE_INSIGHT_AGENT_CASE_RUN_AGENT:-0}
+AGENT_CASE_SET=${KUBE_INSIGHT_AGENT_CASE_SET:-node-inventory}
+AGENT_CASE_STRICT=${KUBE_INSIGHT_AGENT_CASE_STRICT:-1}
+AGENT_CASE_SLUG=${KUBE_INSIGHT_AGENT_CASE_SLUG:-agent-custom}
+AGENT_CASE_PARALLEL=${KUBE_INSIGHT_AGENT_CASE_PARALLEL:-1}
 AGENT_CASE_QUESTION=${KUBE_INSIGHT_AGENT_CASE_QUESTION:-看看 gcp2半天内集群的节点是否有变化？一共有多少节点，有哪些类型？总的cpu 内存 量是多少}
 AGENT_CASE_TIMEOUT=${KUBE_INSIGHT_AGENT_CASE_TIMEOUT_SECONDS:-360}
-AGENT_CASE_REQUIRED_TOOLS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_TOOLS:-kube_insight_health,kube_insight_schema,kube_insight_js}
-AGENT_CASE_FORBIDDEN_TOOLS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_TOOLS:-artifact_transform_js,kube_insight_scripted_query}
-AGENT_CASE_EXPECTED_TOOL_SEQUENCE=${KUBE_INSIGHT_AGENT_CASE_EXPECTED_TOOL_SEQUENCE:-kube_insight_health,kube_insight_schema,kube_insight_js;kube_insight_schema,kube_insight_health,kube_insight_js}
-AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT:-gcp2}
-AGENT_CASE_REQUIRED_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS:-节点,CPU,GiB}
-AGENT_CASE_FORBIDDEN_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_ANSWER_TERMS:-没有净增减}
-AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS:-北京时间|Asia/Shanghai|+08:00}
+AGENT_CASE_REQUIRED_TOOLS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_TOOLS-kube_insight_health,kube_insight_schema,kube_insight_js}
+AGENT_CASE_FORBIDDEN_TOOLS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_TOOLS-artifact_transform_js,kube_insight_scripted_query}
+AGENT_CASE_EXPECTED_TOOL_SEQUENCE=${KUBE_INSIGHT_AGENT_CASE_EXPECTED_TOOL_SEQUENCE-}
+AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT-gcp2}
+AGENT_CASE_REQUIRED_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS-节点,CPU,GiB}
+AGENT_CASE_FORBIDDEN_ANSWER_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_ANSWER_TERMS-没有净增减}
+AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS=${KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS-北京时间|Asia/Shanghai|+08:00}
+AGENT_CASE_FORBIDDEN_JS_INPUT_TERMS=${KUBE_INSIGHT_AGENT_CASE_FORBIDDEN_JS_INPUT_TERMS-now()}
+AGENT_CASE_FORBID_JS_ANTIPATTERNS=${KUBE_INSIGHT_AGENT_CASE_FORBID_JS_ANTIPATTERNS-1}
+AGENT_CASE_REQUIRE_JS_ABSOLUTE_TIME=${KUBE_INSIGHT_AGENT_CASE_REQUIRE_JS_ABSOLUTE_TIME-1}
+AGENT_CASE_NODE_LIFECYCLE_CHECK=${KUBE_INSIGHT_AGENT_CASE_NODE_LIFECYCLE_CHECK-1}
+AGENT_CASE_REQUIRE_SCRATCH_HANDLES=${KUBE_INSIGHT_AGENT_CASE_REQUIRE_SCRATCH_HANDLES-0}
+AGENT_CASE_MIN_CITATIONS=${KUBE_INSIGHT_AGENT_CASE_MIN_CITATIONS-0}
 AGENT_CASE_CLIENT_TIME_ZONE=${KUBE_INSIGHT_AGENT_CASE_CLIENT_TIME_ZONE:-Asia/Shanghai}
 AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES=${KUBE_INSIGHT_AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES:-480}
 AGENT_CASE_CLIENT_LOCALE=${KUBE_INSIGHT_AGENT_CASE_CLIENT_LOCALE:-zh-CN}
@@ -56,10 +66,34 @@ pipe_each() {
   tr '|' '\n' <<<"$raw" | sed 's/^ *//;s/ *$//' | sed '/^$/d'
 }
 
-agent_case() {
-  local session_json session_id run_json run_id slug sse_path events_json status final_answer
+text_contains_term() {
+  local text=$1
+  local term=$2
+  local alt
+  while IFS= read -r alt; do
+    if grep -Fqi "$alt" <<<"$text"; then
+      return 0
+    fi
+  done < <(pipe_each "$term")
+  return 1
+}
 
-  printf 'running agent case: %s\n' "$AGENT_CASE_QUESTION" >&2
+agent_case() {
+  local slug=$1
+  local question=$2
+  local required_tools=$3
+  local forbidden_tools=$4
+  local expected_tool_sequence=$5
+  local forbidden_first_health_input=$6
+  local required_answer_terms=$7
+  local forbidden_answer_terms=$8
+  local required_answer_any_terms=$9
+  local node_lifecycle_instance_type_check=${10}
+  local session_json session_id run_json run_id sse_path events_json status final_answer
+  local failures=()
+  local actual_tool_sequence=""
+
+  printf 'running agent case %s: %s\n' "$slug" "$question" >&2
   session_json="$(request_json POST /api/v1/agent/sessions "$(jq -n --arg title "ClickHouse agent case smoke" '{title:$title}')")"
   session_id="$(jq -r '.id' <<<"$session_json")"
   local client_sent_at client_context_json
@@ -81,11 +115,10 @@ print(json.dumps({
 }))
 ' "$client_sent_at" "$AGENT_CASE_CLIENT_TIME_ZONE" "$AGENT_CASE_CLIENT_UTC_OFFSET_MINUTES" "$AGENT_CASE_CLIENT_LOCALE")"
   run_json="$(request_json POST "/api/v1/agent/sessions/$session_id/runs" "$(jq -n \
-    --arg input "$AGENT_CASE_QUESTION" \
+    --arg input "$question" \
     --argjson clientContext "$client_context_json" \
     '{input:$input, metadata:{clientContext:$clientContext}}')")"
   run_id="$(jq -r '.id' <<<"$run_json")"
-  slug="agent-gcp2-half-day-node-capacity"
   sse_path="$OUT_DIR/$slug.sse"
   events_json="$OUT_DIR/$slug.events.json"
 
@@ -95,115 +128,404 @@ print(json.dumps({
   final_answer="$(jq -r '[.[] | select(.type=="answer.final" or .type=="message.completed") | .data.content // empty] | last // ""' "$events_json")"
 
   if [[ "$status" != "run.completed" ]]; then
-    echo "Agent run $run_id did not complete successfully: $status" >&2
+    failures+=("run did not complete successfully: ${status:-missing-terminal-status}")
     jq 'map({type, sequence, data})' "$events_json" >&2
-    exit 1
   fi
 
   if jq -e '[.[] | select(.type=="tool.failed" or .data.status=="failed")] | length > 0' "$events_json" >/dev/null; then
-    echo "Agent run $run_id has failed tool calls." >&2
+    failures+=("run has failed tool calls")
     jq '[.[] | select(.type=="tool.failed" or .data.status=="failed") | {type, sequence, data}]' "$events_json" >&2
-    exit 1
   fi
 
   while IFS= read -r tool_name; do
     if ! jq -e --arg name "$tool_name" 'any(.[]; (.type=="tool.completed" or .type=="tool.audit") and .data.name==$name and (.data.status // "completed") != "failed")' "$events_json" >/dev/null; then
-      echo "Agent run $run_id did not call required tool: $tool_name" >&2
+      failures+=("missing required tool: $tool_name")
       jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed" or .type=="tool.audit") | {sequence, name:.data.name, status:.data.status, input:.data.input}]' "$events_json" >&2
-      exit 1
     fi
-  done < <(csv_each "$AGENT_CASE_REQUIRED_TOOLS")
+  done < <(csv_each "$required_tools")
 
   while IFS= read -r tool_name; do
     if jq -e --arg name "$tool_name" 'any(.[]; (.type=="tool.completed" or .type=="tool.failed" or .type=="tool.audit") and .data.name==$name)' "$events_json" >/dev/null; then
-      echo "Agent run $run_id called forbidden tool: $tool_name" >&2
+      failures+=("called forbidden tool: $tool_name")
       jq --arg name "$tool_name" '[.[] | select((.type=="tool.completed" or .type=="tool.failed" or .type=="tool.audit") and .data.name==$name) | {sequence, name:.data.name, status:.data.status, input:.data.input}]' "$events_json" >&2
-      exit 1
     fi
-  done < <(csv_each "$AGENT_CASE_FORBIDDEN_TOOLS")
+  done < <(csv_each "$forbidden_tools")
 
-  if [[ -n "$AGENT_CASE_EXPECTED_TOOL_SEQUENCE" ]]; then
+  if [[ -n "$expected_tool_sequence" ]]; then
     actual_tool_sequence="$(jq -r '[.[] | select(.type=="tool.completed" or .type=="tool.failed") | .data.name] | join(",")' "$events_json")"
-    if ! grep -Fxq "$actual_tool_sequence" < <(tr ';' '\n' <<<"$AGENT_CASE_EXPECTED_TOOL_SEQUENCE"); then
-      echo "Agent run $run_id used unexpected tool sequence: got=$actual_tool_sequence want=$AGENT_CASE_EXPECTED_TOOL_SEQUENCE" >&2
+    if ! grep -Fxq "$actual_tool_sequence" < <(tr ';' '\n' <<<"$expected_tool_sequence"); then
+      failures+=("unexpected tool sequence: got=$actual_tool_sequence want=$expected_tool_sequence")
       jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed" or .type=="tool.audit") | {sequence, name:.data.name, status:.data.status, input:.data.input}]' "$events_json" >&2
-      exit 1
     fi
   fi
 
-  if jq -e '
-    [.[]
-      | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js")
-      | .data.artifact.data.output
-      | (if type=="string" then (fromjson? // {}) else . end)
-      | ..
-      | objects
-      | select(has("nodeLifecycle") or has("recent_lifecycle_events"))
-      | (.nodeLifecycle // .recent_lifecycle_events // [])[]
-      | select(((.instance_type // .instanceType // "") | tostring) == "")
-    ] | length > 0
-  ' "$events_json" >/dev/null; then
-    echo "Agent run $run_id returned Node lifecycle rows without instance type." >&2
-    jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
-    exit 1
+  if [[ "$node_lifecycle_instance_type_check" == "1" || "$node_lifecycle_instance_type_check" == "true" ]]; then
+    if jq -e '
+      [.[]
+        | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js")
+        | .data.artifact.data.output
+        | (if type=="string" then (fromjson? // {}) else . end)
+        | ..
+        | objects
+        | select(has("nodeLifecycle") or has("recent_lifecycle_events"))
+        | (.nodeLifecycle // .recent_lifecycle_events // [])[]
+        | select(((.instance_type // .instanceType // "") | tostring) == "")
+      ] | length > 0
+    ' "$events_json" >/dev/null; then
+      failures+=("Node lifecycle rows missing instance type")
+      jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
+    fi
+    if jq -e '
+      [.[]
+        | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js")
+        | .data.artifact.data.output
+        | (if type=="string" then (fromjson? // {}) else . end)
+        | ..
+        | objects
+        | select(has("op") or has("observation_type") or has("first_seen_utc") or has("first_seen"))
+        | select(((.instance_type // .instanceType // "") | tostring | ascii_downcase) == "unknown"
+                 or ((.instance_type // .instanceType // "") | tostring) == "")
+      ] | length > 0
+    ' "$events_json" >/dev/null; then
+      failures+=("Node lifecycle rows still contain unknown/missing instance type after enrichment")
+      jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call" and .data.artifact.data.name=="kube_insight_js") | .data.artifact.data.output]' "$events_json" >&2
+    fi
   fi
 
-  if [[ -n "$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" ]]; then
-    if jq -e --arg fragment "$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" '
+  if [[ -n "$forbidden_first_health_input" ]]; then
+    if jq -e --arg fragment "$forbidden_first_health_input" '
       [.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_health")]
       | sort_by(.sequence)
       | first
       | ((.data.input // {}) | tostring | contains($fragment))
     ' "$events_json" >/dev/null; then
-      echo "Agent run $run_id passed forbidden fragment to the first kube_insight_health call: $AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" >&2
+      failures+=("first kube_insight_health input contains forbidden fragment: $forbidden_first_health_input")
       jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_health") | {sequence, input:.data.input}]' "$events_json" >&2
-      exit 1
+    fi
+  fi
+
+  if [[ -n "$required_answer_any_terms" && -n "$AGENT_CASE_FORBIDDEN_JS_INPUT_TERMS" ]]; then
+    while IFS= read -r term; do
+      if jq -e --arg term "$term" '
+        any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js" and ((.data.input // {}) | tostring | contains($term)))
+      ' "$events_json" >/dev/null; then
+        failures+=("JS input used forbidden relative/server-time term: $term")
+        jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+      fi
+    done < <(csv_each "$AGENT_CASE_FORBIDDEN_JS_INPUT_TERMS")
+  fi
+
+  if [[ "$AGENT_CASE_FORBID_JS_ANTIPATTERNS" == "1" || "$AGENT_CASE_FORBID_JS_ANTIPATTERNS" == "true" ]]; then
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("const\\s+sql\\s*=")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS script shadows sql helper with const sql")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("history\\s*:\\s*history|rows\\s*:\\s*rows\\s*[,}]")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS script returns broad raw rows/history instead of compact result or scratch handle")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("max\\s*\\(\\s*updated_at\\s*\\)\\s+as\\s+updated_at"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS SQL reuses updated_at as aggregate alias next to other aggregates")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+    if jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit")
+        and .data.name=="kube_insight_js"
+        and (((.data.input.script // "") | tostring) | test("(JSONExtractString|replace(All|RegexpAll)?)[^`]{0,240}/\\s*(1000|1024|1048576)"; "i")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS SQL appears to parse Kubernetes quantity strings inside ClickHouse; fetch raw strings and parse units in JS")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
+    fi
+  fi
+
+  if [[ -n "$required_answer_any_terms" && ( "$AGENT_CASE_REQUIRE_JS_ABSOLUTE_TIME" == "1" || "$AGENT_CASE_REQUIRE_JS_ABSOLUTE_TIME" == "true" ) ]]; then
+    if jq -e 'any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js")' "$events_json" >/dev/null && ! jq -e '
+      any(.[]; (.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js" and (((.data.input // {}) | tostring) | test("[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}")))
+    ' "$events_json" >/dev/null; then
+      failures+=("JS input missing absolute UTC time literal")
+      jq '[.[] | select((.type=="tool.started" or .type=="tool.completed" or .type=="tool.audit") and .data.name=="kube_insight_js") | {sequence, input:.data.input}]' "$events_json" >&2
     fi
   fi
 
   if [[ -z "$final_answer" ]]; then
-    echo "Agent run $run_id produced an empty final answer." >&2
-    exit 1
+    failures+=("empty final answer")
   fi
   while IFS= read -r term; do
-    if ! grep -Fqi "$term" <<<"$final_answer"; then
-      echo "Agent run $run_id final answer is missing required term: $term" >&2
+    if ! text_contains_term "$final_answer" "$term"; then
+      failures+=("final answer missing required term: $term")
       printf '%s\n' "$final_answer" >&2
-      exit 1
     fi
-  done < <(csv_each "$AGENT_CASE_REQUIRED_ANSWER_TERMS")
+  done < <(csv_each "$required_answer_terms")
   while IFS= read -r term; do
     if grep -Fqi "$term" <<<"$final_answer"; then
-      echo "Agent run $run_id final answer contains forbidden term: $term" >&2
+      failures+=("final answer contains forbidden term: $term")
       printf '%s\n' "$final_answer" >&2
-      exit 1
     fi
-  done < <(csv_each "$AGENT_CASE_FORBIDDEN_ANSWER_TERMS")
-  if [[ -n "$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" ]]; then
+  done < <(csv_each "$forbidden_answer_terms")
+  if [[ -n "$required_answer_any_terms" ]]; then
     local matched_any_term=0
     while IFS= read -r term; do
       if grep -Fqi "$term" <<<"$final_answer"; then
         matched_any_term=1
       fi
-    done < <(pipe_each "$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS")
+    done < <(pipe_each "$required_answer_any_terms")
     if [[ "$matched_any_term" != "1" ]]; then
-      echo "Agent run $run_id final answer is missing any required timezone/local-time term: $AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" >&2
+      failures+=("final answer missing any required term group: $required_answer_any_terms")
       printf '%s\n' "$final_answer" >&2
-      exit 1
     fi
+  fi
+
+  if [[ "$AGENT_CASE_REQUIRE_SCRATCH_HANDLES" == "1" || "$AGENT_CASE_REQUIRE_SCRATCH_HANDLES" == "true" ]]; then
+    if ! jq -e '
+      [
+        .[]
+        | select(.type=="artifact.created")
+        | (.data.artifact.data.scratchHandles // [])[]
+      ] | length > 0
+    ' "$events_json" >/dev/null; then
+      failures+=("missing required scratch handles")
+      jq '[.[] | select(.type=="artifact.created" and .data.artifact.kind=="tool_call") | {sequence, name:.data.artifact.data.name, scratchHandles:.data.artifact.data.scratchHandles}]' "$events_json" >&2
+    fi
+  fi
+
+  local failed_tool_calls artifact_count citation_count scratch_handle_count check_status check_failures_json
+  failed_tool_calls="$(jq '[.[] | select(.type=="tool.failed" or .data.status=="failed")] | length' "$events_json")"
+  artifact_count="$(jq '[.[] | select(.type=="artifact.created")] | length' "$events_json")"
+  citation_count="$(jq '[.[] | select(.type=="citation.created")] | length' "$events_json")"
+  scratch_handle_count="$(jq '[
+    .[]
+    | select(.type=="artifact.created")
+    | (.data.artifact.data.scratchHandles // [])[]
+  ] | length' "$events_json")"
+  if (( citation_count < AGENT_CASE_MIN_CITATIONS )); then
+    failures+=("citation count $citation_count is below required minimum $AGENT_CASE_MIN_CITATIONS")
+    jq '[.[] | select(.type=="citation.created" or .type=="answer.final") | {sequence, type, data}]' "$events_json" >&2
+  fi
+  check_status="passed"
+  if ((${#failures[@]} > 0)); then
+    check_status="failed"
+    check_failures_json="$(printf '%s\n' "${failures[@]}" | jq -R . | jq -s .)"
+  else
+    check_failures_json="[]"
   fi
 
   jq -n \
     --arg sessionId "$session_id" \
     --arg runId "$run_id" \
-    --arg question "$AGENT_CASE_QUESTION" \
+    --arg slug "$slug" \
+    --arg question "$question" \
     --arg status "$status" \
+    --arg checkStatus "$check_status" \
     --arg eventsPath "$events_json" \
     --arg finalAnswer "$final_answer" \
+    --arg actualToolSequence "$actual_tool_sequence" \
+    --argjson checkFailures "$check_failures_json" \
     --argjson toolNames "$(jq '[.[] | select(.type=="tool.completed" or .type=="tool.failed") | .data.name] | map(select(. != null))' "$events_json")" \
-    '{sessionId:$sessionId, runId:$runId, question:$question, status:$status, toolNames:$toolNames, eventsPath:$eventsPath, finalAnswer:$finalAnswer}' \
+    --argjson failedToolCalls "$failed_tool_calls" \
+    --argjson artifacts "$artifact_count" \
+    --argjson citations "$citation_count" \
+    --argjson scratchHandles "$scratch_handle_count" \
+    '{sessionId:$sessionId, runId:$runId, slug:$slug, question:$question, status:$status, checkStatus:$checkStatus, checkFailures:$checkFailures, toolNames:$toolNames, failedToolCalls:$failedToolCalls, artifacts:$artifacts, citations:$citations, scratchHandles:$scratchHandles, actualToolSequence:$actualToolSequence, eventsPath:$eventsPath, finalAnswer:$finalAnswer}' \
     >"$OUT_DIR/$slug.summary.json"
-  printf '%s: run=%s tools=%s\n' "$OUT_DIR/$slug.summary.json" "$run_id" "$(jq -r '.toolNames | join(",")' "$OUT_DIR/$slug.summary.json")"
+  printf '%s: run=%s status=%s checks=%s tools=%s\n' "$OUT_DIR/$slug.summary.json" "$run_id" "$status" "$check_status" "$(jq -r '.toolNames | join(",")' "$OUT_DIR/$slug.summary.json")"
+  if [[ "$check_status" != "passed" && "$AGENT_CASE_STRICT" != "0" && "$AGENT_CASE_STRICT" != "false" ]]; then
+    printf 'Agent case %s failed checks:\n' "$slug" >&2
+    printf ' - %s\n' "${failures[@]}" >&2
+    exit 1
+  fi
+}
+
+agent_case_configured() {
+	agent_case \
+		"agent-gcp2-half-day-node-capacity" \
+    "$AGENT_CASE_QUESTION" \
+    "$AGENT_CASE_REQUIRED_TOOLS" \
+    "$AGENT_CASE_FORBIDDEN_TOOLS" \
+    "$AGENT_CASE_EXPECTED_TOOL_SEQUENCE" \
+    "$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" \
+		"$AGENT_CASE_REQUIRED_ANSWER_TERMS" \
+		"$AGENT_CASE_FORBIDDEN_ANSWER_TERMS" \
+		"$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" \
+		"1"
+}
+
+agent_case_custom() {
+	agent_case \
+		"$AGENT_CASE_SLUG" \
+		"$AGENT_CASE_QUESTION" \
+		"$AGENT_CASE_REQUIRED_TOOLS" \
+		"$AGENT_CASE_FORBIDDEN_TOOLS" \
+		"$AGENT_CASE_EXPECTED_TOOL_SEQUENCE" \
+		"$AGENT_CASE_FORBIDDEN_FIRST_HEALTH_INPUT" \
+		"$AGENT_CASE_REQUIRED_ANSWER_TERMS" \
+		"$AGENT_CASE_FORBIDDEN_ANSWER_TERMS" \
+		"$AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS" \
+		"$AGENT_CASE_NODE_LIFECYCLE_CHECK"
+}
+
+agent_aggregation_case_by_slug() {
+	local slug=$1
+	local required_tools="kube_insight_health,kube_insight_schema,kube_insight_js"
+	local forbidden_tools="artifact_transform_js,kube_insight_scripted_query"
+	local expected_sequence=""
+  case "$slug" in
+    agent-namespace-pod-resource-top)
+      agent_case \
+        "agent-namespace-pod-resource-top" \
+        "帮我看看哪个namespace pod资源占用最高" \
+        "$required_tools" \
+        "$forbidden_tools" \
+        "$expected_sequence" \
+        "" \
+        "namespace|Namespace|命名空间,Pod" \
+        "" \
+        "" \
+        "0"
+      ;;
+    agent-namespace-resource-delta)
+      agent_case \
+        "agent-namespace-resource-delta" \
+        "帮我看看过去几天哪个namespace资源占用有较大变化" \
+        "$required_tools" \
+        "$forbidden_tools" \
+        "$expected_sequence" \
+        "" \
+        "namespace|Namespace|命名空间,变化" \
+        "" \
+        "北京时间|Asia/Shanghai|+08:00|UTC" \
+        "0"
+      ;;
+    agent-pod-count-peak)
+      agent_case \
+        "agent-pod-count-peak" \
+        "帮我看看过去一周pod数量最多的时间点是什么时候" \
+        "$required_tools" \
+        "$forbidden_tools" \
+        "$expected_sequence" \
+        "" \
+        "Pod,时间" \
+        "" \
+        "北京时间|Asia/Shanghai|+08:00|UTC" \
+        "0"
+      ;;
+    agent-pvc-resize-delta)
+      agent_case \
+        "agent-pvc-resize-delta" \
+        "帮我看看过去一周有哪些 PVC 发生过扩容？从多少扩到多少？" \
+        "$required_tools" \
+        "$forbidden_tools" \
+        "$expected_sequence" \
+        "" \
+        "PVC,GiB,扩" \
+        "字节,bytes" \
+        "北京时间|Asia/Shanghai|+08:00|UTC" \
+        "0"
+      ;;
+    *)
+      echo "unknown aggregation case slug: $slug" >&2
+      return 1
+      ;;
+  esac
+}
+
+agent_aggregation_cases() {
+  local slugs=(agent-namespace-pod-resource-top agent-namespace-resource-delta agent-pod-count-peak agent-pvc-resize-delta)
+  if (( AGENT_CASE_PARALLEL > 1 )); then
+    local pids=()
+    local slug pid failures=0
+    printf 'running aggregation agent cases in parallel: %s\n' "${slugs[*]}" >&2
+    for slug in "${slugs[@]}"; do
+      (
+        agent_aggregation_case_by_slug "$slug"
+      ) &
+      pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do
+      if ! wait "$pid"; then
+        failures=$((failures + 1))
+      fi
+    done
+    if (( failures > 0 )); then
+      echo "$failures parallel aggregation case(s) failed" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  local slug
+  for slug in "${slugs[@]}"; do
+    agent_aggregation_case_by_slug "$slug"
+  done
+}
+
+write_agent_case_report() {
+  local summaries=("$OUT_DIR"/agent-*.summary.json)
+  if [[ ! -e "${summaries[0]}" ]]; then
+    return
+  fi
+  local generated_at report_json report_md
+  generated_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+  report_json="$OUT_DIR/agent-cases-report.json"
+  report_md="$OUT_DIR/agent-cases-report.md"
+  jq -s \
+    --arg generatedAt "$generated_at" \
+    --arg caseSet "$AGENT_CASE_SET" \
+    --arg strict "$AGENT_CASE_STRICT" '
+      {
+        generatedAt: $generatedAt,
+        caseSet: $caseSet,
+        strict: $strict,
+        totals: {
+          cases: length,
+          passed: (map(select(.checkStatus == "passed")) | length),
+          failed: (map(select(.checkStatus != "passed")) | length),
+          completedRuns: (map(select(.status == "run.completed")) | length),
+          toolCalls: ((map((.toolNames // []) | length) | add) // 0),
+          failedToolCalls: ((map(.failedToolCalls // 0) | add) // 0),
+          citations: ((map(.citations // 0) | add) // 0),
+          scratchHandles: ((map(.scratchHandles // 0) | add) // 0)
+        },
+        cases: sort_by(.slug)
+      }
+    ' "${summaries[@]}" >"$report_json"
+  jq -r '
+    def cell: tostring | gsub("\\|"; "\\|") | gsub("[\\r\\n]+"; " ");
+    [
+      "# ClickHouse Agent Case Report",
+      "",
+      "- Generated: \(.generatedAt)",
+      "- Case set: \(.caseSet)",
+      "- Strict checks: \(.strict)",
+      "",
+      "| Metric | Value |",
+      "| --- | ---: |",
+      "| Cases | \(.totals.cases) |",
+      "| Passed | \(.totals.passed) |",
+      "| Failed | \(.totals.failed) |",
+      "| Completed runs | \(.totals.completedRuns) |",
+      "| Tool calls | \(.totals.toolCalls) |",
+      "| Failed tool calls | \(.totals.failedToolCalls) |",
+      "| Citations | \(.totals.citations) |",
+      "| Scratch handles | \(.totals.scratchHandles) |",
+      "",
+      "| Case | Status | Checks | Tools | Citations | Scratch handles | Failures |",
+      "| --- | --- | --- | --- | ---: | ---: | --- |"
+    ][],
+    (.cases[]? | "| \(.slug | cell) | \(.status | cell) | \(.checkStatus | cell) | \((.toolNames // []) | join(",") | cell) | \(.citations // 0) | \(.scratchHandles // 0) | \((.checkFailures // []) | join("; ") | cell) |")
+  ' "$report_json" >"$report_md"
+  printf 'agent case report: %s\n' "$report_md"
 }
 
 request_json GET /healthz > "$OUT_DIR/healthz.json"
@@ -220,7 +542,27 @@ sql_case allocation_rollup "with latest_pods as (select cluster_id, namespace, n
 sql_case restart_by_namespace "select cluster_id, namespace, count() as restart_related_rows, max(ts) as last_seen from facts where ts >= now() - interval 7 day and (positionCaseInsensitive(fact_key, 'restart') > 0 or positionCaseInsensitive(fact_value, 'restart') > 0) group by cluster_id, namespace order by restart_related_rows desc, last_seen desc limit 25"
 
 if [[ "$RUN_AGENT_CASE" == "1" || "$RUN_AGENT_CASE" == "true" ]]; then
-  agent_case
+  case "$AGENT_CASE_SET" in
+    node-inventory|default)
+      agent_case_configured
+      ;;
+		aggregation)
+			agent_aggregation_cases
+			;;
+		custom|single)
+			agent_case_custom
+			;;
+		all)
+			agent_case_configured
+			agent_aggregation_cases
+      ;;
+		*)
+			echo "unknown KUBE_INSIGHT_AGENT_CASE_SET: $AGENT_CASE_SET" >&2
+			echo "valid values: node-inventory, aggregation, custom, all" >&2
+			exit 1
+			;;
+  esac
+  write_agent_case_report
 fi
 
 printf 'wrote ClickHouse agent case smoke output to %s\n' "$OUT_DIR"

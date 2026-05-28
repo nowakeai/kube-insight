@@ -704,6 +704,7 @@ func agentRunClientContextMessage(metadata json.RawMessage) string {
 	var b strings.Builder
 	b.WriteString("Client context for this run:\n")
 	b.WriteString("- Treat Client sent at/local time/time zone as the current time base for this run. Use this, not server time, model training time, or tool checked_at timestamps, to interpret relative user dates/times such as today, yesterday, last 10 minutes, or this week. It is not proof about Kubernetes state. Compute absolute from/to bounds before the first data tool call. Use UTC for tool arguments and SQL predicates, but render final-answer timestamps in the client time zone when provided, preferably with the IANA time zone name or numeric offset instead of ambiguous abbreviations; include UTC only as a secondary reference when useful.\n")
+	b.WriteString("- Final answers that include any query window, observation timestamp, change timestamp, or lookback window must include the client-local time zone label when provided. If a tool returns only UTC, convert or restate the same window with the client time zone next to it before answering.\n")
 	writeClientContextLine(&b, "Client sent at", contextString(contextRecord, "sentAt"))
 	writeClientContextLine(&b, "Client local time", contextString(contextRecord, "localTime"))
 	writeClientContextLine(&b, "Client time zone", contextString(contextRecord, "timeZone"))

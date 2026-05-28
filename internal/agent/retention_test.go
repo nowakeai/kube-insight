@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -119,12 +122,80 @@ func TestPlanRetentionPreservesChildArtifactsWhileParentRuns(t *testing.T) {
 	}
 }
 
+func TestCleanupScratchStoresPrunesExpiredAndProtectsRunningSessions(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	now := time.Unix(10_000, 0).UTC()
+	old := now.Add(-2 * time.Hour)
+	opts := DefaultRetentionOptions()
+	opts.ScratchMaxAgeSeconds = int64(time.Hour / time.Second)
+
+	oldPath := writeScratchTestFile(t, "sess_old", "rows.json", []byte(`[{"namespace":"default"}]`), old)
+	activePath := writeScratchTestFile(t, "sess_active", "rows.json", []byte(`[{"namespace":"kube-system"}]`), old)
+	freshPath := writeScratchTestFile(t, "sess_fresh", "rows.json", []byte(`[{"namespace":"ops"}]`), now.Add(-time.Minute))
+
+	report, err := CleanupScratchStores(context.Background(), []Run{{ID: "run_active", SessionID: "sess_active", Status: RunRunning}}, opts, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ScratchStoresDeleted != 1 || report.ScratchBytesDeleted == 0 || joinIDs(report.ScratchSessionIDs) != "sess_old" {
+		t.Fatalf("report = %#v", report)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old scratch path should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(activePath); err != nil {
+		t.Fatalf("active scratch path should remain: %v", err)
+	}
+	if _, err := os.Stat(freshPath); err != nil {
+		t.Fatalf("fresh scratch path should remain: %v", err)
+	}
+}
+
+func TestCleanupScratchStoresDryRunReportsWithoutDeleting(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	now := time.Unix(10_000, 0).UTC()
+	old := now.Add(-2 * time.Hour)
+	opts := DefaultRetentionOptions()
+	opts.DryRun = true
+	opts.ScratchMaxAgeSeconds = int64(time.Hour / time.Second)
+	path := writeScratchTestFile(t, "sess_old", "rows.json", []byte(`[1,2,3]`), old)
+
+	report, err := CleanupScratchStores(context.Background(), nil, opts, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ScratchStoresDeleted != 1 || joinIDs(report.ScratchSessionIDs) != "sess_old" {
+		t.Fatalf("report = %#v", report)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("dry-run scratch path should remain: %v", err)
+	}
+}
+
 func artifactEvent(eventID, artifactID string) RunEvent {
 	return RunEvent{ID: eventID, Type: EventArtifact, Data: jsonRaw(ArtifactEventData{Artifact: Artifact{ID: artifactID, Kind: ArtifactKindMarkdown}})}
 }
 
 func citationEvent(eventID, artifactID string) RunEvent {
 	return RunEvent{ID: eventID, Type: EventCitation, Data: jsonRaw(CitationEventData{Citation: Citation{ID: "citation_1", ArtifactID: artifactID}})}
+}
+
+func writeScratchTestFile(t *testing.T, sessionID, name string, data []byte, modTime time.Time) string {
+	t.Helper()
+	path := filepath.Join(scratchSessionRoot(sessionID), name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Dir(path), modTime, modTime); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func joinIDs(values []string) string {

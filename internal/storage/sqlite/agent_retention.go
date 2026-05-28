@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"time"
 
 	"kube-insight/internal/agent"
 )
@@ -19,6 +20,11 @@ func (s *Store) ApplyAgentRetention(ctx context.Context, opts agent.RetentionOpt
 	}
 	plan := agent.PlanRetention(runs, eventsByRunID, opts)
 	report := plan.Report()
+	scratchReport, err := agent.CleanupScratchStores(ctx, runs, opts, time.Now().UTC())
+	if err != nil {
+		return agent.RetentionReport{}, err
+	}
+	agent.MergeScratchRetentionReport(&report, scratchReport)
 	if opts.DryRun || (len(plan.SupersededRunIDs) == 0 && len(plan.UnreferencedArtifactEventIDs) == 0) {
 		return report, nil
 	}

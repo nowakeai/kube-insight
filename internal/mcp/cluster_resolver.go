@@ -60,6 +60,9 @@ func resolveClusterID(ctx context.Context, store ReadStore, input string) (strin
 	}
 	available := make([]string, 0, len(clusters))
 	for _, cluster := range clusters {
+		if strings.TrimSpace(cluster.Name) == "" {
+			continue
+		}
 		display := clusterDisplayAlias(cluster)
 		if display != "" && display != cluster.Name {
 			available = append(available, fmt.Sprintf("%s (id=%s)", display, cluster.Name))
@@ -77,6 +80,9 @@ func clusterHasEvidence(cluster storage.ClusterRecord) bool {
 func matchingClusters(clusters []storage.ClusterRecord, input string, match func(storage.ClusterRecord, string) bool) []storage.ClusterRecord {
 	matches := make([]storage.ClusterRecord, 0, 1)
 	for _, cluster := range clusters {
+		if strings.TrimSpace(cluster.Name) == "" {
+			continue
+		}
 		if match(cluster, input) {
 			matches = append(matches, cluster)
 		}

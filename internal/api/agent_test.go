@@ -389,6 +389,7 @@ func TestRetryAgentRunCreatesNewRunFromTerminalRun(t *testing.T) {
 }
 
 func TestCompactAgentRetentionEndpointPrunesRetryBranchAndArtifacts(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	store := agent.NewMemoryStore()
 	handler, err := NewServer(ServerOptions{
 		OpenStore: func(context.Context) (ReadStore, error) {
@@ -443,6 +444,7 @@ func TestCompactAgentRetentionEndpointPrunesRetryBranchAndArtifacts(t *testing.T
 }
 
 func TestAgentRetentionRunsPeriodically(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	store := agent.NewMemoryStore()
 	handler, err := NewServer(ServerOptions{
 		OpenStore: func(context.Context) (ReadStore, error) {

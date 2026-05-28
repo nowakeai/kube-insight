@@ -92,6 +92,7 @@ func TestClickHouseAgentStoreDeleteSessionPlansMutations(t *testing.T) {
 }
 
 func TestClickHouseAgentRetentionPlansDeleteMutations(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	client := newFakeAgentClickHouseClient()
 	store := &Store{Client: client, Database: "ki"}
 	ctx := context.Background()

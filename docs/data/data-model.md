@@ -348,7 +348,7 @@ object_facts(
   node_id,
   workload_id,
   service_id,
-  fact_key_id,
+  fact_key,
   fact_value,
   numeric_value,
   severity,

@@ -3,12 +3,16 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"kube-insight/internal/agent"
 )
 
 func TestAgentRetentionPrunesSupersededRunsAndUnreferencedArtifacts(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	ctx := context.Background()
 	store, err := Open(t.TempDir() + "/ki.db")
 	if err != nil {
@@ -49,6 +53,43 @@ func TestAgentRetentionPrunesSupersededRunsAndUnreferencedArtifacts(t *testing.T
 	}
 	if hasEventID(events, dropArtifact) || !hasEventID(events, keepArtifact) {
 		t.Fatalf("events after retention = %#v keep=%s drop=%s", events, keepArtifact, dropArtifact)
+	}
+}
+
+func TestAgentRetentionPrunesExpiredScratchWithoutDBDeletes(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	ctx := context.Background()
+	store, err := Open(t.TempDir() + "/ki.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	scratchPath := filepath.Join(os.TempDir(), "kube-insight-agent-scratch", "sess_old", "rows.json")
+	if err := os.MkdirAll(filepath.Dir(scratchPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scratchPath, []byte(`[1,2,3]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(scratchPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Dir(scratchPath), old, old); err != nil {
+		t.Fatal(err)
+	}
+	opts := agent.DefaultRetentionOptions()
+	opts.ScratchMaxAgeSeconds = int64(time.Hour / time.Second)
+
+	report, err := store.ApplyAgentRetention(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ScratchStoresDeleted != 1 || report.ScratchBytesDeleted == 0 {
+		t.Fatalf("report = %#v", report)
+	}
+	if _, err := os.Stat(scratchPath); !os.IsNotExist(err) {
+		t.Fatalf("scratch should be removed, stat err=%v", err)
 	}
 }
 

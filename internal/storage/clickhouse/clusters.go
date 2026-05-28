@@ -46,24 +46,31 @@ version_counts AS (
   FROM %s.versions
   GROUP BY cluster_id
 ),
-latest_counts AS (
-  SELECT cluster_id AS name, uniqExact(object_id) AS latest
-  FROM %s.versions
-  GROUP BY cluster_id
-)
+	latest_counts AS (
+	  SELECT cluster_id AS name, uniqExact(object_id) AS latest
+	  FROM %s.versions
+	  GROUP BY cluster_id
+	),
+	cluster_names AS (
+	  SELECT name FROM latest_clusters WHERE name != ''
+	  UNION DISTINCT SELECT name FROM object_counts WHERE name != ''
+	  UNION DISTINCT SELECT name FROM version_counts WHERE name != ''
+	  UNION DISTINCT SELECT name FROM latest_counts WHERE name != ''
+	)
 SELECT
-  lc.name,
-  lc.uid,
-  lc.source,
-  lc.latest_created_at AS created_at,
-  ifNull(oc.objects, 0) AS objects,
-  ifNull(vc.versions, 0) AS versions,
-  ifNull(lc2.latest, 0) AS latest
-FROM latest_clusters lc
-LEFT JOIN object_counts oc ON oc.name = lc.name
-LEFT JOIN version_counts vc ON vc.name = lc.name
-LEFT JOIN latest_counts lc2 ON lc2.name = lc.name
-ORDER BY lc.name`, q(s.database()), q(s.database()), q(s.database()), q(s.database()))
+	  cn.name,
+	  lc.uid,
+	  lc.source,
+	  lc.latest_created_at AS created_at,
+	  ifNull(oc.objects, 0) AS objects,
+	  ifNull(vc.versions, 0) AS versions,
+	  ifNull(lc2.latest, 0) AS latest
+FROM cluster_names cn
+LEFT JOIN latest_clusters lc ON lc.name = cn.name
+LEFT JOIN object_counts oc ON oc.name = cn.name
+LEFT JOIN version_counts vc ON vc.name = cn.name
+LEFT JOIN latest_counts lc2 ON lc2.name = cn.name
+ORDER BY cn.name`, q(s.database()), q(s.database()), q(s.database()), q(s.database()))
 	result, err := s.client().QueryJSON(ctx, query)
 	if err != nil {
 		return nil, err

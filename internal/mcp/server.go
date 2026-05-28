@@ -414,7 +414,7 @@ func tools() []sdkmcp.Tool {
 	return []sdkmcp.Tool{
 		{
 			Name:        "kube_insight_schema",
-			Description: "Return the active kube-insight backend schema as a compact DSL for LLM SQL planning, including dialect notes, useful tables, columns, indexes, joins, and recipes. Call this before writing SQL because SQLite and ClickHouse table names differ. Do not call schema when health, search, history, topology, or service investigation already provides enough evidence.",
+			Description: "Return the active kube-insight backend schema as a compact DSL for LLM SQL planning, including dialect notes, useful tables, columns, indexes, joins, and recipes. For Kubernetes current-state, historical lookback, ranking, aggregation, or absence claims, call kube_insight_health before or alongside schema; schema is not collector coverage evidence. If the user provided a cluster display name or fragment such as gcp2, call kube_insight_health without a cluster filter before schema so the fragment is resolved to a stable cluster_id. Call schema before writing SQL because SQLite and ClickHouse table names differ. Do not call schema when health, search, history, topology, or service investigation already provides enough evidence.",
 			InputSchema: map[string]any{
 				"type":       "object",
 				"properties": map[string]any{},
@@ -422,7 +422,7 @@ func tools() []sdkmcp.Tool {
 		},
 		{
 			Name:        "kube_insight_sql",
-			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. When a bounded SQL query returns rows that answer a ranking, allocation, or exact recent-change question, that result is terminal evidence: answer from it instead of calling search, history, topology, or more SQL unless rows are empty or the user explicitly asks for impact, root cause, or raw proof. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. If the user provided a cluster display name or fragment such as gcp2, first inspect kube_insight_health without a cluster filter and use the returned stable cluster_id; do not put a guessed display alias into SQL. Keep maxRows bounded. For recent/today/half-day questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+			Description: "Run read-only SQL against the configured kube-insight evidence store for precise discovery, ranking, aggregation, and proof rows that typed tools cannot already provide. For Kubernetes current-state, historical lookback, ranking, aggregation, or absence claims, first gather collector coverage with kube_insight_health; schema/SQL rows alone do not prove the collector was healthy. When a bounded SQL query returns rows that answer a ranking, allocation, or exact recent-change question, that result is terminal evidence: answer from it instead of calling search, history, topology, or more SQL unless rows are empty or the user explicitly asks for impact, root cause, or raw proof. Always call kube_insight_schema first and write SQL for the reported backend/dialect; do not assume SQLite table names when schema notes show ClickHouse-compatible tables. If the user provided a cluster display name or fragment such as gcp2, first inspect kube_insight_health without a cluster filter and use the returned stable cluster_id; do not put a guessed display alias into SQL. Keep maxRows bounded. For recent/today/half-day questions include timestamp predicates and prefer indexed fact/change/edge fields before text or JSON scans. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -601,12 +601,12 @@ func promptText(name string, args map[string]string) (string, string, error) {
 		cluster := promptArg(args, "cluster", "the relevant cluster")
 		return fmt.Sprintf(`Investigate %s with kube-insight.
 
-Default to SQL after schema detection. Typed tools such as kube_insight_health and kube_insight_history are guardrails and packaged summaries; use kube_insight_sql for discovery, ranking candidates, topology expansion, and proof queries.
+Start with collector coverage and cluster orientation, then use schema-guided SQL or JS only when typed tools cannot already prove the answer. kube_insight_health is required coverage evidence for current-state, historical lookback, ranking, aggregation, and absence claims; schema/SQL rows alone do not prove the collector was healthy.
 
 Use this order:
-1. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
-2. If the user supplied a cluster name or fragment such as gcp2, first call kube_insight_health without a cluster filter to list available cluster display/source names and stable cluster_ids. Do not pass the user fragment as the first health cluster argument, and do not put the user fragment into a cluster_id SQL predicate until it has been matched to a stable cluster_id.
-3. Check collector coverage for %s. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health. kube_insight_health may be used as a summary.
+1. Call kube_insight_health first, without a cluster filter when the user supplied a cluster name or fragment such as gcp2, to list available cluster display/source names, stable cluster_ids, collector coverage, stale streams, and current errors. Do not pass the user fragment as the first health cluster argument, and do not put the user fragment into a cluster_id SQL predicate until it has been matched to a stable cluster_id.
+2. Check collector coverage for %s from that health result. For ClickHouse-compatible backends, ingestion_offsets is append-only, so collapse current state with argMax(status, updated_at), argMax(error, updated_at), and max(updated_at) before judging health if you must inspect coverage manually.
+3. Call kube_insight_schema and read the backend notes before writing SQL; SQLite and ClickHouse-compatible backends use different table names and timestamp expressions.
 4. List clusters with the cluster query that matches the returned schema. For SQLite use clusters; for ClickHouse-compatible backends use versions/facts/edges and the cluster_id string already stored in evidence rows.
 5. Pick the relevant stable cluster id and keep cluster_id in follow-up SQL.
 6. Query facts and changes for candidate resources. Prefer exact fact_key/fact_value, kind, severity, and object_id predicates before broad text search. For Service exposure issues, start with service.load_balancer.pending and service.load_balancer.ingress_ip facts before opening retained Service versions.
@@ -620,10 +620,10 @@ Do not claim absence unless collector coverage is healthy for the resource types
 		keyword := promptArg(args, "keyword", "the message keyword")
 		return fmt.Sprintf(`Investigate retained Kubernetes Events in %s.
 
-Use kube_insight_schema first, then use kube_insight_sql as the primary interface with SQL that matches the active backend:
-1. Identify whether schema notes say SQLite or ClickHouse-compatible.
-2. Check current collector coverage for Event and affected-resource types. For ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at) before trusting current status.
-3. Select a cluster_id using available schema rows or evidence rows.
+Use kube_insight_health for collector coverage, then use kube_insight_schema and kube_insight_sql when SQL is needed:
+1. Call kube_insight_health first to check current collector coverage for Event and affected-resource types.
+2. Call kube_insight_schema and identify whether schema notes say SQLite or ClickHouse-compatible.
+3. Select a cluster_id using the health cluster map and evidence rows.
 4. Query Event facts directly. SQLite uses object_facts; ClickHouse-compatible backends use facts. Count Warning Events by k8s_event.reason, narrowing to %s when provided.
 5. Search k8s_event.message_preview for %s only after the reason query is scoped by cluster_id.
 6. Follow Event relationship edges. SQLite uses object_edges; ClickHouse-compatible backends use edges. Look for event_regarding_object, event_related_object, or event_involves_object to identify affected resources.
@@ -635,14 +635,15 @@ Compare retained Event history with current kubectl only as separate evidence; k
 		target := promptObjectTarget(args)
 		return fmt.Sprintf(`Inspect object history for %s.
 
-Use kube_insight_schema first and treat kube_insight_sql as the primary investigation interface. Detect whether the active backend exposes SQLite tables such as object_facts/object_edges/object_observations/latest_index or ClickHouse-compatible tables such as facts/edges/changes/observations/versions.
+Use kube_insight_health for collector coverage, then use kube_insight_schema and kube_insight_sql when SQL is needed. Detect whether the active backend exposes SQLite tables such as object_facts/object_edges/object_observations/latest_index or ClickHouse-compatible tables such as facts/edges/changes/observations/versions.
 
-Start with SQL:
-1. Check coverage for the object's resource type; for ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at).
-2. Locate the object by the most specific identifier available, preferring uid when known.
-3. Query facts and changes for the object_id to explain why it matters.
-4. Query edges where the object is src_id or dst_id to find related causes and dependents.
-5. Query observations and versions for proof timestamps, resource versions, doc_hash values, and retained documents when needed.
+Start with coverage and identity:
+1. Call kube_insight_health first to check coverage for the object's resource type; for ClickHouse-compatible backends, collapse append-only ingestion_offsets with argMax(status, updated_at) only if you must inspect coverage manually.
+2. Call kube_insight_schema before writing SQL.
+3. Locate the object by the most specific identifier available, preferring uid when known.
+4. Query facts and changes for the object_id to explain why it matters.
+5. Query edges where the object is src_id or dst_id to find related causes and dependents.
+6. Query observations and versions for proof timestamps, resource versions, doc_hash values, and retained documents when needed.
 
 Use kube_insight_history after SQL has identified the object. Include diffs and keep maxVersions/maxObservations bounded at first.
 

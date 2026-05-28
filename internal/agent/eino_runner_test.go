@@ -344,6 +344,56 @@ func TestEinoRunRecorderUsesMiddlewareToolTimingWhenStartedEventIsMissing(t *tes
 	}
 }
 
+func TestEinoRunRecorderPromotesScratchHandlesToToolArtifact(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	session, err := store.CreateSession(ctx, CreateSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.CreateRun(ctx, session.ID, CreateRunInput{Input: "scratch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := newEinoRunRecorder(store, run.ID)
+	if err := recorder.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	toolMessage := schema.ToolMessage(`{"result":{"handle":{"path":"/rows/top.json","mime":"application/json","bytes":123,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sessionId":"sess_1","runId":"run_1"}}}`, "tool_1", schema.WithToolName(scriptedQueryToolName))
+	if _, err := recorder.Record(ctx, adk.EventFromMessage(toolMessage, nil, schema.Tool, scriptedQueryToolName)); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact ArtifactEventData
+	for _, event := range events {
+		if event.Type != EventArtifact {
+			continue
+		}
+		if err := json.Unmarshal(event.Data, &artifact); err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
+	if artifact.Artifact.ID == "" {
+		t.Fatalf("missing artifact: %#v", events)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(artifact.Artifact.Data, &record); err != nil {
+		t.Fatal(err)
+	}
+	handles, _ := record["scratchHandles"].([]any)
+	if len(handles) != 1 {
+		t.Fatalf("artifact data missing scratch handles: %s", string(artifact.Artifact.Data))
+	}
+	handle, _ := handles[0].(map[string]any)
+	if handle["path"] != "/rows/top.json" || handle["sha256"] == "" {
+		t.Fatalf("handle = %#v", handle)
+	}
+}
+
 func TestEinoRunRecorderCreatesEvidenceArtifactsFromSearchOutput(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

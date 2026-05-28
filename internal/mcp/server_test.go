@@ -417,7 +417,7 @@ func TestToolDescriptionsGuideBoundedMCPUsage(t *testing.T) {
 	}
 }
 
-func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
+func TestPromptsGuideCoverageFirstInvestigation(t *testing.T) {
 	cases := []struct {
 		name string
 		want []string
@@ -425,8 +425,9 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_coverage_first",
 			want: []string{
-				"Default to SQL after schema detection",
-				"kube_insight_sql",
+				"Start with collector coverage",
+				"kube_insight_health is required coverage evidence",
+				"Call kube_insight_health first",
 				"Do not pass the user fragment as the first health cluster argument",
 				"ingestion_offsets is append-only",
 				"argMax(status, updated_at)",
@@ -438,7 +439,8 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_event_history",
 			want: []string{
-				"kube_insight_sql as the primary interface",
+				"kube_insight_health for collector coverage",
+				"Call kube_insight_health first",
 				"object_facts",
 				"ClickHouse-compatible backends use facts",
 				"object_edges",
@@ -449,8 +451,9 @@ func TestPromptsGuideSQLFirstInvestigation(t *testing.T) {
 		{
 			name: "kube_insight_object_history",
 			want: []string{
-				"kube_insight_schema first",
-				"kube_insight_sql as the primary investigation interface",
+				"kube_insight_health for collector coverage",
+				"Call kube_insight_health first",
+				"Call kube_insight_schema before writing SQL",
 				"object_facts/object_edges/object_observations/latest_index",
 				"facts/edges/changes/observations/versions",
 				"argMax(status, updated_at)",

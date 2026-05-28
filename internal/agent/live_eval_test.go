@@ -336,7 +336,7 @@ type liveEvalSQLTool struct{}
 func (t liveEvalSQLTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "kube_insight_sql",
-		Desc: "Run bounded read-only SQL after calling kube_insight_schema. Use only for aggregates or proof rows that typed tools cannot already provide. Terminal rule: when SQL returns rows for OOM ranking, allocation requests/limits, or exact recent changes, answer from those rows immediately; do not call search, history, topology, or more SQL unless rows are empty or the user explicitly asks for root cause/impact/raw proof. If JavaScript grouping is needed, prefer one kube_insight_js interpreter call that runs the proof SQL and grouping together. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
+		Desc: "Run bounded read-only SQL after calling kube_insight_schema. Use only for aggregates or proof rows that typed tools cannot already provide. Terminal rule: when SQL returns rows for OOM ranking, allocation requests/limits, or exact recent changes, answer from those rows immediately; do not call search, history, topology, or more SQL unless rows are empty or the user explicitly asks for root cause/impact/raw proof. If JavaScript grouping is needed, prefer kube_insight_js planning that runs proof SQL and grouping together when practical. Do not use SQL to re-confirm facts, changes, versions, or topology already returned by typed tools.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"sql":     {Type: schema.String, Required: true, Desc: "Read-only SQL."},
 			"maxRows": {Type: schema.Integer, Desc: "Maximum rows."},

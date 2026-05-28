@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"time"
 )
 
 type RetentionOptions struct {
-	PruneSupersededRuns        bool `json:"pruneSupersededRuns"`
-	PruneUnreferencedArtifacts bool `json:"pruneUnreferencedArtifacts"`
-	DryRun                     bool `json:"dryRun,omitempty"`
+	PruneSupersededRuns        bool  `json:"pruneSupersededRuns"`
+	PruneUnreferencedArtifacts bool  `json:"pruneUnreferencedArtifacts"`
+	PruneScratchStores         bool  `json:"pruneScratchStores"`
+	ScratchMaxAgeSeconds       int64 `json:"scratchMaxAgeSeconds,omitempty"`
+	DryRun                     bool  `json:"dryRun,omitempty"`
 }
 
 type RetentionReport struct {
@@ -19,8 +22,11 @@ type RetentionReport struct {
 	SupersededRunsDeleted             int      `json:"supersededRunsDeleted"`
 	SupersededRunEventsDeleted        int      `json:"supersededRunEventsDeleted"`
 	UnreferencedArtifactEventsDeleted int      `json:"unreferencedArtifactEventsDeleted"`
+	ScratchStoresDeleted              int      `json:"scratchStoresDeleted,omitempty"`
+	ScratchBytesDeleted               int64    `json:"scratchBytesDeleted,omitempty"`
 	SupersededRunIDs                  []string `json:"supersededRunIds,omitempty"`
 	UnreferencedArtifactEventIDs      []string `json:"unreferencedArtifactEventIds,omitempty"`
+	ScratchSessionIDs                 []string `json:"scratchSessionIds,omitempty"`
 }
 
 type RetentionStore interface {
@@ -37,7 +43,7 @@ type RetentionPlan struct {
 }
 
 func DefaultRetentionOptions() RetentionOptions {
-	return RetentionOptions{PruneSupersededRuns: true, PruneUnreferencedArtifacts: true}
+	return RetentionOptions{PruneSupersededRuns: true, PruneUnreferencedArtifacts: true, PruneScratchStores: true, ScratchMaxAgeSeconds: int64(defaultScratchStoreTTL / time.Second)}
 }
 
 func PlanRetention(runs []Run, eventsByRunID map[string][]RunEvent, opts RetentionOptions) RetentionPlan {
@@ -253,6 +259,11 @@ func (s *MemoryStore) ApplyAgentRetention(ctx context.Context, opts RetentionOpt
 	}
 	plan := PlanRetention(runs, eventsByRunID, opts)
 	report := plan.Report()
+	scratchReport, err := CleanupScratchStores(ctx, runs, opts, time.Now().UTC())
+	if err != nil {
+		return RetentionReport{}, err
+	}
+	MergeScratchRetentionReport(&report, scratchReport)
 	if opts.DryRun {
 		return report, nil
 	}
@@ -276,6 +287,12 @@ func (s *MemoryStore) ApplyAgentRetention(ctx context.Context, opts RetentionOpt
 		delete(s.runs, runID)
 	}
 	return report, nil
+}
+
+func MergeScratchRetentionReport(report *RetentionReport, scratch RetentionReport) {
+	report.ScratchStoresDeleted += scratch.ScratchStoresDeleted
+	report.ScratchBytesDeleted += scratch.ScratchBytesDeleted
+	report.ScratchSessionIDs = append(report.ScratchSessionIDs, scratch.ScratchSessionIDs...)
 }
 
 func retryOfRunID(run Run) string {

@@ -496,27 +496,7 @@ func (r einoRunRecorder) Record(ctx context.Context, event *adk.AgentEvent) (ein
 		artifactID := ""
 		if len(outputData) > 0 {
 			artifactID = NewArtifactID()
-			artifactData := jsonRaw(map[string]any{
-				"toolCallId":    msg.ToolCallID,
-				"name":          name,
-				"input":         rawMessageValue(draft.Input),
-				"output":        rawMessageValue(outputData),
-				"outputSummary": outputSummary,
-				"status":        status,
-				"durationMs":    durationMS,
-			})
-			if errorMessage != "" {
-				artifactData = jsonRaw(map[string]any{
-					"toolCallId":    msg.ToolCallID,
-					"name":          name,
-					"input":         rawMessageValue(draft.Input),
-					"output":        rawMessageValue(outputData),
-					"outputSummary": outputSummary,
-					"status":        status,
-					"durationMs":    durationMS,
-					"error":         errorMessage,
-				})
-			}
+			artifactData := toolCallArtifactData(msg.ToolCallID, name, draft.Input, outputData, outputSummary, status, durationMS, errorMessage)
 			if err := r.append(ctx, EventArtifact, ArtifactEventData{Artifact: Artifact{ID: artifactID, Kind: ArtifactKindToolCall, Title: "Tool output: " + name, Data: artifactData}}); err != nil {
 				return recorded, err
 			}

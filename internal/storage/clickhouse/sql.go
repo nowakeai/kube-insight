@@ -119,12 +119,16 @@ ORDER BY table, position`, quoteString(database)))
 			"Active SQL backend: ClickHouse-compatible (ClickHouse or chDB).",
 			"ClickHouse timestamps use DateTime64 UTC columns unless noted otherwise.",
 			"Use observations and versions for proof; use facts, edges, and changes for investigation candidates.",
+			"ClickHouse changes rows do not include uid. For object identity, use changes.object_id or query observations/versions by cluster_id, kind, namespace, and name to retrieve uid.",
 			"When the requested semantic field is unknown, profile real data first: distinct fact_key/fact_value pairs, observation_type values, recent kind counts, cluster ids, and min/max timestamps with tight LIMITs.",
 			"Use kube_insight_health cluster display map to render cluster_id as a human-readable cluster/context name in final answers.",
 			"For recent/today/last-N queries, include UTC time bounds on facts.ts, changes.ts, observations.observed_at, versions.observed_at, edges.valid_from, or ingestion_offsets.updated_at.",
 			"Prefer sorted columns before text search: facts(cluster_id,fact_key,fact_value,ts), changes(cluster_id,change_family,path,ts), observations(cluster_id,kind,namespace,name,observed_at), edges(cluster_id,edge_type,src_id,valid_from_ms).",
 			"Avoid doc/detail text scans until candidates are narrowed by cluster, kind, namespace, name, exact fact/change/edge keys, and time.",
 			"For configuration fields such as container requests/limits, profile facts first; if facts do not carry those fields, use one scoped observations.doc profile over recent rows to find the relevant kind/observation_type before fetching proof.",
+			"For historical aggregation, ranking, bucketing, latest-per-object selection, or Kubernetes unit normalization, prefer kube_insight_js after schema when code-shaped aggregation is clearer than plain SQL. Run bounded SQL inside JS and return answer-ready JSON instead of chaining many hand-written kube_insight_sql calls. Fetch Kubernetes CPU/memory/storage quantity strings in SQL and parse units in JavaScript; do not divide JSONExtractString or replaceAll string expressions inside ClickHouse SQL.",
+			"In kube_insight_js, sql(query, maxRows) and sqlAll([{name, sql, maxRows}]) are synchronous helpers. Do not use await, do not call sql with an object argument, do not name a variable sql, and return compact objects instead of JSON.stringify(rawRows). Combine tightly related profile, proof, and aggregation when practical, but do not treat one JS call as a correctness requirement. Usually omit maxQueries; if set, it must be at least the number of sql() calls plus sqlAll() specs.",
+			"When a CTE defines aggregate aliases such as argMax(doc, observed_at) as latest_doc or argMax(observation_type, observed_at) as last_type, never reference those aliases in WHERE. Put latest_doc/last_type filters in HAVING or an outer SELECT.",
 			"For ClickHouse JSON proof snippets, prefer JSONExtractRaw(doc, 'spec', 'containers') or selecting a bounded substring(doc, ...) sample; do not use JSONExtract without an explicit return type.",
 			"SQL access is read-only; use SELECT/WITH/EXPLAIN/DESCRIBE/SHOW only.",
 		},
@@ -150,7 +154,7 @@ func clickHouseSchemaRecipes() []storage.SQLSchemaRecipe {
 			SQL: `select cluster_id, kind, resource, namespace,
        argMax(status, updated_at) as status,
        argMax(error, updated_at) as error,
-       max(updated_at) as updated_at
+       max(updated_at) as latest_updated_at
 from ingestion_offsets
 where cluster_id = 'CLUSTER_ID'
 group by cluster_id, kind, resource, namespace
@@ -176,39 +180,39 @@ limit 50`,
 		},
 		{
 			Name:        "recent_change_rollup",
-			Description: "Generic fast path for recent changes. Use exact change_family/path/kind filters when known; avoid old_scalar/new_scalar text scans until narrowed.",
-			SQL: `select kind, namespace, name, change_family, path,
-       count() as changes,
-       min(ts) as first_seen,
-       max(ts) as last_seen
+			Description: "Generic fast path for recent changes. Use exact change_family/path/kind filters when known; avoid old_scalar/new_scalar text scans until narrowed. The changes table has object_id but no uid; join or follow up through observations/versions when uid is needed.",
+			SQL: `select object_id, kind, namespace, name, change_family, path,
+	       count() as changes,
+	       min(ts) as first_seen,
+	       max(ts) as last_seen
 from changes
 where cluster_id = 'CLUSTER_ID'
   and ts >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
   and change_family in ('status','spec','topology')
-group by kind, namespace, name, change_family, path
-order by changes desc, last_seen desc
-limit 50`,
+	group by object_id, kind, namespace, name, change_family, path
+	order by changes desc, last_seen desc
+	limit 50`,
 		},
 		{
 			Name:        "container_resource_allocation_rollup",
-			Description: "Generic Kubernetes container requests/limits rollup for allocation/configuration questions. Use this after schema/health when the user asks for allocated resources rather than live usage; answer from returned rows instead of probing JSON syntax repeatedly.",
+			Description: "Generic Kubernetes container requests/limits rollup for simple allocation/configuration summaries. Unless the user already scoped one exact cluster_id, keep all clusters and group by cluster_id plus namespace; do not pick the first cluster from health output. Returned sample strings are only examples; do not estimate total CPU or memory from samples. For top namespace ranking, unit normalization, or allocation-change comparisons, use pod_resource_rows_for_js inside kube_insight_js instead.",
 			SQL: `with latest_pods as (
-  select namespace, name, uid, doc,
+  select cluster_id, namespace, name, uid, doc,
          row_number() over (partition by cluster_id, kind, namespace, name, uid order by observed_at desc) as rn
   from observations
-  where cluster_id = 'CLUSTER_ID'
-    and kind = 'Pod'
+  where kind = 'Pod'
     and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
     and position(doc, '\"resources\"') > 0
 ), container_resources as (
-  select namespace, name,
+  select cluster_id, namespace, name,
          arrayJoin(JSONExtractArrayRaw(doc, 'spec', 'containers')) as container_raw,
          JSONExtractString(container_raw, 'resources', 'requests', 'cpu') as cpu_request,
          JSONExtractString(container_raw, 'resources', 'requests', 'memory') as memory_request
   from latest_pods
   where rn = 1
 )
-select namespace,
+select cluster_id,
+       namespace,
        countDistinct(name) as pods,
        count() as containers,
        countIf(JSONExtractRaw(container_raw, 'resources', 'requests') != '') as containers_with_requests,
@@ -216,13 +220,93 @@ select namespace,
        arrayStringConcat(arraySlice(groupUniqArrayIf(cpu_request, cpu_request != ''), 1, 5), ', ') as cpu_request_samples,
        arrayStringConcat(arraySlice(groupUniqArrayIf(memory_request, memory_request != ''), 1, 5), ', ') as memory_request_samples
 from container_resources
-group by namespace
+group by cluster_id, namespace
 order by containers_with_requests desc, containers desc
 limit 25`,
 		},
 		{
+			Name:        "pod_resource_rows_for_js",
+			Description: "Row-level latest Pod container resource data for kube_insight_js. Use this for namespace Pod resource ranking or allocation-change questions. Unless the user already scoped one exact cluster_id, keep all clusters, preserve cluster_id in the rows, and rank by cluster_id plus namespace or by an explicitly stated global aggregation; do not pick the first cluster from health output. Normalize Kubernetes CPU/memory units, group, rank, and compare snapshots in JS when code-shaped aggregation is clearer. Copy the CTE shape: latest_doc is an aggregate alias, so keep position(latest_doc, ...) in HAVING or an outer SELECT, never WHERE. Do not estimate totals from sample strings, and do not count raw observation rows as resource usage.",
+			SQL: `with latest_pods as (
+  select cluster_id, namespace, name, uid,
+         argMax(doc, observed_at) as latest_doc,
+         argMax(observation_type, observed_at) as last_type,
+         max(observed_at) as last_seen
+  from observations
+  where kind = 'Pod'
+    and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-26 00:00:00', 3, 'UTC')
+  group by cluster_id, namespace, name, uid
+  having position(latest_doc, '"resources"') > 0
+), containers as (
+  select cluster_id, namespace, name, uid, last_seen,
+         arrayJoin(JSONExtractArrayRaw(latest_doc, 'spec', 'containers')) as container_raw
+  from latest_pods
+  where last_type != 'DELETED'
+)
+select cluster_id, namespace, name, uid, last_seen,
+       JSONExtractString(container_raw, 'name') as container,
+       JSONExtractString(container_raw, 'resources', 'requests', 'cpu') as cpu_request,
+       JSONExtractString(container_raw, 'resources', 'requests', 'memory') as memory_request,
+       JSONExtractString(container_raw, 'resources', 'limits', 'cpu') as cpu_limit,
+       JSONExtractString(container_raw, 'resources', 'limits', 'memory') as memory_limit
+from containers
+limit 1000`,
+		},
+		{
+			Name:        "namespace_resource_delta_for_js",
+			Description: "Start/end Pod resource allocation rows for namespace resource-change questions. Query actual Pod coverage/min/max timestamps, compute startWindow/endWindow variables from that coverage, then fetch start_rows and end_rows with those variables. If coverage is per cluster, choose the dataful cluster/window before constructing snapshot SQL. Treat resource change as requests/limits allocation change unless the user explicitly asks for change-event volume or health churn. Normalize CPU/memory units and return start/end values, absolute deltas, percent deltas, final top ranking, and separate existing namespaces from newly observed namespaces when available. Do not query changes/status events or run key-namespace deep dives for allocation questions; if a chosen window is sparse or stale, use a focused follow-up coverage/query step rather than guessing.",
+			SQL: `with latest_pods as (
+  select cluster_id, namespace, name, uid,
+         argMax(doc, observed_at) as latest_doc,
+         argMax(observation_type, observed_at) as last_type,
+         max(observed_at) as last_seen
+  from observations
+  where kind = 'Pod'
+    and observed_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+    and observed_at < toDateTime64('2026-05-21 00:00:00', 3, 'UTC')
+  group by cluster_id, namespace, name, uid
+  having last_type != 'DELETED'
+     and position(latest_doc, '"resources"') > 0
+), containers as (
+  select cluster_id, namespace, name, uid, last_seen,
+         arrayJoin(JSONExtractArrayRaw(latest_doc, 'spec', 'containers')) as container_raw
+  from latest_pods
+)
+select cluster_id, namespace, name, uid, last_seen,
+       JSONExtractString(container_raw, 'name') as container,
+       JSONExtractString(container_raw, 'resources', 'requests', 'cpu') as cpu_request,
+       JSONExtractString(container_raw, 'resources', 'requests', 'memory') as memory_request,
+       JSONExtractString(container_raw, 'resources', 'limits', 'cpu') as cpu_limit,
+       JSONExtractString(container_raw, 'resources', 'limits', 'memory') as memory_limit
+from containers
+limit 5000`,
+		},
+		{
+			Name:        "pod_lifecycle_hourly_events_for_js",
+			Description: "Pod lifecycle rows for kube_insight_js time bucketing. Use this for peak Pod-count or Pod-count delta questions; reconstruct object state per time bucket in JS from ADDED/DELETED lifecycles plus a baseline, not from raw observation counts or countDistinct(uid) per bucket. Use an event-sweep algorithm: sorted +1/-1 lifecycle events, cumulative counts once, then moving-pointer or binary-search bucket lookup. Do not scan all lifecycle rows for every bucket; that O(bucket_count*object_count) loop can timeout in goja.",
+			SQL: `with lifecycles as (
+  select cluster_id, namespace, name, uid,
+         minIf(observed_at, observation_type = 'ADDED') as added_at,
+         minIf(observed_at, observation_type = 'DELETED') as deleted_at
+  from observations
+  where kind = 'Pod'
+    and cluster_id = 'CLUSTER_ID'
+    and observed_at <= toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+    and observation_type in ('ADDED', 'DELETED')
+  group by cluster_id, namespace, name, uid
+  having added_at > toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+)
+select cluster_id, namespace, name, uid, added_at, deleted_at
+from lifecycles
+where added_at < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+  and (deleted_at = toDateTime64('1970-01-01 00:00:00', 3, 'UTC')
+       or deleted_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC'))
+limit 2000`,
+		},
+		{
 			Name:        "current_node_capacity_snapshot",
-			Description: "Current Node inventory, instance type, and capacity/allocatable totals. Use this for questions such as how many nodes, which node types, total CPU, or total memory. It collapses observations to the latest non-deleted Node snapshot before aggregating; do not sum raw fact rows across a time window for current capacity.",
+			Description: "Current Node inventory, instance type, and raw capacity/allocatable quantity strings for kube_insight_js. Use this for questions such as how many nodes, which node types, total CPU, or total memory. It collapses observations to the latest non-deleted Node snapshot; parse Kubernetes quantity units and aggregate totals in JavaScript instead of dividing JSONExtractString results inside SQL. Do not sum raw fact rows across a time window for current capacity.",
 			SQL: `with latest_nodes as (
   select cluster_id, name, uid,
          argMax(doc, observed_at) as doc,
@@ -236,40 +320,28 @@ limit 25`,
   select cluster_id, name, uid, last_seen,
          JSONExtractString(doc, 'metadata', 'labels', 'node.kubernetes.io/instance-type') as instance_type,
          JSONExtractString(doc, 'metadata', 'labels', 'cloud.google.com/gke-nodepool') as nodepool,
-         toFloat64OrZero(JSONExtractString(doc, 'status', 'capacity', 'cpu')) as capacity_cpu_cores,
-         toFloat64OrZero(replaceRegexpAll(JSONExtractString(doc, 'status', 'capacity', 'memory'), 'Ki$', '')) / 1048576 as capacity_memory_gib,
-         JSONExtractString(doc, 'status', 'allocatable', 'cpu') as allocatable_cpu_raw,
-         JSONExtractString(doc, 'status', 'allocatable', 'memory') as allocatable_memory_raw
+         JSONExtractString(doc, 'status', 'capacity', 'cpu') as capacity_cpu,
+         JSONExtractString(doc, 'status', 'capacity', 'memory') as capacity_memory,
+         JSONExtractString(doc, 'status', 'allocatable', 'cpu') as allocatable_cpu,
+         JSONExtractString(doc, 'status', 'allocatable', 'memory') as allocatable_memory
   from latest_nodes
   where last_type != 'DELETED'
-), normalized as (
-  select cluster_id, name, uid, last_seen, instance_type, nodepool,
-         capacity_cpu_cores,
-         capacity_memory_gib,
-         if(endsWith(allocatable_cpu_raw, 'm'),
-            toFloat64OrZero(replaceRegexpAll(allocatable_cpu_raw, 'm$', '')) / 1000,
-            toFloat64OrZero(allocatable_cpu_raw)) as allocatable_cpu_cores,
-         toFloat64OrZero(replaceRegexpAll(allocatable_memory_raw, 'Ki$', '')) / 1048576 as allocatable_memory_gib
-  from parsed
 )
-select cluster_id,
+select cluster_id, name, uid,
        if(instance_type = '', 'unknown', instance_type) as instance_type,
-       count() as nodes,
-       sum(capacity_cpu_cores) as capacity_cpu_cores,
-       round(sum(capacity_memory_gib), 2) as capacity_memory_gib,
-       round(sum(allocatable_cpu_cores), 2) as allocatable_cpu_cores,
-       round(sum(allocatable_memory_gib), 2) as allocatable_memory_gib,
-       arrayStringConcat(arraySlice(groupUniqArray(nodepool), 1, 8), ', ') as nodepools,
-       min(last_seen) as oldest_latest_observation,
-       max(last_seen) as newest_latest_observation
-from normalized
-group by cluster_id, instance_type
-order by instance_type
-limit 50`,
+       nodepool,
+       capacity_cpu,
+       capacity_memory,
+       allocatable_cpu,
+       allocatable_memory,
+       last_seen
+from parsed
+order by cluster_id, instance_type, name
+limit 5000`,
 		},
 		{
 			Name:        "recent_node_lifecycle",
-			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals. The event row is enriched from the same Node's following observations because ADDED docs can arrive before labels such as instance type are complete.",
+			Description: "Recent Node ADDED/DELETED events for a time window. Pair this with current_node_capacity_snapshot when the user asks whether nodes changed and also wants current totals. The event row is enriched from nearby same-name observations with instance-type labels because ADDED docs can arrive before labels such as instance type are complete.",
 			SQL: `with lifecycle as (
   select cluster_id, observation_type, name, uid,
          min(observed_at) as first_seen,
@@ -281,17 +353,16 @@ limit 50`,
     and observed_at >= toDateTime64('2026-05-25 00:00:00', 3, 'UTC')
     and observed_at < toDateTime64('2026-05-26 00:00:00', 3, 'UTC')
   group by cluster_id, observation_type, name, uid
-), enriched as (
+), label_docs as (
   select l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen,
-         argMax(o.doc, o.observed_at) as doc
+         argMaxIf(o.doc, o.observed_at, position(o.doc, 'node.kubernetes.io/instance-type') > 0) as doc
   from lifecycle as l
   left join observations as o
     on o.cluster_id = l.cluster_id
    and o.kind = 'Node'
    and o.name = l.name
-   and o.uid = l.uid
-   and o.observed_at >= l.first_seen
-   and o.observed_at <= l.first_seen + interval 15 minute
+   and o.observed_at >= l.first_seen - interval 30 minute
+   and o.observed_at <= l.first_seen + interval 60 minute
   group by l.cluster_id, l.observation_type, l.name, l.uid, l.first_seen, l.last_seen
 )
 select observation_type, name, uid,
@@ -300,9 +371,42 @@ select observation_type, name, uid,
        JSONExtractString(doc, 'metadata', 'creationTimestamp') as creation_timestamp,
        first_seen,
        last_seen
-from enriched
+from label_docs
 order by first_seen
 limit 100`,
+		},
+		{
+			Name:        "pvc_resize_candidates_for_js",
+			Description: "PVC resize candidate discovery. Use this before pvc_storage_history_for_js when the target PVC names are unknown. changes has object_id but no uid; get uid from observations if needed. This candidate query is not final proof; fetch ordered observations and collapse storage transitions in JS before answering.",
+			SQL: `select cluster_id, object_id, namespace, name,
+	       count() as changes,
+	       min(ts) as first_change,
+	       max(ts) as last_change,
+	       arrayStringConcat(arraySlice(groupUniqArray(path), 1, 8), ', ') as paths
+	from changes
+	where kind = 'PersistentVolumeClaim'
+	  and ts >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+	  and ts < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+	  and (path like '%storage%' or path like '%FileSystemResize%' or path like '%Resizing%')
+	group by cluster_id, object_id, namespace, name
+	order by last_change desc
+	limit 100`,
+		},
+		{
+			Name:        "pvc_storage_history_for_js",
+			Description: "PVC request/capacity history rows for kube_insight_js. Use this for PVC resize/expansion questions and short follow-ups such as 'from how much to how much'. Query the target PVC set from prior context or from pvc_resize_candidates_for_js, collapse adjacent equal request/capacity values in JS, pair requested and capacity changes into one unique PVC-level resize record, convert bytes/Ki/Gi quantities to GiB, and return before/after deltas as answer-ready JSON. Do not return separate rows per changed field, stream many raw PVC observations back to the model, or re-query after a result has exact before/after rows.",
+			SQL: `select cluster_id, namespace, name, uid, observed_at, observation_type,
+       JSONExtractString(doc, 'spec', 'resources', 'requests', 'storage') as requested_storage,
+       JSONExtractString(doc, 'status', 'capacity', 'storage') as capacity_storage,
+       JSONExtractString(doc, 'status', 'phase') as phase
+from observations
+where kind = 'PersistentVolumeClaim'
+  and observed_at >= toDateTime64('2026-05-20 00:00:00', 3, 'UTC')
+  and observed_at < toDateTime64('2026-05-27 00:00:00', 3, 'UTC')
+  and name in ('PVC_NAME_1', 'PVC_NAME_2')
+  and position(doc, '"storage"') > 0
+order by cluster_id, namespace, name, uid, observed_at
+limit 2000`,
 		},
 		{
 			Name:        "raw_doc_field_profile",

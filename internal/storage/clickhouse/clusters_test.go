@@ -52,3 +52,27 @@ func TestStoreClustersRoundTripMetadataQueriesClusterTable(t *testing.T) {
 		t.Fatalf("ListClusters should avoid same-name aggregate aliases that can trip ClickHouse analyzer: %s", joined)
 	}
 }
+
+func TestStoreListClustersIncludesEvidenceClustersWithoutMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := string(data)
+		if !strings.Contains(request, "cluster_names AS") {
+			t.Fatalf("ListClusters should union metadata and evidence cluster ids: %s", request)
+		}
+		_, _ = w.Write([]byte(`{"data":[{"name":"k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc","uid":"","source":"","created_at":"","objects":"7","versions":"11","latest":"7"}],"rows":1}`))
+	}))
+	defer server.Close()
+
+	store := &Store{Client: HTTPClient{Endpoint: server.URL, HTTPClient: server.Client()}, Database: "ki"}
+	clusters, err := store.ListClusters(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clusters) != 1 || clusters[0].Name != "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc" || clusters[0].Objects != 7 || clusters[0].Versions != 11 || clusters[0].Latest != 7 {
+		t.Fatalf("clusters = %#v", clusters)
+	}
+}

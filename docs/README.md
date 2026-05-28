@@ -38,6 +38,7 @@ These documents explain the system shape and current implementation direction:
 - [Technology Stack](architecture/technology-stack.md)
 - [Storage, Index, And Query Design](data/storage-index-query.md)
 - [Efficient History Storage V2](data/efficient-history-storage-v2.md)
+- [Facts Catalog](data/facts-catalog.md)
 - [Multi Backend Roadmap](data/multi-backend-roadmap.md)
 - [Ingestion And Extraction](ingestion/ingestion-and-extraction.md)
 - [Global Watcher Design](ingestion/global-watcher-design.md)
@@ -75,6 +76,7 @@ Development-stage checklists, closeout notes, validation plans, and local
 workflow records live under `docs/dev/` so user-facing docs stay focused.
 
 - [Development Commands](dev/commands.md)
+- [Background Tasks](dev/background-tasks.md)
 - [Agent Evaluation](dev/agent-evaluation.md)
 - [ClickHouse Local Workflow](dev/clickhouse-local-workflow.md)
 - [MVP Dev Checklist](dev/mvp-dev-checklist.md)

@@ -94,6 +94,24 @@ func TestResolveClusterIDRejectsUnknownWhenClustersKnown(t *testing.T) {
 	}
 }
 
+func TestResolveClusterIDIgnoresBlankClusterMetadata(t *testing.T) {
+	store := clusterResolverStore{clusters: []storage.ClusterRecord{
+		{Name: "", Source: "demo-project_us-central1_demo-cluster-2 https://192.0.2.10"},
+		{Name: "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc", Latest: 23},
+	}}
+	got, err := resolveClusterID(context.Background(), store, "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc")
+	if err != nil {
+		t.Fatalf("resolveClusterID stable id error = %v", err)
+	}
+	if got != "k8s-ac26a5e8-69aa-400e-9f3d-ef14dbd9cadc" {
+		t.Fatalf("resolveClusterID stable id = %q", got)
+	}
+	_, err = resolveClusterID(context.Background(), store, "missing")
+	if err == nil || strings.Contains(err.Error(), "id=") {
+		t.Fatalf("resolveClusterID unknown error = %v", err)
+	}
+}
+
 func TestResolveClusterIDPassesThroughWhenClusterListingUnavailable(t *testing.T) {
 	got, err := resolveClusterID(context.Background(), passThroughReadStore{}, "c1")
 	if err != nil {

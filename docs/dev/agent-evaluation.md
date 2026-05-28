@@ -177,7 +177,7 @@ Use `toolCalls`, `failedToolCalls`, `toolNames`, `initialContext`, and
 `toolFrequency` to compare whether context compaction reduces prompt size
 without causing extra rediscovery calls.
 
-Use an OOM follow-up pair when validating session-context replay:
+Use an OOM follow-up pair when validating session-context replay. The request metadata must include fresh client `sentAt`, `localTime`, `timeZone`, UTC offset, and locale for each run, and the captured completion request should place that volatile client context immediately before the current relative-time user prompt:
 
 ```bash
 make build
@@ -198,23 +198,138 @@ make build
 KUBE_INSIGHT_AGENT_API_SMOKE_MODEL=mimo-v2.5-pro \
 KUBE_INSIGHT_AGENT_API_SMOKE_API_KEY_ENV=MIMO_API_KEY \
 KUBE_INSIGHT_AGENT_API_SMOKE_BASE_URL_ENV=MIMO_OPENAI_BASEURL \
-KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='How many Nodes are there, and what are total capacity CPU and memory? Cite the proof.;;Use one bounded JS interpreter SQL plan to summarize Node count plus total capacity CPU and memory, and cite the proof.' \
+KUBE_INSIGHT_AGENT_API_SMOKE_QUESTIONS='How many Nodes are there, and what are total capacity CPU and memory? Cite the proof.;;Use bounded JS interpreter SQL planning to summarize Node count plus total capacity CPU and memory, and cite the proof.' \
 KUBE_INSIGHT_AGENT_API_SMOKE_MAX_FOLLOWUP_TOOL_CALLS=4 \
 KUBE_INSIGHT_AGENT_API_SMOKE_OUTPUT="$PWD/testdata/generated/agent-api-live-smoke-node-capacity" \
 scripts/agent-api-live-smoke.sh
 ```
 
+For historical aggregation prompts, use the `aggregation` case set. It covers
+namespace Pod allocation ranking, namespace resource-change comparison, peak Pod
+count over a time range, and PVC resize history. The first three cases are the
+core regression set for complex aggregation: after the 2026-05-27 prompt/tool
+contract tuning they passed individually and in the `aggregation-v9` run using
+`kube_insight_health`, `kube_insight_schema`, and `kube_insight_js`. These
+checks should validate bounded staged planning and evidence quality, not require
+a single JS call. The PVC resize case is intentionally kept in the set because it exposes a
+harder pattern: discover candidates, read ordered object versions, and compare
+previous/next storage values in JavaScript instead of SQL window functions. It
+also exposed intermittent SSE transfer-close behavior during long live runs, so
+use it as a follow-up stability case rather than a release gate until that path
+is fixed.
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_SET=aggregation \
+KUBE_INSIGHT_AGENT_CASE_STRICT=0 \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-aggregation" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
 For an existing ClickHouse-backed compose API server, `agent-clickhouse-case-smoke`
 can also submit a real agent run for the abbreviated-cluster Node inventory case.
-The optional agent check verifies the desired tool path: discover clusters with
-unfiltered health, use schema plus one `kube_insight_js` call, avoid legacy split
-JS tools, keep the sequence to only `health/schema -> kube_insight_js`, and keep
-the first health call from treating `gcp2` as the stored cluster ID.
+The optional agent check verifies the desired tool behavior: discover clusters
+with unfiltered health, use schema plus `kube_insight_js` when code-shaped
+aggregation is needed, avoid legacy split JS tools, keep the first health call
+from treating `gcp2` as the stored cluster ID, and require the final answer to
+render the relative half-day window in the supplied client time zone instead of
+only UTC/server time. It should not require the investigation to finish in one JS
+call.
 
 ```bash
 KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
 KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-gcp2" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
+External skill black-box tests must use this same compose dev API/MCP/ClickHouse
+data path. Start child `codex exec` runs in a fresh empty temporary directory,
+not in the kube-insight checkout. Copy only `kube-insight-skill/` into that
+temporary directory before launching the child. This prevents the child agent
+from taking shortcuts through repo state, generated files, internal tests, or
+unrelated local context while still giving it the public skill instructions. A
+`codex exec` run that opens `testdata/generated/*.db` or another SQLite fixture
+only proves the skill can reason about a tiny offline sample; it does not
+validate behavior against the real dev evidence store, fuzzy cluster resolution,
+current collector coverage, or ClickHouse-scale aggregation.
+Configure the test prompt to forbid SQLite fixture/sample DB fallback and to use
+the running dev API/MCP/ClickHouse endpoint. Do allow the child agent to use
+normal local tools for analysis: shell, `curl`, Python, `jq`, DuckDB, and
+temporary files under `/tmp` are part of the external-agent capability being
+tested. The forbidden paths are wrong data sources and shortcuts, not tools:
+no repo edits, no host Codex memory, no `internal/agent/*` prompt/test mining,
+and no Chrome/Next DevTools unless the case is explicitly about Web UI behavior.
+`kubectl` is allowed when it models a real external-agent workflow, such as
+port-forwarding to a cluster-hosted kube-insight API, validating live current
+state, or interacting with related cluster services. The case should still prove
+that kube-insight supplied the historical, retained, or aggregated evidence that
+plain `kubectl` cannot provide.
+For the local dev host, run the child with
+`-c features.use_legacy_landlock=false --sandbox danger-full-access` after
+copying only the skill into `/tmp`. The extra access is for loopback network
+reachability to the already-running dev API/ClickHouse, not permission to inspect
+the repo. Keep the prompt prohibition on repo edits, host memories, and
+`internal/agent/*`. If ClickHouse HTTP requires credentials, prefer
+`POST /api/v1/sql` through the kube-insight API rather than reading repo config.
+
+Use the aggregation case set when validating generic historical aggregation
+behavior before adding more prompt rules. Start with `STRICT=0` to collect all
+baseline traces even when one case fails, then inspect `agent-cases-report.md`
+and the per-case event JSON files:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_SET=aggregation \
+KUBE_INSIGHT_AGENT_CASE_PARALLEL=3 \
+KUBE_INSIGHT_AGENT_CASE_STRICT=0 \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-aggregation" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
+The aggregation set currently covers namespace Pod resource ranking, namespace
+resource-change ranking over a relative multi-day window, and peak Pod-count
+time over the last week. The desired path is `health/schema -> kube_insight_js`
+with bounded SQL inside the interpreter, answer-ready grouping, normalized
+Kubernetes units when applicable, and cited proof. Treat failures as taxonomy
+data before editing the prompt: relative time, fuzzy lookup, complex
+aggregation, deep field extraction, parallel discovery, complex predicates,
+zero-result pivot, or evidence stopping.
+`KUBE_INSIGHT_AGENT_CASE_PARALLEL` submits multiple live runs concurrently for
+faster prompt iteration; use it only for opt-in provider-backed testing where
+parallel token spend is acceptable.
+For scratch/VFS validation, add
+`KUBE_INSIGHT_AGENT_CASE_REQUIRE_SCRATCH_HANDLES=1`. The case smoke will then
+assert that at least one tool-call artifact promoted session scratch handles and
+will include scratch-handle totals in the report.
+Use `KUBE_INSIGHT_AGENT_CASE_MIN_CITATIONS=N` when a case needs distinct proof
+surfaces, for example Node inventory plus lifecycle changes should cite both
+the current capacity snapshot and the lifecycle rows.
+By default, the case smoke also checks common JS anti-patterns that caused real
+aggregation failures: `const sql = ...` shadowing the SQL helper, and returning
+broad raw arrays such as `{history: history}` or `{rows: rows}` instead of a
+compact result or scratch handle. It also flags ClickHouse aggregate alias reuse
+such as `max(updated_at) AS updated_at`, which can be rewritten into nested
+aggregates when `updated_at` is also used by `argMax`, and SQL-side Kubernetes
+quantity parsing patterns where `JSONExtractString`/`replaceAll` strings are
+divided by `1000`, `1024`, or `1048576` inside JS SQL. Fetch quantity strings in
+SQL and parse units in JavaScript instead. Disable these checks only for debugging with
+`KUBE_INSIGHT_AGENT_CASE_FORBID_JS_ANTIPATTERNS=0`.
+
+For faster iteration on one prompt, use the `custom` case set and override the
+question/checks:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_SET=custom \
+KUBE_INSIGHT_AGENT_CASE_SLUG=agent-namespace-pod-resource-top \
+KUBE_INSIGHT_AGENT_CASE_QUESTION='帮我看看哪个namespace pod资源占用最高' \
+KUBE_INSIGHT_AGENT_CASE_NODE_LIFECYCLE_CHECK=0 \
+KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_TERMS='namespace,Pod' \
+KUBE_INSIGHT_AGENT_CASE_REQUIRED_ANSWER_ANY_TERMS='' \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-custom" \
 scripts/agent-clickhouse-case-smoke.sh
 ```
 

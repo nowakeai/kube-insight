@@ -21,6 +21,7 @@ const (
 	legacyScriptedQueryToolName    = "kube_insight_scripted_query"
 	legacyJSTransformToolName      = "artifact_transform_js"
 	defaultScriptedQueryTimeout    = 3 * time.Second
+	minScriptedQueryOutputSize     = 16 * 1024
 	maxScriptedQueryTimeout        = 8 * time.Second
 	defaultScriptedQueryOutputSize = 128 * 1024
 	maxScriptedQueryOutputSize     = 512 * 1024
@@ -28,7 +29,7 @@ const (
 	defaultScriptedQueryMaxQueries = 6
 	maxScriptedQueryMaxQueries     = 10
 	defaultScriptedQueryMaxRows    = 100
-	maxScriptedQueryMaxRows        = 1000
+	maxScriptedQueryMaxRows        = 10000
 )
 
 type ScriptedQueryTool struct {
@@ -45,11 +46,12 @@ type scriptedQueryArguments struct {
 }
 
 type scriptedQueryResult struct {
-	Result  json.RawMessage    `json:"result,omitempty"`
-	Queries []scriptedQueryLog `json:"queries,omitempty"`
-	Logs    []string           `json:"logs,omitempty"`
-	Error   string             `json:"error,omitempty"`
-	Detail  map[string]any     `json:"detail,omitempty"`
+	Result         json.RawMessage    `json:"result,omitempty"`
+	Queries        []scriptedQueryLog `json:"queries,omitempty"`
+	Logs           []string           `json:"logs,omitempty"`
+	ScratchHandles []map[string]any   `json:"scratchHandles,omitempty"`
+	Error          string             `json:"error,omitempty"`
+	Detail         map[string]any     `json:"detail,omitempty"`
 }
 
 type scriptedQueryLog struct {
@@ -71,12 +73,12 @@ func NewJSInterpreterTool(sqlTool tool.InvokableTool) tool.BaseTool {
 func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: scriptedQueryToolName,
-		Desc: "Run one bounded JavaScript interpreter for kube-insight investigation. Use it both to transform JSON already returned in this run via input/rows and to call kube_insight_sql through sql(query, maxRows) or sqlAll([{name, sql, maxRows}]) after kube_insight_schema. Prefer this single JS tool when one script can do dependent or parallel profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON field extraction, Kubernetes CPU/memory unit normalization, grouping, sorting, filtering, counting, or answer-ready summarization. The script has no filesystem, network, process, or environment access beyond bounded read-only SQL helpers. Return compact answer-ready JSON with grouping, totals, sorting, and unit normalization already done; one successful interpreter result is usually terminal evidence. SQL integer columns may arrive as strings, so use Number(value) or ki.sumBy(rows, key) for totals to avoid string concatenation. When the final answer uses this result, add a nearby evidence label such as {{evidence: Node capacity facts}} so the server can verify citations.",
+		Desc: "Run a bounded JavaScript interpreter for kube-insight investigation. Use it both to transform JSON already returned in this run via input/rows and to call kube_insight_sql through synchronous helpers sql(query, maxRows) or sqlAll([{name, sql, maxRows}]) after kube_insight_schema. For Kubernetes current-state, historical lookback, ranking, aggregation, or absence claims, gather collector coverage with kube_insight_health before or alongside schema/JS; do not skip health just because schema is enough to write SQL. Do not use await with sql/sqlAll. Never write const sql = `...`; that shadows the sql helper and makes sql(sql, maxRows) fail. Use const query = `...` or const sqlText = `...`, then call sql(query, maxRows). Do not call sql with an object argument. sql(query) and each sqlAll named result return arrays directly; read results.name or rows(result), never results.rows(...). For named sqlAll results, use const result = sqlAll([...]); const rows = result.name; do not use comma-expression destructuring from multiple sqlAll calls. Prefer this single JS tool surface when code-shaped aggregation is clearer: dependent or parallel profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON field extraction, Kubernetes CPU/memory unit normalization, grouping, sorting, filtering, counting, time bucketing, top-N ranking, per-object ordered previous/next diffing such as PVC resize, or answer-ready summarization. When practical, include tightly related profiling, proof SQL, and aggregation together to reduce latency and context size, but do not treat one JS call as a correctness requirement. For relative-time prompts, use literal UTC bounds already computed from client context; do not use JavaScript Date arithmetic, kube_insight_health checked_at, SQL now(), or server time as now. When a JS result covers a relative window, return both window_utc and window_client or client_timezone fields so the final answer can show the client-local time zone, not UTC only. For unscoped namespace resource-ranking scripts, do not hard-code the first cluster_id from health output; keep all dataful clusters, preserve cluster_id in rows, and return per-cluster plus explicitly labeled global rankings when useful. For namespace resource-delta scripts, query coverage/min/max, compute startWindow/endWindow from those coverage rows, then build start/end snapshot SQL; if a previous step exposed a bad, sparse, or stale window, a focused follow-up JS/SQL step may correct it. For Node inventory plus lifecycle scripts, fetch current capacity rows and lifecycle rows together, then fill missing lifecycle instance_type/nodepool from same-name lifecycle rows with known labels and current capacity rows before returning; if any lifecycle label is still missing, run a focused fallback JS/SQL step before answering. Return separate compact sections such as current_node_capacity and node_lifecycle_events so the final answer can cite both. For PVC resize scripts, if the result contains expansions_found > 0 or PVC records with before/after requested/capacity values, answer from that result instead of running a broad lag/window SQL query that returns raw PVC rows, and label normalized binary quantities as GiB in the final answer. For Pod-count peak scripts, use an event sweep over sorted +1/-1 lifecycle events, not nested bucket-by-pod scans. For multi-cluster or multi-metric aggregation, cover relevant clusters, requested ranking dimensions, totals, samples, coverage, row_count, and truncated flags; split into staged JS calls only when that makes planning clearer or keeps intermediate data bounded. Choose conservative bounded LIMIT/maxRows values up front, up to 10000 rows when needed; for lifecycle peak or broad historical scans that can exceed 1000 rows, choose a useful cap instead of probing repeatedly. Avoid repeated equivalent JS/SQL probes after enough evidence exists, and never call this tool only to reformat, translate, hard-code, summarize, or present rows from a previous tool result; write the final Markdown answer directly. Use a follow-up only when the prior result failed, was empty, was truncated and cannot support even a caveated answer, or missed a field explicitly required by the user. Omit maxQueries unless you intentionally need a lower cap; the default allows 6 SQL calls, and any explicit maxQueries must be at least the number of sql plus sqlAll item calls in the script. Usually omit maxOutputBytes; return compact top rows and scratch handles instead of forcing a tiny output limit. The script has no filesystem, network, process, or environment access beyond bounded read-only SQL helpers and session-scoped scratch helpers. Use scratch.write(path, value, metadata), scratch.load(path), scratch.read(path, options), and scratch.list(prefix) to share large JSON between steps by virtual path instead of returning it to the LLM context. Use scratch.load(path) when a later JS step needs the full JSON value for aggregation; use scratch.read(path, options) only when you need metadata, preview, or chunked content. The tool also records scratch.write handles in the top-level scratchHandles result, but best practice is still to assign const handle = scratch.write(...) and return that handle near the compact result. Fetch Kubernetes CPU/memory/storage quantity strings as strings in SQL and parse units in JavaScript; do not divide JSONExtractString or replaceAll string expressions by 1000, 1024, or 1048576 inside SQL. Return a compact object/array, not JSON.stringify of raw rows. Never return broad raw arrays such as {history: history} or {rows: rows}; aggregate them, slice to proof rows, or write them to scratch and return the handle. Include only top rows, totals, caveats, coverage, row_count, truncated, scratch handles, and source IDs needed for the answer. Before returning, make sure every returned property references a variable defined in the script. A complete interpreter result over relevant rows is usually enough evidence to answer. SQL integer columns may arrive as strings, so use Number(value) or ki.sumBy(rows, key) for totals to avoid string concatenation. When the final answer uses this result, add nearby evidence labels such as {{evidence: Node capacity snapshot}} and {{evidence: Node lifecycle events}} so the server can verify citations.",
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"script": {
 				Type:     schema.String,
 				Required: true,
-				Desc:     "JavaScript statements. Available helpers: input, inputRows, sql(query, maxRows), sqlAll([{name, sql, maxRows}]) which returns an object keyed by name plus _items when all specs are named, rows(result), ki/_ helpers groupBy/countBy/sumBy/sortBy/uniqBy/pick, console.log, print, and json(value). Use Number(value) or ki.sumBy(rows, key) before summing SQL numeric columns, because ClickHouse integers can arrive as strings. Use return to provide JSON-serializable data.",
+				Desc:     "JavaScript statements. Available helpers: input, inputRows, sql(query, maxRows), sqlAll([{name, sql, maxRows}]) which returns an object keyed by name plus _items when all specs are named, rows(result), scratch.write/load/read/list for session-scoped JSON handles, ki/_ helpers groupBy/countBy/sumBy/sortBy/uniqBy/pick, console.log, print, and json(value). sql and sqlAll are synchronous; call const podRows = sql(query, 100), not await sql(...) and not sql({sql: query, maxRows: 100}). Never create const sql = `...`; that hides the helper and makes sql(sql, maxRows) fail. Use const query = `...` or const sqlText = `...` for SQL strings. sql(query) and each sqlAll named result return arrays directly; use const result = sqlAll([...]); const rows = result.name; never results.rows(...) and never comma-expression destructuring from two sqlAll calls. Use literal UTC bounds computed before the tool call; do not use Date arithmetic or SQL now() inside the script for relative windows. Fetch Kubernetes CPU/memory/storage quantity strings as strings in SQL and parse m/Ki/Mi/Gi/Ti units in JavaScript; do not divide JSONExtractString or replaceAll string expressions by 1000, 1024, or 1048576 inside SQL. For Node lifecycle, fill missing instance_type/nodepool from same-name known lifecycle rows or current capacity rows before returning. Use scratch.load(path) to load the full JSON value from a previous scratch.write for in-script aggregation; scratch.read(path, options) returns a metadata envelope and is mainly for previews or chunks. For resource deltas, derive startWindow/endWindow from coverage before snapshot SQL. For bucket peaks, use event-sweep cumulative counts instead of nested lifecycle scans. Use Number(value) or ki.sumBy(rows, key) before summing SQL numeric columns, because ClickHouse integers can arrive as strings. Return a compact JSON-serializable object/array with explicit fields such as top, totals, coverage, row_count, truncated, and scratch handles; do not return JSON.stringify(rawRows), and never return broad raw arrays such as {history: history} or {rows: rows}.",
 			},
 			"input": {
 				Type: schema.Object,
@@ -88,15 +90,15 @@ func (t ScriptedQueryTool) Info(context.Context) (*schema.ToolInfo, error) {
 			},
 			"maxOutputBytes": {
 				Type: schema.Integer,
-				Desc: "Optional maximum JSON output size. Defaults to 131072 and is capped at 524288.",
+				Desc: "Optional maximum JSON output size. Usually omit this; defaults to 131072, has a 16384 minimum, and is capped at 524288. Prefer compact top rows plus scratch handles over tiny limits.",
 			},
 			"maxQueries": {
 				Type: schema.Integer,
-				Desc: "Optional maximum SQL calls allowed from the script. Defaults to 6 and is capped at 10.",
+				Desc: "Optional maximum SQL calls allowed from the script. Usually omit this and use the default 6. If set, it must be at least the number of sql() calls plus sqlAll() specs the script will run; it is capped at 10.",
 			},
 			"defaultMaxRows": {
 				Type: schema.Integer,
-				Desc: "Optional default maxRows for sql calls. Defaults to 100 and is capped at 1000.",
+				Desc: "Optional default maxRows for sql calls. Defaults to 100 and is capped at 10000. Prefer per-call maxRows for large lifecycle scans and keep returned output compact.",
 			},
 		}),
 	}, nil
@@ -201,6 +203,10 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	if err := installJSDataHelpers(vm); err != nil {
 		return "", fmt.Errorf("%s failed to install helpers: %w", scriptedQueryToolName, err)
 	}
+	scratchHandles := []map[string]any{}
+	if err := installScratchHelpers(ctx, vm, &scratchHandles); err != nil {
+		return "", fmt.Errorf("%s failed to install scratch helpers: %w", scriptedQueryToolName, err)
+	}
 	timer := time.AfterFunc(timeout, func() {
 		vm.Interrupt("timeout")
 	})
@@ -222,7 +228,7 @@ func (t ScriptedQueryTool) InvokableRun(ctx context.Context, argumentsInJSON str
 	if err != nil {
 		return "", fmt.Errorf("%s result is not JSON serializable: %w", scriptedQueryToolName, err)
 	}
-	out := scriptedQueryResult{Result: resultData, Queries: state.logs(), Logs: logs}
+	out := scriptedQueryResult{Result: resultData, Queries: state.logs(), Logs: logs, ScratchHandles: scratchHandles}
 	encoded, err := json.Marshal(out)
 	if err != nil {
 		return "", err
@@ -368,7 +374,7 @@ func (s *scriptedQueryState) reserveQueries(count int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.queries+count > s.maxQueries {
-		return fmt.Errorf("script query limit exceeded: %d requested > %d allowed", s.queries+count, s.maxQueries)
+		return fmt.Errorf("script query limit exceeded: %d requested > %d allowed; omit maxQueries to use the default or set maxQueries >= the total sql() calls plus sqlAll() specs", s.queries+count, s.maxQueries)
 	}
 	s.queries += count
 	return nil
@@ -530,6 +536,9 @@ func boundedScriptedQueryTimeout(ms int) time.Duration {
 func boundedScriptedQueryOutputLimit(limit int) int {
 	if limit <= 0 {
 		return defaultScriptedQueryOutputSize
+	}
+	if limit < minScriptedQueryOutputSize {
+		return minScriptedQueryOutputSize
 	}
 	if limit > maxScriptedQueryOutputSize {
 		return maxScriptedQueryOutputSize

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,6 +77,7 @@ func TestEvaluateRunEventsPassesScriptedQueryTranscript(t *testing.T) {
 	}
 	events := evaluationTranscript(
 		[]EvaluationToolCall{
+			{ID: "tool_health", Name: "kube_insight_health", Status: "completed", DurationMS: 50},
 			{ID: "tool_schema", Name: "kube_insight_schema", Status: "completed", DurationMS: 80},
 			{ID: "tool_script", Name: scriptedQueryToolName, Status: "completed", DurationMS: 320},
 		},
@@ -111,6 +113,7 @@ func TestEvaluateRunEventsPassesSchemaSQLEvidenceTranscript(t *testing.T) {
 	tc := evaluationCaseByIDForTest(t, "schema-sql-evidence")
 	events := evaluationTranscript(
 		[]EvaluationToolCall{
+			{ID: "tool_health", Name: "kube_insight_health", Status: "completed", DurationMS: 50},
 			{ID: "tool_schema", Name: "kube_insight_schema", Status: "completed", DurationMS: 80},
 			{ID: "tool_sql", Name: "kube_insight_sql", Status: "completed", DurationMS: 170},
 		},
@@ -122,6 +125,28 @@ func TestEvaluateRunEventsPassesSchemaSQLEvidenceTranscript(t *testing.T) {
 	report := EvaluateRunEvents(tc, events)
 	if !report.Passed {
 		t.Fatalf("report should pass: %#v", report)
+	}
+}
+
+func TestEvaluateRunEventsFlagsDataToolBeforeHealth(t *testing.T) {
+	tc := evaluationCaseByIDForTest(t, "scripted-query-node-capacity")
+	events := evaluationTranscript(
+		[]EvaluationToolCall{
+			{ID: "tool_schema", Name: "kube_insight_schema", Status: "completed", DurationMS: 80},
+			{ID: "tool_health", Name: "kube_insight_health", Status: "completed", DurationMS: 50},
+			{ID: "tool_script", Name: scriptedQueryToolName, Status: "completed", DurationMS: 320},
+		},
+		[]string{ArtifactKindToolCall},
+		1,
+		"The cluster has 18 Node objects with 144 CPU cores and 576 GiB memory capacity.",
+	)
+
+	report := EvaluateRunEvents(tc, events)
+	if report.Passed {
+		t.Fatalf("report should fail: %#v", report)
+	}
+	if !strings.Contains(failedCheckNames(report), "health before data tools") {
+		t.Fatalf("failed checks = %s", failedCheckNames(report))
 	}
 }
 

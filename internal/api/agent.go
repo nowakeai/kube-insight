@@ -29,6 +29,8 @@ type createAgentRunRequest struct {
 type compactAgentRetentionRequest struct {
 	PruneSupersededRuns        *bool `json:"pruneSupersededRuns,omitempty"`
 	PruneUnreferencedArtifacts *bool `json:"pruneUnreferencedArtifacts,omitempty"`
+	PruneScratchStores         *bool `json:"pruneScratchStores,omitempty"`
+	ScratchMaxAgeSeconds       int64 `json:"scratchMaxAgeSeconds,omitempty"`
 	DryRun                     bool  `json:"dryRun,omitempty"`
 }
 
@@ -53,6 +55,12 @@ func (s *Server) handleCompactAgentRetention(w http.ResponseWriter, r *http.Requ
 	}
 	if input.PruneUnreferencedArtifacts != nil {
 		opts.PruneUnreferencedArtifacts = *input.PruneUnreferencedArtifacts
+	}
+	if input.PruneScratchStores != nil {
+		opts.PruneScratchStores = *input.PruneScratchStores
+	}
+	if input.ScratchMaxAgeSeconds > 0 {
+		opts.ScratchMaxAgeSeconds = input.ScratchMaxAgeSeconds
 	}
 	opts.DryRun = input.DryRun
 	report, err := retentionStore.ApplyAgentRetention(r.Context(), opts)

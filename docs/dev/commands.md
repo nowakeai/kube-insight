@@ -324,7 +324,7 @@ same backend:
 | Exact recent changes | `最近 vm/vmagent-vm-gcp-victoria-metrics-k8s-stack 这个 Deployment 有什么变化？` | health + schema + one rollup changes SQL | <=3 tools |
 | Service health | exact Service health question | health + service investigation | <=2 tools |
 | Parallel triage | broad incident, cluster health, namespace triage, or mixed symptoms | one `parallel_investigation` call with 2-4 independent branches | avoid for exact Service or exact object-change prompts |
-| JS interpreter | dependent profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON extraction, unit normalization, SQL rows plus grouping, or reshaping bounded input JSON | schema + one `kube_insight_js` | bounded read-only SQL and bounded input only; prefer over repeated SQL plus separate transform |
+| JS interpreter | dependent profile -> proof SQL, several independent aggregates, latest-per-object selection, JSON extraction, unit normalization, SQL rows plus grouping, or reshaping bounded input JSON | schema + `kube_insight_js` planning | bounded read-only SQL and bounded input only; prefer over repeated SQL plus separate broad transforms |
 | Evidence condenser | ask for a readable summary of noisy evidence | health/search or SQL + `evidence_condenser` | condenser only when explicitly useful |
 
 For exact recent-change prompts, the SQL should be a rollup over `changes`
@@ -390,6 +390,98 @@ representative SQL/profile cases:
 ```bash
 KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke" scripts/agent-clickhouse-case-smoke.sh
 ```
+
+Run the ClickHouse-backed aggregation agent cases when checking whether prompt
+changes generalize beyond the Node inventory case. Use non-strict mode for a
+baseline so all traces are captured even if some checks fail:
+
+```bash
+KUBE_INSIGHT_AGENT_CASE_API_URL=http://127.0.0.1:8080 \
+KUBE_INSIGHT_AGENT_CASE_RUN_AGENT=1 \
+KUBE_INSIGHT_AGENT_CASE_SET=aggregation \
+KUBE_INSIGHT_AGENT_CASE_PARALLEL=3 \
+KUBE_INSIGHT_AGENT_CASE_STRICT=0 \
+KUBE_INSIGHT_AGENT_CASE_OUTPUT="$PWD/testdata/generated/agent-clickhouse-case-smoke-aggregation" \
+scripts/agent-clickhouse-case-smoke.sh
+```
+
+For one-off reruns while tuning a case, use `KUBE_INSIGHT_AGENT_CASE_SET=custom`
+with `KUBE_INSIGHT_AGENT_CASE_QUESTION`, `KUBE_INSIGHT_AGENT_CASE_SLUG`, and
+case-specific answer/tool checks. `KUBE_INSIGHT_AGENT_CASE_PARALLEL` only affects
+multi-case sets such as `aggregation` and `all`.
+
+When black-box testing `kube-insight-skill` with `codex exec`, start from a
+fresh empty temporary working directory. Copy only `kube-insight-skill/` into
+that directory, then run the child agent there and point it at the running
+compose dev API/MCP/ClickHouse data. The child should not start in the
+repository checkout. This keeps the test closer to a real external-agent
+environment and prevents accidental shortcuts such as reading `git status`,
+local tests, or repo-private context. Do not let the test fall back to SQLite
+fixture or sample databases; those are useful for deterministic unit smoke
+tests but do not validate external-agent behavior on the real dev evidence
+store.
+
+Allow the child Codex process to use normal analysis tools. It may run shell
+commands, `curl`, Python, `jq`, DuckDB, or similar processors, and it may write
+temporary exports or scripts under `/tmp`. The restriction is on data source and
+repo mutation, not on tool use: it should not edit repository files, read host
+Codex memory, or mine `internal/agent/*` built-in prompts/tests. `kubectl` is
+allowed when it reflects a realistic user workflow, such as port-forwarding to a
+cluster-hosted kube-insight instance, validating live current state, or
+interacting with related cluster services. It must not replace kube-insight as
+the historical evidence source for claims that require retained history,
+coverage, or ClickHouse-scale aggregation. Chrome/Next DevTools should stay out
+of these tests unless the case is explicitly about the Web UI.
+
+Use a prompt shape like this:
+
+```bash
+WORKDIR="$(mktemp -d /tmp/kube-insight-skill-blackbox.XXXXXX)"
+cp -a "$PWD/kube-insight-skill" "$WORKDIR/"
+codex exec -c features.use_legacy_landlock=false \
+  --ephemeral --skip-git-repo-check --sandbox danger-full-access -C "$WORKDIR" \
+  'Black-box evaluate kube-insight-skill as an external agent. Do not edit files.
+   You may use shell, curl, Python, jq, DuckDB, and temporary files under /tmp
+   for analysis. Use the running compose dev kube-insight API/MCP/ClickHouse
+   data, not SQLite fixture/sample databases. You may use kubectl only for
+   realistic live validation, port-forwarding, or cluster interaction; do not
+   use it as a replacement for kube-insight historical evidence. Do not use
+   Chrome/Next DevTools, /home/coder/.codex/memories, or internal/agent
+   prompt/test files.
+   Read kube-insight-skill/SKILL.md and referenced skill files only as needed.
+   Do not inspect the kube-insight repository checkout.
+   Investigate: 看看 gcp2 半天内集群的节点是否有变化？一共有多少节点，有哪些类型？
+   总的 CPU 内存量是多少。'
+```
+
+On this dev host, `workspace-write` plus the inherited legacy Landlock setting
+can prevent child shell startup, and `workspace-write` may also block loopback
+access to `127.0.0.1:8080`. Use the explicit `features.use_legacy_landlock=false`
+override and `danger-full-access` only for this already-isolated temporary
+black-box harness. If `127.0.0.1:8080` still fails, fix the test environment or
+use the compose service network; do not accept a SQLite fallback as a passing
+skill evaluation. If raw ClickHouse HTTP on `127.0.0.1:8123` returns
+`401 Unauthorized`, use kube-insight's `POST /api/v1/sql` read-only endpoint
+instead of mining repo config for credentials.
+
+When validating the session scratch/VFS path, add
+`KUBE_INSIGHT_AGENT_CASE_REQUIRE_SCRATCH_HANDLES=1`. The smoke report will then
+fail a case unless at least one tool-call artifact promoted `scratchHandles`, and
+the generated Markdown report includes the scratch-handle count.
+For cases that combine multiple proof surfaces, use
+`KUBE_INSIGHT_AGENT_CASE_MIN_CITATIONS=N`; for example Node inventory plus
+recent lifecycle changes should cite both capacity snapshot evidence and
+lifecycle evidence.
+The smoke script also fails common JS anti-patterns by default: `const sql = ...`
+shadowing the helper, and returning broad raw arrays such as
+`{history: history}` or `{rows: rows}`. It also flags `max(updated_at) AS
+updated_at` aggregate alias reuse inside JS SQL because ClickHouse can rewrite
+that into nested aggregate expressions, and flags SQL-side Kubernetes quantity
+parsing where `JSONExtractString`/`replaceAll` string expressions are divided by
+`1000`, `1024`, or `1048576` inside JS SQL. Fetch raw quantity strings in SQL
+and parse units in JavaScript. Set
+`KUBE_INSIGHT_AGENT_CASE_FORBID_JS_ANTIPATTERNS=0` only when inspecting a known
+bad trace.
 
 Run the isolated API live smoke when changing session replay, retry behavior, or
 prompt/tool budgets. It builds a temporary SQLite fixture DB, starts a temporary

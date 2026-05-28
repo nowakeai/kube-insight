@@ -20,7 +20,7 @@ resolve it from health/coverage before using `cluster_id` in SQL.
 
 ## Fuzzy Cluster Node Inventory And Capacity
 
-User intent: "看看 gcp2 半天内集群的节点是否有变化？一共有多少节点，有哪些类型？总的 CPU 内存量是多少"
+User intent: "Check whether the gcp2 cluster changed in the last half day. How many nodes are there, what types are they, and what is the total CPU and memory capacity?"
 
 Plan:
 
@@ -50,7 +50,7 @@ See `query-patterns.md` sections `Node Capacity And Allocatable` and
 
 ## Namespace Resource Ranking
 
-User intent: "帮我看看哪个 namespace pod 资源占用最高"
+User intent: "Which namespace has the highest Pod resource allocation?"
 
 Plan:
 
@@ -68,7 +68,7 @@ global rankings. This is allocation/configuration, not actual usage; say so.
 
 ## Namespace Resource Delta
 
-User intent: "帮我看看过去几天哪个 namespace 资源占用有较大变化"
+User intent: "Which namespace had the largest Pod resource allocation change over the past few days?"
 
 Plan:
 
@@ -88,7 +88,7 @@ than allocation/configuration.
 
 ## Pod Count Peak
 
-User intent: "帮我看看过去一周 pod 数量最多的时间点是什么时候"
+User intent: "When was the Pod count highest over the past week?"
 
 Plan:
 
@@ -125,7 +125,7 @@ export that hits its row cap is incomplete evidence for a peak.
 
 ## PVC Storage Resize Deltas
 
-User intent: "最近一周哪些 PVC 扩容了？从多少到多少？"
+User intent: "Which PVCs expanded in the last week, and from what size to what size?"
 
 Plan:
 
@@ -143,7 +143,7 @@ back into the model unless raw proof is requested.
 
 ## Scheduling Failures And Pending Pods
 
-User intent: "最近有哪些 Pending/调度失败的 Pod？最常见原因是什么？"
+User intent: "Which Pods were recently Pending or unschedulable, and what were the most common reasons?"
 
 Plan:
 
@@ -160,14 +160,14 @@ Plan:
    separate `PodScheduled=True` initialization/image-pull cases from real
    `Unschedulable` cases.
 
-Do not answer "调度失败" from `Pending` alone. Many Pods are briefly Pending
+Do not answer "unschedulable" from `Pending` alone. Many Pods are briefly Pending
 while init containers run or images pull. Events may be useful when covered, but
 retained Pod conditions are enough to prove historical scheduler messages when
 Events are not collected.
 
 ## Ready Became False
 
-User intent: "过去几天 Pod 或 Node Ready condition 有没有变成 False？"
+User intent: "Did any Pod or Node Ready condition become False over the past few days?"
 
 Plan:
 
@@ -186,7 +186,7 @@ Python, DuckDB, or JS and return compact proof rows.
 
 ## Services Without Ready Endpoints
 
-User intent: "当前有哪些 Service 没有 ready endpoints？"
+User intent: "Which Services currently have no ready endpoints?"
 
 Plan:
 
@@ -208,7 +208,7 @@ Service with zero ready endpoints.
 
 ## Pod Lifecycle Churn
 
-User intent: "哪些 namespace Pod 创建/删除最频繁？是否主要来自 CronJob 或短生命周期任务？"
+User intent: "Which namespaces have the most frequent Pod creates/deletes, and is it mainly from CronJobs or short-lived jobs?"
 
 Plan:
 
@@ -268,7 +268,7 @@ CLI equivalent:
 
 ## OOM Or Restart Ranking
 
-User intent: "哪个 namespace/Pod OOM 或 restart 最多？"
+User intent: "Which namespace or Pod had the most OOM or restart activity?"
 
 Plan:
 

@@ -114,7 +114,7 @@ shapes.
 Use tasks that need retained history or aggregation:
 
 ```text
-Use kube-insight to determine whether gcp cluster 2 had Node pool membership or capacity changes in the last 3 days. Start with coverage and cite exact evidence.
+Use kube-insight to determine whether a managed Kubernetes node pool had membership or capacity changes recently. Start with coverage and cite exact evidence.
 ```
 
 ```text

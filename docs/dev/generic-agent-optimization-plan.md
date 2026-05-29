@@ -292,7 +292,7 @@ correctness issues:
   context compact and route-oriented rather than stuffing broad evidence into the
   system prompt.
 - Natural-language cluster fragments must be resolved through the health cluster
-  display map before SQL. A model may otherwise turn `gcp cluster 2` into a
+  display map before SQL. A model may otherwise turn `demo cluster` into a
   guessed `cluster_id` and produce a fast but wrong answer.
 - Container requests/limits questions need an explicit generic ClickHouse recipe.
   Without it, models repeatedly probe JSON extraction syntax even though each SQL

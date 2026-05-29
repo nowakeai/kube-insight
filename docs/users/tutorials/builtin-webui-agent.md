@@ -93,7 +93,7 @@ Use a question that requires retained history, not just current live state. Good
 first prompts:
 
 ```text
-Did the gcp cluster 2 node pool change in the last 3 days? Use evidence and cite the exact time window.
+Did a managed Kubernetes node pool change recently? Use evidence and cite the exact time window.
 ```
 
 ```text

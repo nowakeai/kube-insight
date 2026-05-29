@@ -1,7 +1,7 @@
 # Agent-First Web UI Design
 
 Audience: product and implementation contributors. Use
-[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md) for the
+[Built-in Web UI Agent Tutorial](../../users/tutorials/builtin-webui-agent.md) for the
 user tutorial.
 
 Status date: 2026-05-22

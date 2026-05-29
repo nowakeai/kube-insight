@@ -95,7 +95,7 @@ Kubernetes RBAC support remains the next major security milestone.
   Kubernetes authorization model and historical RBAC inheritance notes.
 - [Agent SQL RBAC Filtering](../security/agent-rbac-sql-filtering.md): SQL and
   agent-facing filtering rules for RBAC-constrained reads.
-- [MVP Dev Checklist](../dev/mvp-dev-checklist.md): completed local backend MVP
+- [MVP Dev Checklist](../../dev/mvp-dev-checklist.md): completed local backend MVP
   checklist and stop line.
-- [ClickHouse MVP Closeout](../dev/clickhouse-mvp-closeout.md): detailed
+- [ClickHouse MVP Closeout](../../dev/clickhouse-mvp-closeout.md): detailed
   ClickHouse/chDB completion notes, validation results, and follow-ups.

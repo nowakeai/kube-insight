@@ -97,7 +97,7 @@ and release packaging for default and chDB-enabled artifacts. ClickHouse mainten
   `scripts/clickhouse-benchmark.sh`, `scripts/chdb-smoke.sh`,
   `scripts/benchmark-agent-vs-kubectl.sh`, `scripts/mcp-sql-first-smoke.sh`,
   `scripts/release-artifact-smoke.sh`, `scripts/live-service-vs-kubectl.sh`.
-- Agent and storage benchmark docs: `docs/validation/storage-mode-comparison.md`.
+- Agent and storage benchmark docs: `docs/users/reference/storage-mode-comparison.md`.
 
 ## Validation Run
 
@@ -183,8 +183,8 @@ ClickHouse SQL/API completed in `448.746 ms` total, while the comparable raw
   `testdata/generated/` are ignored and should not be staged.
 - The checked-in docs intentionally keep developer-only workflows under
   `docs/dev/` and user-facing backend positioning in `README.md`,
-  `docs/quickstart.md`, and `docs/configuration/configuration.md`.
-- `docs/validation/storage-mode-comparison.md` is the user-facing evidence,
+  `docs/users/getting-started/quickstart.md`, and `docs/operators/configuration/configuration.md`.
+- `docs/users/reference/storage-mode-comparison.md` is the user-facing evidence,
   kubectl comparison, live same-target Service comparison, and storage-mode
   benchmark doc for retained kube-insight evidence versus repeated broad live
   `kubectl` calls.
@@ -232,7 +232,7 @@ is squashed, but they are useful for staging and review.
    - `RELEASE.md`, open-source readiness checks
 
 6. Documentation pass
-   - user-facing docs: `README.md`, `docs/quickstart.md`, configuration docs
+   - user-facing docs: `README.md`, `docs/users/getting-started/quickstart.md`, configuration docs
    - architecture/data docs: backend strategy, storage/index/query docs
    - dev docs: workflow, checklist, validation closeout, PR summary
 

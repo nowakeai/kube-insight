@@ -667,8 +667,8 @@ by final citations. It intentionally skips in-progress runs because citations ca
 arrive after artifacts. ClickHouse cleanup is mutation-based and completes
 asynchronously.
 
-More user-facing examples live in `docs/quickstart.md` and
-`docs/configuration/configuration.md`.
+More user-facing examples live in `docs/users/getting-started/quickstart.md` and
+`docs/operators/configuration/configuration.md`.
 
 ## chDB Optional Build Check
 

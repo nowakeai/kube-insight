@@ -1,7 +1,7 @@
 # System Architecture
 
 Audience: operators and contributors who need the deployment and component
-model. Start with [Quickstart](../quickstart.md) for normal usage.
+model. Start with [Quickstart](../../users/getting-started/quickstart.md) for normal usage.
 
 ## Overview
 

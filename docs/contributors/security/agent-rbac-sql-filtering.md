@@ -1,7 +1,7 @@
 # Agent SQL RBAC Filtering
 
 Audience: security and API contributors designing future authorization-aware
-SQL filtering. Start with [Security, Privacy, And Retention](security-retention.md)
+SQL filtering. Start with [Security, Privacy, And Retention](../../operators/security/security-retention.md)
 for current user-facing security guidance.
 
 Agent SQL access is powerful and must not bypass Kubernetes RBAC.

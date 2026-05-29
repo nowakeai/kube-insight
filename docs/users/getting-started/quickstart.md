@@ -32,7 +32,7 @@ Windows users can download the `.zip` artifact from the
 ## Local Storage Variants
 
 For performance numbers and backend tradeoffs, see
-[Storage Modes And Performance](validation/storage-mode-comparison.md).
+[Storage Modes And Performance](../reference/storage-mode-comparison.md).
 
 Use the default `kube-insight` binary for the smallest local install:
 
@@ -194,7 +194,7 @@ runtime:
 - `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
 - `--webui`: embedded Web UI listener for the React app built from `web/`.
   The first formal UI milestone is the agent-first chat surface described in
-  [Agent-First Web UI Design](product/agent-first-web-ui.md).
+  [Agent-First Web UI Design](../../contributors/product/agent-first-web-ui.md).
 
 Open the Web UI at <http://127.0.0.1:8090>. `--app` uses one listener for the
 local app: Web UI is available at `/`, API at `/api/v1/*`, MCP at `/mcp`, and
@@ -227,9 +227,9 @@ Supported provider values are `openai` and `openai-compatible`. Omit
 `baseUrlEnv` or leave the named environment variable unset for the default
 OpenAI endpoint. The API reports whether the key/base URL variables are
 configured, but never returns the secret values. See
-[Configuration](configuration/configuration.md#roles-and-service-mode) for the
+[Configuration](../../operators/configuration/configuration.md#roles-and-service-mode) for the
 full `server.chat` schema, or follow the
-[Built-in Web UI Agent Tutorial](tutorials/builtin-webui-agent.md) for an
+[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md) for an
 end-to-end browser workflow.
 
 `--watch` is independent from the app surfaces. Add it when this process should
@@ -313,7 +313,7 @@ ClickHouse-compatible backends expose different SQL table names.
 
 If you want to use kube-insight from Codex, Claude, or another external agent
 instead of the built-in Web UI agent, follow the
-[External Agent Skill Tutorial](tutorials/external-agent-skill.md).
+[External Agent Skill Tutorial](../tutorials/external-agent-skill.md).
 
 When the built-in Web UI/API chat agent runs against a SQLite DB, kube-insight
 adds a small runtime orientation message before each run. It includes collector
@@ -351,4 +351,4 @@ git diff --check
 `make validate` runs the generated PoC fixture validation and writes reports
 under `testdata/generated/`; use it when changing ingestion, extraction, storage,
 query, API, or MCP behavior. ClickHouse and chDB validation commands are listed
-in [Development Commands](dev/commands.md).
+in [Development Commands](../../dev/commands.md).

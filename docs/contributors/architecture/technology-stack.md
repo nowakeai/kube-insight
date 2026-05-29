@@ -1,7 +1,7 @@
 # Technology Stack
 
 Audience: contributors and evaluators comparing implementation choices. Start
-with [Quickstart](../quickstart.md) for normal usage.
+with [Quickstart](../../users/getting-started/quickstart.md) for normal usage.
 
 ## Decision
 

@@ -134,8 +134,8 @@ absolute time window.
 
 ## Next Steps
 
-- [Quickstart](../quickstart.md) covers CLI, service mode, API, and MCP basics.
-- [Configuration](../configuration/configuration.md) documents the full
+- [Quickstart](../getting-started/quickstart.md) covers CLI, service mode, API, and MCP basics.
+- [Configuration](../../operators/configuration/configuration.md) documents the full
   `server.chat` schema.
 - [Troubleshooting Workflows](../workflows/troubleshooting-workflows.md) gives
   investigation patterns you can adapt into Web UI prompts.

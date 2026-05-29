@@ -14,7 +14,7 @@ The default collector should be a global watcher. It discovers every
 list/watch-capable GroupVersionResource and stores every observed object in the
 generic resource history store, subject to the configured filter pipeline.
 
-See [Global Watcher Design](global-watcher-design.md).
+See [Global Watcher Design](../../contributors/ingestion/global-watcher-design.md).
 
 P0 typed extractors:
 

@@ -1,7 +1,7 @@
 # Efficient History Storage V2
 
 Audience: storage-design contributors. This is not a setup guide; start with
-[Storage Modes And Performance](../validation/storage-mode-comparison.md) for
+[Storage Modes And Performance](../../users/reference/storage-mode-comparison.md) for
 user-facing storage tradeoffs.
 
 This document revisits kube-insight storage after observing a real

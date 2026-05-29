@@ -9,7 +9,7 @@ so within acceptable storage, performance, and security limits.
 This plan defines test layers and release gates. Benchmark metric definitions
 live in [PoC And Benchmark Plan](poc-and-benchmark-plan.md), the user-facing
 storage and agent-performance summary lives in
-[Storage Modes And Performance](../validation/storage-mode-comparison.md), and the
+[Storage Modes And Performance](../users/reference/storage-mode-comparison.md), and the
 latest ClickHouse/chDB closeout metrics live in
 [ClickHouse MVP Closeout](clickhouse-mvp-closeout.md).
 

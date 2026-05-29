@@ -51,7 +51,7 @@ resource through the Kubernetes API server, they must not be able to access the
 same resource, its historical versions, topology edges, or derived facts through
 `kube-insight`.
 
-See [Kubernetes RBAC Inheritance](kubernetes-rbac-inheritance.md) for the
+See [Kubernetes RBAC Inheritance](../../contributors/security/kubernetes-rbac-inheritance.md) for the
 detailed design.
 
 Access is scoped by:

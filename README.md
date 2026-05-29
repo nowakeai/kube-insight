@@ -80,7 +80,7 @@ Open the embedded UI at <http://127.0.0.1:8090>. Release binaries include the
 prebuilt React app; no separate frontend checkout or Node.js runtime is needed
 to use it.
 
-See the full [quickstart](docs/quickstart.md) for Web UI, API, MCP, compaction,
+See the full [quickstart](docs/users/getting-started/quickstart.md) for Web UI, API, MCP, compaction,
 and history examples.
 
 ## The Problem
@@ -174,7 +174,7 @@ current-state baseline.
 | kube-insight + chDB | You want local ClickHouse-compatible tables without a server. | Requires `libchdb.so`; larger artifact and more runtime packaging complexity. |
 | kube-insight + ClickHouse | You need continuous central evidence history, compression, API/MCP service reads, and future cold-tiering. | Requires operating ClickHouse. |
 
-See [Storage Modes And Performance](docs/validation/storage-mode-comparison.md)
+See [Storage Modes And Performance](docs/users/reference/storage-mode-comparison.md)
 for the detailed performance and tradeoff matrix.
 
 ## How It Works
@@ -267,7 +267,7 @@ MCP prompts:
 ## Validation Highlights
 
 The detailed numbers live in
-[Storage Modes And Performance](docs/validation/storage-mode-comparison.md).
+[Storage Modes And Performance](docs/users/reference/storage-mode-comparison.md).
 The important reading is the shape of the work, not a claim that every point
 lookup beats `kubectl`:
 
@@ -303,16 +303,16 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Documentation
 
-- [Product brief](docs/requirements/product-brief.md)
-- [Quickstart](docs/quickstart.md)
-- [Built-in Web UI agent tutorial](docs/tutorials/builtin-webui-agent.md)
-- [External agent skill tutorial](docs/tutorials/external-agent-skill.md)
+- [Product brief](docs/users/getting-started/product-brief.md)
+- [Quickstart](docs/users/getting-started/quickstart.md)
+- [Built-in Web UI agent tutorial](docs/users/tutorials/builtin-webui-agent.md)
+- [External agent skill tutorial](docs/users/tutorials/external-agent-skill.md)
 - [Full documentation index](docs/README.md)
-- [Configuration](docs/configuration/configuration.md)
-- [Data model](docs/data/data-model.md)
-- [Storage modes and performance](docs/validation/storage-mode-comparison.md)
-- [Roadmap](docs/roadmap/roadmap.md)
-- [Agent SQL cookbook](docs/workflows/agent-sql-cookbook.md)
+- [Configuration](docs/operators/configuration/configuration.md)
+- [Data model](docs/operators/data/data-model.md)
+- [Storage modes and performance](docs/users/reference/storage-mode-comparison.md)
+- [Roadmap](docs/contributors/roadmap/roadmap.md)
+- [Agent SQL cookbook](docs/users/workflows/agent-sql-cookbook.md)
 - [kube-insight agent skill](kube-insight-skill/SKILL.md)
 - [Development commands](docs/dev/commands.md)
 - [Contributing](CONTRIBUTING.md)
@@ -324,7 +324,7 @@ Facts and edges are the candidate path. Versions are the proof.
 
 ## Roadmap
 
-The current roadmap is tracked in [Roadmap](docs/roadmap/roadmap.md). In short:
+The current roadmap is tracked in [Roadmap](docs/contributors/roadmap/roadmap.md). In short:
 
 - SQLite default local mode, the chDB-enabled local variant, and the core MCP
   read surface are complete for the MVP baseline;
@@ -338,9 +338,9 @@ The current roadmap is tracked in [Roadmap](docs/roadmap/roadmap.md). In short:
 - production readiness follows after the UI and RBAC service boundaries are in
   place.
 
-See the detailed [Roadmap And Open Questions](docs/roadmap/roadmap-open-questions.md),
-[Multi Backend Roadmap](docs/data/multi-backend-roadmap.md), and
-[Agent And UI Roadmap](docs/product/agent-and-ui-roadmap.md) for the underlying
+See the detailed [Roadmap And Open Questions](docs/contributors/roadmap/roadmap-open-questions.md),
+[Multi Backend Roadmap](docs/contributors/data/multi-backend-roadmap.md), and
+[Agent And UI Roadmap](docs/contributors/product/agent-and-ui-roadmap.md) for the underlying
 workstreams.
 
 ## Release Status

@@ -148,7 +148,7 @@ The expected agent loop is:
 
 ## Next Steps
 
-- [kube-insight Agent Skill](../../kube-insight-skill/SKILL.md) is the full
+- [kube-insight Agent Skill](../../../kube-insight-skill/SKILL.md) is the full
   agent-facing instruction file.
 - [Agent SQL Cookbook](../workflows/agent-sql-cookbook.md) has backend-specific
   SQL patterns.

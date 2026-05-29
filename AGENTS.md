@@ -6,12 +6,12 @@ operational notes, and design details in `docs/`.
 ## Read First
 
 - Product and architecture: `docs/README.md`
-- Local usage and service mode: `docs/quickstart.md`
-- Configuration, filters, and running modes: `docs/configuration/configuration.md`
-- Processing config model: `docs/configuration/processing-model.md`
-- Data model and schema intent: `docs/data/data-model.md`
-- Storage efficiency plan: `docs/data/efficient-history-storage-v2.md`
-- Agent SQL usage: `docs/workflows/agent-sql-cookbook.md`
+- Local usage and service mode: `docs/users/getting-started/quickstart.md`
+- Configuration, filters, and running modes: `docs/operators/configuration/configuration.md`
+- Processing config model: `docs/operators/configuration/processing-model.md`
+- Data model and schema intent: `docs/operators/data/data-model.md`
+- Storage efficiency plan: `docs/contributors/data/efficient-history-storage-v2.md`
+- Agent SQL usage: `docs/users/workflows/agent-sql-cookbook.md`
 - Development commands: `docs/dev/commands.md`
 
 ## Non-Negotiable Design Rules

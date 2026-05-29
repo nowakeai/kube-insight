@@ -1,7 +1,7 @@
 # Backend Strategy
 
 Audience: maintainers evaluating storage strategy. Start with
-[Storage Modes And Performance](../validation/storage-mode-comparison.md) for
+[Storage Modes And Performance](../../users/reference/storage-mode-comparison.md) for
 the user-facing backend guide.
 
 ## Decision

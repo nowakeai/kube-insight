@@ -1,7 +1,7 @@
 # Kubernetes RBAC Inheritance
 
 Audience: security and service-auth contributors. Start with
-[Security, Privacy, And Retention](security-retention.md) for current
+[Security, Privacy, And Retention](../../operators/security/security-retention.md) for current
 user-facing security guidance.
 
 ## Goal

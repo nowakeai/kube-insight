@@ -1,7 +1,7 @@
 # Global Watcher Design
 
 Audience: contributors working on discovery, watches, and collection internals.
-Start with [Quickstart](../quickstart.md) for normal collection commands.
+Start with [Quickstart](../../users/getting-started/quickstart.md) for normal collection commands.
 
 ## Goal
 

@@ -14,6 +14,25 @@ operational notes, and design details in `docs/`.
 - Agent SQL usage: `docs/users/workflows/agent-sql-cookbook.md`
 - Development commands: `docs/dev/commands.md`
 
+## Documentation Audience Rules
+
+- Put ordinary user onboarding, tutorials, workflows, and user-facing benchmark
+  material under `docs/users/<category>/`.
+- Put operator-facing configuration, data-model, ingestion, and current
+  security guidance under `docs/operators/<category>/`.
+- Put implementation design, roadmap, future security design, and contributor
+  architecture notes under `docs/contributors/<category>/`.
+- Put maintainer strategy notes under `docs/maintainers/<category>/`.
+- Put historical research, old product names, and discarded approaches under
+  `docs/archive/<category>/`.
+- Keep development checklists, local validation notes, PR records, and raw
+  engineering work logs under `docs/dev/`.
+- Do not add user-facing links to `docs/contributors/`, `docs/maintainers/`, or
+  `docs/archive/` unless the link is clearly labeled as design, maintainer, or
+  historical background.
+- When moving docs, update `docs/README.md`, `README.md`, this file, and all
+  relative Markdown links in the same change.
+
 ## Non-Negotiable Design Rules
 
 - `api_resources` is the authoritative GVR/resource/scope mapping.
@@ -51,10 +70,11 @@ operational notes, and design details in `docs/`.
 - For Web UI or frontend development, use the Docker compose dev environment
   (`make dev-compose-up-detached`) instead of starting another host
   `kube-insight serve` process or a host Vite dev server. Compose owns the
-  ClickHouse, watcher/API, metrics, and Web UI services; use the compose Web UI
-  for Vite reloads and rebuild/recreate compose services after backend changes.
-  Start a separate host `serve` only for pure backend tests or isolated smoke
-  scripts, and stop it when the test is done.
+  ClickHouse service, watcher/app server on port 8090, metrics endpoint, and
+  Web UI dev server on port 5173; use the compose Web UI for Vite reloads and
+  rebuild/recreate compose services after backend changes. Start a separate
+  host `serve` only for pure backend tests or isolated smoke scripts, and stop
+  it when the test is done.
 - Prefer configuration, rule tables, and data-driven registries over hardcoded
   branching. Keep unavoidable built-in defaults centralized and documented so
   they can be overridden or moved to config later.

@@ -20,7 +20,7 @@
 
 ## Built-in Agent Demo
 
-https://github.com/user-attachments/assets/dc847c9f-5bd9-4f50-a06b-8424ebb4a3bb
+https://github.com/user-attachments/assets/abc0dd70-9237-4fd8-b17e-235336bee1f0
 
 Demo scenario: ask the built-in agent whether the `gcp cluster 2` node pool
 changed in the last 3 days. The answer uses retained Node lifecycle history,

@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	charm.land/log/v2 v2.0.0
 	github.com/chdb-io/chdb-go v1.11.0
-	github.com/cloudwego/eino v0.8.13
+	github.com/cloudwego/eino v0.9.2
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c

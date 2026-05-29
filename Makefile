@@ -56,13 +56,13 @@ web-embedded-smoke: build
 
 build: web-build
 	mkdir -p $(dir $(BIN))
-	go build -o $(BIN) ./cmd/kube-insight
+	go build -tags embedwebui -o $(BIN) ./cmd/kube-insight
 
 build-default: build
 
 build-chdb: web-build
 	mkdir -p $(dir $(CHDB_BIN))
-	go build -tags chdb -o $(CHDB_BIN) ./cmd/kube-insight
+	go build -tags "chdb embedwebui" -o $(CHDB_BIN) ./cmd/kube-insight
 
 build-local-variants: build-default build-chdb
 
@@ -104,7 +104,7 @@ validate: web-build
 chdb-build-check: web-build
 	go test -c -tags chdb ./internal/storage/chdb -o /tmp/kube-insight-chdb-store.test
 	go test -c -tags chdb ./internal/cli -o /tmp/kube-insight-chdb-cli.test
-	go build -tags chdb -o /tmp/kube-insight-chdb ./cmd/kube-insight
+	go build -tags "chdb embedwebui" -o /tmp/kube-insight-chdb ./cmd/kube-insight
 
 chdb-smoke:
 	./scripts/chdb-smoke.sh

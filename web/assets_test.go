@@ -1,3 +1,5 @@
+//go:build embedwebui
+
 package webui
 
 import (

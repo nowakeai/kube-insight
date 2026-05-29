@@ -13,7 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web-build /src/web/dist ./web/dist
-RUN CGO_ENABLED=0 go build -o /out/kube-insight ./cmd/kube-insight
+RUN CGO_ENABLED=0 go build -tags embedwebui -o /out/kube-insight ./cmd/kube-insight
 
 FROM gcr.io/google.com/cloudsdktool/google-cloud-cli:slim
 RUN apt-get update \

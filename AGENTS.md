@@ -53,6 +53,11 @@ operational notes, and design details in `docs/`.
   a clear product-specific reason.
 - When stopping, handing off, or summarizing an incomplete thread, state both
   what should happen next and how you intend to do it.
+- Use `todos.md` or files under `tmp/` only as local scratch space for temporary
+  execution checklists, PR reviews, and in-progress coordination. Do not commit
+  these scratch files. When a checklist captures durable workflow knowledge,
+  move the stable rule into this file or the appropriate `docs/` page before
+  closing the task.
 - Keep code files at or below 800 lines. Split by responsibility before adding
   more behavior.
 - Preserve user changes. Do not revert unrelated dirty worktree changes.

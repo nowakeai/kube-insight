@@ -58,6 +58,11 @@ operational notes, and design details in `docs/`.
   these scratch files. When a checklist captures durable workflow knowledge,
   move the stable rule into this file or the appropriate `docs/` page before
   closing the task.
+- Do not move environment-specific rules, hostnames, private domains, local
+  ports, personal provider/model choices, credentials, or machine-specific paths
+  from scratch notes into tracked files. Keep tracked docs and examples generic
+  by using placeholders such as `<HOSTNAME>` or documented environment
+  variables.
 - Keep code files at or below 800 lines. Split by responsibility before adding
   more behavior.
 - Preserve user changes. Do not revert unrelated dirty worktree changes.

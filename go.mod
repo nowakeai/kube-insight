@@ -11,7 +11,7 @@ require (
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/dustin/go-humanize v1.0.1
 	github.com/mark3labs/mcp-go v0.54.1
-	github.com/modelcontextprotocol/go-sdk v1.6.0
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1

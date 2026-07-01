@@ -122,7 +122,8 @@ but new remote-agent setups should use Streamable HTTP `/mcp`.
 
 Make clear that this SQLite quickstart is not the long-running retained-history
 deployment path. For continuous agent use, prefer the Helm chart's default chDB
-storage or external ClickHouse.
+storage or external ClickHouse. The Helm chart defaults retained evidence to
+180 days, about 6 months, for chDB and ClickHouse-backed installs.
 
 ## Scenario Index
 

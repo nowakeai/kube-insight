@@ -110,11 +110,11 @@ storage:
     # default window. Tune this down for small PVCs or strict data-retention
     # policies.
     enabled: true
-    # 7776000 seconds = 90 days, about 3 months.
-    maxAgeSeconds: 7776000
+    # 15552000 seconds = 180 days, about 6 months.
+    maxAgeSeconds: 15552000
     minVersionsPerObject: 1
-    # 7776000 seconds = 90 days, about 3 months.
-    filterDecisionMaxAgeSeconds: 7776000
+    # 15552000 seconds = 180 days, about 6 months.
+    filterDecisionMaxAgeSeconds: 15552000
 
 collection:
   namespace: ""

@@ -10,7 +10,8 @@ permissions:
   packages: write
 
 env:
-  CHDB_VERSION: "3.7.2"
+  # chDB runtime assets come from chdb-core, which publishes libchdb tarballs.
+  CHDB_VERSION: "26.5.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

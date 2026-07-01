@@ -4,20 +4,20 @@ go 1.26.0
 
 require (
 	charm.land/log/v2 v2.0.0
-	github.com/chdb-io/chdb-go v1.11.0
-	github.com/cloudwego/eino v0.9.3
+	github.com/chdb-io/chdb-go v1.12.0
+	github.com/cloudwego/eino v0.9.12
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
-	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
+	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/dustin/go-humanize v1.0.1
-	github.com/mark3labs/mcp-go v0.54.1
-	github.com/modelcontextprotocol/go-sdk v1.6.0
+	github.com/mark3labs/mcp-go v0.55.1
+	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/apimachinery v0.36.1
-	k8s.io/client-go v0.36.1
-	modernc.org/sqlite v1.51.0
+	k8s.io/apimachinery v0.36.2
+	k8s.io/client-go v0.36.2
+	modernc.org/sqlite v1.53.0
 )
 
 require (
@@ -42,6 +42,7 @@ require (
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -117,11 +118,11 @@ require (
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/api v0.36.1 // indirect
+	k8s.io/api v0.36.2 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260512234627-ef417d054102 // indirect
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
-	modernc.org/libc v1.72.3 // indirect
+	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

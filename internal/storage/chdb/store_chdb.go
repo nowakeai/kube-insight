@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +23,7 @@ const (
 	defaultFlushIntervalMS = 1000
 )
 
-var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var identifierPattern = databaseIdentifierPattern
 
 type Store struct {
 	*clickhouse.Store
@@ -32,13 +31,9 @@ type Store struct {
 }
 
 func NewStore(opts Options) (storage.Store, error) {
-	opts.Path = strings.TrimSpace(opts.Path)
-	opts.Database = strings.TrimSpace(opts.Database)
-	if opts.Path == "" {
-		return nil, fmt.Errorf("chdb path is required")
-	}
-	if opts.Database == "" {
-		return nil, fmt.Errorf("chdb database is required")
+	opts, err := validateOptions(opts)
+	if err != nil {
+		return nil, err
 	}
 	client, err := newClient(opts.Path, opts.Database)
 	if err != nil {

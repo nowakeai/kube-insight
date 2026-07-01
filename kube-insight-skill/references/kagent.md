@@ -14,8 +14,10 @@ proof.
 Recommended deployment:
 
 - kube-insight runs in Kubernetes from the Helm chart.
-- The Helm chart defaults to embedded chDB storage on a PVC.
-- Team/shared installs can use external ClickHouse storage.
+- The Helm chart defaults to embedded chDB storage on a PVC, with retained
+  evidence kept for 180 days, about 6 months.
+- Team/shared installs can use external ClickHouse storage with the same
+  long-retention default.
 - SQLite is only for tests, demos, and temporary local runs.
 - kagent references kube-insight with `RemoteMCPServer` and Streamable HTTP.
 - kube-insight evidence rules are distributed as a kagent prompt library
@@ -159,5 +161,9 @@ Expected kagent flow:
 - If kagent discovers no kube-insight tools, first verify the kube-insight
   Service URL, then check `GET /api/v1/server/info` through port-forward or a
   debug client.
+- kagent-created Agents use kagent `ModelConfig` for their LLM provider.
+  kube-insight's built-in Web UI/A2A agent is configured separately with
+  `server.chat`; do not assume kube-insight reads kagent `ModelConfig` unless a
+  future adapter explicitly documents that behavior.
 - Do not store private cluster hostnames, staging details, provider keys, or
   internal domains in manifests committed to the repository.

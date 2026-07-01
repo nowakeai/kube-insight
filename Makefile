@@ -7,7 +7,9 @@ GO_TEST_PACKAGES ?= ./cmd/... ./internal/... ./web
 WEB_DIR ?= web
 WEB_NODE_MODULES_STAMP ?= $(WEB_DIR)/node_modules/.package-lock.json
 CHDB_BIN ?= bin/kube-insight-chdb
-CHDB_VERSION ?= 3.7.2
+# chDB runtime assets come from chdb-core, which publishes the libchdb tarballs
+# consumed by GoReleaser archives and release container images.
+CHDB_VERSION ?= 26.5.0
 CHDB_LIB ?= /usr/local/lib/libchdb.so
 CHDB_RUNTIME_DIR ?= build/chdb-runtime
 CHDB_IMAGE ?= kube-insight-chdb:local
@@ -43,13 +45,13 @@ check-lines:
 	fi
 
 helm-lint:
-	helm lint charts/kube-insight
-	helm template kube-insight charts/kube-insight --namespace kube-insight >/tmp/kube-insight-chart.yaml
-	helm template kube-insight charts/kube-insight --namespace kube-insight --set mode=writer >/tmp/kube-insight-chart-writer.yaml
-	helm template kube-insight charts/kube-insight --namespace kube-insight -f charts/kube-insight/values-clickhouse.yaml >/tmp/kube-insight-chart-clickhouse-recommended.yaml
-	helm template kube-insight charts/kube-insight --namespace kube-insight --set storage.driver=clickhouse --set storage.clickhouse.dsn=http://clickhouse:8123 >/tmp/kube-insight-chart-clickhouse.yaml
-	helm template kube-insight charts/kube-insight --namespace kube-insight --set kagent.enabled=true >/tmp/kube-insight-chart-kagent.yaml
-	helm template kube-insight charts/kube-insight --namespace kube-insight --set kagent.enabled=true --set kagent.agent.create=true >/tmp/kube-insight-chart-kagent-agent.yaml
+	helm lint $(HELM_CHART)
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight >/tmp/kube-insight-chart.yaml
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight --set mode=writer >/tmp/kube-insight-chart-writer.yaml
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight -f $(HELM_CHART)/values-clickhouse.yaml >/tmp/kube-insight-chart-clickhouse-recommended.yaml
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight --set storage.driver=clickhouse --set storage.clickhouse.dsn=http://clickhouse:8123 >/tmp/kube-insight-chart-clickhouse.yaml
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight --set kagent.enabled=true >/tmp/kube-insight-chart-kagent.yaml
+	helm template kube-insight $(HELM_CHART) --namespace kube-insight --set kagent.enabled=true --set kagent.agent.create=true >/tmp/kube-insight-chart-kagent-agent.yaml
 
 helm-package: helm-lint
 	mkdir -p $(HELM_DIST)
@@ -94,13 +96,14 @@ build-chdb-image: build-chdb
 
 prepare-chdb-runtime:
 	mkdir -p $(CHDB_RUNTIME_DIR)
-	rm -f $(CHDB_RUNTIME_DIR)/libchdb.so
+	rm -f $(CHDB_RUNTIME_DIR)/libchdb.so $(CHDB_RUNTIME_DIR)/libchdb-linux-amd64.so $(CHDB_RUNTIME_DIR)/libchdb-linux-arm64.so
 	@download_chdb_runtime() { \
 		asset="$$1"; \
 		dest="$$2"; \
 		tmp="$(CHDB_RUNTIME_DIR)/$${asset}.tar.gz"; \
 		mkdir -p "$$dest"; \
-		curl -fsSL -o "$$tmp" "https://github.com/chdb-io/chdb/releases/download/v$(CHDB_VERSION)/$${asset}.tar.gz"; \
+		if test -s "$$dest/libchdb.so"; then return 0; fi; \
+		curl -fsSL -o "$$tmp" "https://github.com/chdb-io/chdb-core/releases/download/v$(CHDB_VERSION)/$${asset}.tar.gz"; \
 		tar -xzf "$$tmp" -C "$$dest" libchdb.so; \
 		rm -f "$$tmp"; \
 		test -s "$$dest/libchdb.so"; \
@@ -109,8 +112,10 @@ prepare-chdb-runtime:
 	download_chdb_runtime linux-aarch64-libchdb '$(CHDB_RUNTIME_DIR)/linux-arm64'; \
 	download_chdb_runtime macos-x86_64-libchdb '$(CHDB_RUNTIME_DIR)/darwin-amd64'; \
 	download_chdb_runtime macos-arm64-libchdb '$(CHDB_RUNTIME_DIR)/darwin-arm64'; \
-	cp '$(CHDB_RUNTIME_DIR)/linux-amd64/libchdb.so' '$(CHDB_RUNTIME_DIR)/libchdb-linux-amd64.so'; \
-	cp '$(CHDB_RUNTIME_DIR)/linux-arm64/libchdb.so' '$(CHDB_RUNTIME_DIR)/libchdb-linux-arm64.so'
+	ln -f '$(CHDB_RUNTIME_DIR)/linux-amd64/libchdb.so' '$(CHDB_RUNTIME_DIR)/libchdb-linux-amd64.so'; \
+	ln -f '$(CHDB_RUNTIME_DIR)/linux-arm64/libchdb.so' '$(CHDB_RUNTIME_DIR)/libchdb-linux-arm64.so'; \
+	test -s '$(CHDB_RUNTIME_DIR)/libchdb-linux-amd64.so'; \
+	test -s '$(CHDB_RUNTIME_DIR)/libchdb-linux-arm64.so'
 
 release-chdb-check: prepare-chdb-runtime
 	command -v goreleaser >/dev/null || (echo "goreleaser is required for release-chdb-check" >&2; exit 1)

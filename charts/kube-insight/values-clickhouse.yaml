@@ -18,6 +18,8 @@ storage:
     flushIntervalMillis: 1000
   retention:
     enabled: true
-    maxAgeSeconds: 7776000
+    # 15552000 seconds = 180 days, about 6 months.
+    maxAgeSeconds: 15552000
     minVersionsPerObject: 1
-    filterDecisionMaxAgeSeconds: 7776000
+    # 15552000 seconds = 180 days, about 6 months.
+    filterDecisionMaxAgeSeconds: 15552000

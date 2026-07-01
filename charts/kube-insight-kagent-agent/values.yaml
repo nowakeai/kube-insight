@@ -1,0 +1,92 @@
+kagent:
+  namespace: kagent
+
+promptLibrary:
+  create: true
+  name: kube-insight-prompts
+
+remoteMCPServer:
+  create: true
+  name: kube-insight
+  description: kube-insight retained Kubernetes evidence MCP server
+  url: http://kube-insight.kube-insight.svc.cluster.local:8090/mcp
+  protocol: STREAMABLE_HTTP
+  timeout: 30s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true
+
+lokiRemoteMCPServer:
+  create: false
+  name: loki-mcp
+  description: Loki logs MCP server for time-bounded Kubernetes log queries.
+  url: http://loki-mcp.kagent.svc.cluster.local:8080/sse
+  protocol: SSE
+  timeout: 30s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true
+
+agent:
+  create: true
+  # Supported values: troubleshooter, aiops-fullstack.
+  profile: troubleshooter
+  name: kube-insight-troubleshooter
+  description: Troubleshoot Kubernetes incidents with kube-insight retained evidence.
+  modelConfig: default-model-config
+  runtime: go
+  stream: true
+  a2aConfig: false
+  builtinPromptLibraryName: kagent-builtin-prompts
+  kubeInsightToolNames:
+    - kube_insight_health
+    - kube_insight_schema
+    - kube_insight_sql
+    - kube_insight_js
+    - kube_insight_search
+    - kube_insight_history
+    - kube_insight_topology
+    - kube_insight_service_investigation
+  kagentToolServer:
+    enabled: false
+    name: kagent-tool-server
+    toolNames:
+      - datetime_get_current_time
+      - shell
+      - k8s_get_available_api_resources
+      - k8s_get_cluster_configuration
+      - k8s_get_resources
+      - k8s_get_resource_yaml
+      - k8s_describe_resource
+      - k8s_get_events
+      - k8s_get_pod_logs
+      - k8s_execute_command
+      - k8s_check_service_connectivity
+      - k8s_apply_manifest
+      - k8s_patch_resource
+      - k8s_rollout
+      - k8s_scale
+      - helm_list_releases
+      - helm_get_release
+      - helm_repo_update
+      - helm_upgrade
+      - helm_uninstall
+      - prometheus_targets_tool
+      - prometheus_label_names_tool
+      - prometheus_query_tool
+      - prometheus_query_range_tool
+      - prometheus_promql_tool
+    requireApproval:
+      - shell
+      - k8s_execute_command
+      - k8s_apply_manifest
+      - k8s_patch_resource
+      - k8s_rollout
+      - k8s_scale
+      - helm_upgrade
+      - helm_uninstall
+  loki:
+    enabled: false
+    remoteMCPServerName: loki-mcp
+    toolNames:
+      - loki_query
+      - loki_label_names
+      - loki_label_values

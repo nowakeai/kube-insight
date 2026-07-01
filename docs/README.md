@@ -24,11 +24,12 @@ Read these in order when evaluating or using kube-insight:
 4. [Built-in Web UI Agent Tutorial](users/tutorials/builtin-webui-agent.md)
 5. [External Agent Skill Tutorial](users/tutorials/external-agent-skill.md)
 6. [kagent Integration Tutorial](users/tutorials/kagent-integration.md)
-7. [A2A Integration Tutorial](users/tutorials/a2a-integration.md)
-8. [Configuration](operators/configuration/configuration.md)
-9. [Storage Modes And Performance](users/reference/storage-mode-comparison.md)
-10. [Troubleshooting Workflows](users/workflows/troubleshooting-workflows.md)
-11. [Security, Privacy, And Retention](operators/security/security-retention.md)
+7. [kagent Agent Chart](../charts/kube-insight-kagent-agent/README.md)
+8. [A2A Integration Tutorial](users/tutorials/a2a-integration.md)
+9. [Configuration](operators/configuration/configuration.md)
+10. [Storage Modes And Performance](users/reference/storage-mode-comparison.md)
+11. [Troubleshooting Workflows](users/workflows/troubleshooting-workflows.md)
+12. [Security, Privacy, And Retention](operators/security/security-retention.md)
 
 ## User Guides And Tutorials
 
@@ -41,6 +42,9 @@ Read these in order when evaluating or using kube-insight:
 - [Helm Chart](../charts/kube-insight/README.md): install kube-insight in
   Kubernetes with chDB by default, external ClickHouse for shared storage, and
   optional kagent resources.
+- [kagent Agent Chart](../charts/kube-insight-kagent-agent/README.md): install
+  only the kagent prompt library, kube-insight `RemoteMCPServer`, and Agent
+  resources when kube-insight itself is managed separately.
 - [kagent Integration Tutorial](users/tutorials/kagent-integration.md): connect
   kagent to kube-insight through a `RemoteMCPServer` and run retained-evidence
   investigations from a kagent Agent.

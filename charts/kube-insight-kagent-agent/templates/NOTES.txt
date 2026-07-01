@@ -1,0 +1,14 @@
+kube-insight kagent Agent chart installed.
+
+Namespace: {{ .Values.kagent.namespace }}
+Prompt library: {{ .Values.promptLibrary.name }}
+RemoteMCPServer: {{ .Values.remoteMCPServer.name }}
+Agent: {{ .Values.agent.name }}
+
+Check resources:
+  kubectl -n {{ .Values.kagent.namespace }} get configmap {{ .Values.promptLibrary.name }}
+  kubectl -n {{ .Values.kagent.namespace }} get remotemcpserver {{ .Values.remoteMCPServer.name }} -o yaml
+  kubectl -n {{ .Values.kagent.namespace }} get agent {{ .Values.agent.name }} -o yaml
+
+Before chatting, confirm the referenced ModelConfig exists:
+  kubectl -n {{ .Values.kagent.namespace }} get modelconfig {{ .Values.agent.modelConfig }} -o yaml

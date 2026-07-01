@@ -120,7 +120,39 @@ Do not also run `kubectl apply -k examples/kagent` for the same resource names,
 or the chart and manual manifests will fight over the prompt library,
 `RemoteMCPServer`, and troubleshooting Agent.
 
-### Option B: Manual or GitOps-managed examples
+### Option B: Dedicated kagent Agent chart
+
+Use this path when kube-insight is already installed and you want to manage the
+kagent resources as a separate package:
+
+```bash
+helm install kube-insight-kagent-agent \
+  oci://ghcr.io/nowakeai/charts/kube-insight-kagent-agent \
+  --namespace kagent \
+  --version <CHART_VERSION> \
+  --set agent.modelConfig='<MODEL_CONFIG_NAME>'
+```
+
+This chart installs only kagent-facing resources. It does not install
+kube-insight. The default profile creates the same troubleshooting Agent and
+kube-insight MCP connection as the examples.
+
+For a broader Agent that combines kube-insight with kagent Kubernetes,
+Prometheus, Helm, and shell tools:
+
+```bash
+helm upgrade kube-insight-kagent-agent \
+  oci://ghcr.io/nowakeai/charts/kube-insight-kagent-agent \
+  --namespace kagent \
+  --reuse-values \
+  --set agent.profile=aiops-fullstack \
+  --set agent.name=kube-insight-aiops-fullstack
+```
+
+Before using `aiops-fullstack`, confirm your kagent tool server exposes the
+referenced tool names.
+
+### Option C: Manual or GitOps-managed examples
 
 Use this path when kube-insight itself is not Helm-managed, or when you want
 GitOps to own the kagent resources separately from the kube-insight release.
@@ -188,7 +220,9 @@ same guidance can be reused by lightweight and full-stack AIOps Agents.
 
 ## 5. Optional Full-Stack AIOps Agent
 
-`examples/kagent/aiops-fullstack-agent.yaml` shows a broader Agent that combines:
+The dedicated kagent Agent chart `aiops-fullstack` profile and
+`examples/kagent/aiops-fullstack-agent.yaml` both show a broader Agent that
+combines:
 
 - kube-insight retained evidence;
 - kagent built-in Kubernetes tools;

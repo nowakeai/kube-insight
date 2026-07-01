@@ -1,0 +1,35 @@
+{{- if .Values.remoteMCPServer.create }}
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: {{ .Values.remoteMCPServer.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight-kagent-agent.labels" . | nindent 4 }}
+spec:
+  description: {{ .Values.remoteMCPServer.description | quote }}
+  protocol: {{ .Values.remoteMCPServer.protocol }}
+  url: {{ .Values.remoteMCPServer.url | quote }}
+  timeout: {{ .Values.remoteMCPServer.timeout }}
+  sseReadTimeout: {{ .Values.remoteMCPServer.sseReadTimeout }}
+  terminateOnClose: {{ .Values.remoteMCPServer.terminateOnClose }}
+{{- end }}
+{{- if and .Values.remoteMCPServer.create .Values.lokiRemoteMCPServer.create }}
+---
+{{- end }}
+{{- if .Values.lokiRemoteMCPServer.create }}
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: {{ .Values.lokiRemoteMCPServer.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight-kagent-agent.labels" . | nindent 4 }}
+spec:
+  description: {{ .Values.lokiRemoteMCPServer.description | quote }}
+  protocol: {{ .Values.lokiRemoteMCPServer.protocol }}
+  url: {{ .Values.lokiRemoteMCPServer.url | quote }}
+  timeout: {{ .Values.lokiRemoteMCPServer.timeout }}
+  sseReadTimeout: {{ .Values.lokiRemoteMCPServer.sseReadTimeout }}
+  terminateOnClose: {{ .Values.lokiRemoteMCPServer.terminateOnClose }}
+{{- end }}

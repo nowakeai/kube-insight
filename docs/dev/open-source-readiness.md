@@ -68,5 +68,8 @@ Run the history scan after final docs and fixtures are committed, not before.
 - [ ] GHCR chart package `oci://ghcr.io/nowakeai/charts/kube-insight` is public
   and installable for the release version.
 - [ ] Release notes mention breaking schema, storage, or CLI changes.
-- [ ] The chart tag uses `chart-v<version>`, for example `chart-v0.1.1`, or the
-  manual workflow uses `expected_chart_version` as a guard when needed.
+- [ ] The application chart tag uses `chart-v<version>`, for example
+  `chart-v0.1.1`; the dedicated kagent Agent chart tag uses
+  `chart-kube-insight-kagent-agent-v<version>`.
+- [ ] Manual chart workflow runs set `chart` and `expected_chart_version` as
+  guards when needed.

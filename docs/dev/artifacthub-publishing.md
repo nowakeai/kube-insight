@@ -77,7 +77,7 @@ owners:
 Do not commit personal Artifact Hub API keys, private emails, or local account
 details.
 
-## kagent Packages
+## kagent Agent Chart
 
 Artifact Hub has a `kagent` repository kind:
 
@@ -85,23 +85,27 @@ Artifact Hub has a `kagent` repository kind:
 28 - Kagent agents
 ```
 
-kagent packages are tracked using the Helm tracker. Publish kagent-facing
-packages as dedicated Helm charts, not as raw `examples/kagent/*.yaml` files.
+kagent packages are tracked using the Helm tracker. Publish kube-insight
+kagent-facing resources through the dedicated Agent chart, not as raw
+`examples/kagent/*.yaml` files:
 
-Recommended future shape:
-
-```text
-charts/kube-insight-kagent-agent/
+```bash
+helm show chart oci://ghcr.io/nowakeai/charts/kube-insight-kagent-agent --version 0.1.0
 ```
 
-That chart should install only kagent resources:
+The chart installs only kagent resources:
 
 - kube-insight prompt library ConfigMap
 - `RemoteMCPServer` pointing to kube-insight `/mcp`
 - troubleshooting or full-stack AIOps `Agent`
 
-Register the dedicated kagent chart with Artifact Hub kind `28` after it is
-published:
+Chart-only releases for this package use tags in this shape:
+
+```text
+chart-kube-insight-kagent-agent-v<version>
+```
+
+Register the dedicated kagent chart with Artifact Hub kind `28`:
 
 ```bash
 curl -X POST 'https://artifacthub.io/api/v1/repositories/user' \

@@ -28,11 +28,11 @@ aggregation, current node capacity, and citations.
 
 ## Quick Start
 
-Download a release binary. Replace `0.1.2` with the version you want from the
+Download a release binary. Replace `0.1.3` with the version you want from the
 [release page](https://github.com/nowakeai/kube-insight/releases):
 
 ```bash
-KI_VERSION=0.1.2
+KI_VERSION=0.1.3
 KI_OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 KI_ARCH="$(uname -m)"
 case "${KI_ARCH}" in

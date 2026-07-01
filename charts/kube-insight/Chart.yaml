@@ -3,7 +3,7 @@ name: kube-insight
 description: Kubernetes retained evidence collector, API, Web UI, MCP, and metrics service.
 type: application
 version: 0.1.0
-appVersion: "0.1.2"
+appVersion: "0.1.3"
 keywords:
   - kubernetes
   - aiops

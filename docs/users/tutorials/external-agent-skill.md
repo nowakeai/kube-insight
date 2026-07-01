@@ -22,11 +22,15 @@ The skill is different from the built-in Web UI agent:
 
 ## 1. Start kube-insight
 
-For local SQLite:
+For a temporary local SQLite test:
 
 ```bash
 ./kube-insight serve --watch --app --db kubeinsight.db
 ```
+
+Do not use SQLite for long-running retained-history service deployments. Use
+the Helm chart's default chDB storage or external ClickHouse when external
+agents will rely on kube-insight continuously.
 
 For a ClickHouse-backed team service, start from the ClickHouse example config:
 
@@ -114,7 +118,9 @@ shapes.
 Use tasks that need retained history or aggregation:
 
 ```text
-Use kube-insight to determine whether a managed Kubernetes node pool had membership or capacity changes recently. Start with coverage and cite exact evidence.
+Use kube-insight to determine whether the target cluster had Node pool
+membership or capacity changes in the last 3 days. Start with coverage and
+cite exact evidence.
 ```
 
 ```text

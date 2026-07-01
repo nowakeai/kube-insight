@@ -1,11 +1,15 @@
 # Quickstart
 
-This quickstart uses the default kube-insight artifact. The default artifact has
-no storage-backend suffix, stays small and pure Go, and uses SQLite for local
-single-file runs. A separate chDB-enabled artifact is available for local
-ClickHouse-compatible storage when `libchdb.so` is installed. The current central
-backend MVP targets ClickHouse for append-only evidence history, JSON search,
-storage-efficiency metrics, and low-cost cold object-storage tiering experiments.
+This quickstart starts with the default kube-insight binary artifact. The
+default binary has no storage-backend suffix, stays small and pure Go, and uses
+SQLite for local tests, short demos, and temporary single-file runs. For
+long-running retained history, use the Helm chart's default chDB-backed install
+or an external ClickHouse backend.
+
+A separate chDB-enabled binary artifact is available for local
+ClickHouse-compatible storage when `libchdb.so` is installed. Release container
+images are chDB-capable by default so the Helm chart can use chDB without a
+special image tag.
 
 ## Install
 
@@ -34,7 +38,7 @@ Windows users can download the `.zip` artifact from the
 For performance numbers and backend tradeoffs, see
 [Storage Modes And Performance](../reference/storage-mode-comparison.md).
 
-Use the default `kube-insight` binary for the smallest local install:
+Use the default `kube-insight` binary for the smallest local test install:
 
 ```bash
 ./kube-insight watch --db kubeinsight.db
@@ -157,12 +161,13 @@ Inspect one object's retained content versions and observation trail:
 unchanged observations keep the time/resourceVersion without duplicating JSON,
 facts, edges, or changes.
 
-## Compact SQLite Storage
+## Compact Temporary SQLite Storage
 
-Long-running `watch` and `serve --watch` processes run lightweight SQLite
-maintenance automatically. The periodic task checkpoints/truncates WAL and runs
-incremental vacuum when possible, so normal watch operation should not require
-frequent full compaction.
+Local `watch` and `serve --watch` processes run lightweight SQLite maintenance
+automatically. The periodic task checkpoints/truncates WAL and runs incremental
+vacuum when possible, so normal temporary watch operation should not require
+frequent full compaction. Do not use SQLite as the long-running retained-history
+backend; use chDB or ClickHouse instead.
 
 After stopping a watcher, compact the local SQLite store:
 
@@ -177,111 +182,35 @@ content versions while keeping every observation timestamp:
 ./kube-insight db compact --db kubeinsight.db --prune-unchanged
 ```
 
-## Service Mode
+## Local Service Smoke
 
-For a local all-in-one service process, run watcher plus read surfaces together.
-Release binaries embed the prebuilt React Web UI into the `kube-insight`
-binary, so using the UI does not require a separate frontend checkout or Node.js
-runtime:
+For a temporary local all-in-one service process, run watcher plus read surfaces
+together. Release binaries embed the prebuilt React Web UI into the
+`kube-insight` binary, so using the UI does not require a separate frontend
+checkout or Node.js runtime:
 
 ```bash
 ./kube-insight serve --watch --app --db kubeinsight.db
 ```
 
-`--app` enables the local agent app surfaces together:
-
-- `--api`: read-only HTTP API.
-- `--mcp`: HTTP MCP service with Streamable HTTP at `/mcp` and legacy SSE at `/sse`.
-- `--webui`: embedded Web UI listener for the React app built from `web/`.
-  The first formal UI milestone is the agent-first chat surface described in
-  [Agent-First Web UI Design](../../contributors/product/agent-first-web-ui.md).
-
 Open the Web UI at <http://127.0.0.1:8090>. `--app` uses one listener for the
 local app: Web UI is available at `/`, API at `/api/v1/*`, MCP at `/mcp`, and
 legacy SSE at `/sse`.
 
-The built-in Web UI agent uses the server-side LLM configuration under
-`server.chat`. Enable it in your config and point `apiKeyEnv` and `baseUrlEnv`
-to environment variable names; keep the secret values in the environment, not in
-the YAML file:
-
-```yaml
-server:
-  chat:
-    enabled: true
-    provider: openai-compatible
-    apiKeyEnv: OPENAI_API_KEY
-    baseUrlEnv: OPENAI_BASE_URL
-    model: gpt-5.2
-    maxIterations: 32
-```
-
-```bash
-export OPENAI_API_KEY='...'
-export OPENAI_BASE_URL='https://api.openai.com/v1'
-./kube-insight --config config/kube-insight.example.yaml serve \
-  --watch --app --db kubeinsight.db
-```
-
-Supported provider values are `openai` and `openai-compatible`. Omit
-`baseUrlEnv` or leave the named environment variable unset for the default
-OpenAI endpoint. The API reports whether the key/base URL variables are
-configured, but never returns the secret values. See
-[Configuration](../../operators/configuration/configuration.md#roles-and-service-mode) for the
-full `server.chat` schema, or follow the
-[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md) for an
-end-to-end browser workflow.
-
-`--watch` is independent from the app surfaces. Add it when this process should
-also collect Kubernetes history; omit it when another writer already owns
-collection.
-
-Example with all service surfaces:
-
-```bash
-./kube-insight serve --watch --app \
-  --db kubeinsight.db \
-  --listen 127.0.0.1:8090
-```
-
-`serve --app` is the preferred service deployment mode for agents that support
-remote MCP over Streamable HTTP. Use `serve mcp` only when an agent runtime
-explicitly expects stdio MCP.
-
-## Serve API
-
-```bash
-./kube-insight serve api --db kubeinsight.db --listen 127.0.0.1:8080
-```
-
 Smoke test:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/api/v1/schema
-curl -X POST http://127.0.0.1:8080/api/v1/sql \
+curl http://127.0.0.1:8090/healthz
+curl http://127.0.0.1:8090/api/v1/schema
+curl -X POST http://127.0.0.1:8090/api/v1/sql \
   -H 'content-type: application/json' \
   -d '{"sql":"select name from latest_index limit 5","maxRows":5}'
-curl 'http://127.0.0.1:8080/api/v1/health?errorsOnly=true&problemLimit=20'
-# Full per-resource stream details for debugging only:
-curl 'http://127.0.0.1:8080/api/v1/health?detail=full&limit=500'
-curl 'http://127.0.0.1:8080/api/v1/history?kind=ClusterRepo&name=rancher-charts&maxVersions=5&maxObservations=20'
+curl 'http://127.0.0.1:8090/api/v1/health?errorsOnly=true&problemLimit=20'
 ```
 
-## Serve MCP
-
-For long-running agent use, connect to the service over MCP Streamable HTTP
-instead of starting a new stdio MCP process per agent session. This keeps
-SQLite, chDB, and ClickHouse access owned by the long-lived kube-insight service
-process:
-
-```bash
-./kube-insight serve --watch --app \
-  --db kubeinsight.db \
-  --listen 127.0.0.1:8090
-```
-
-Configure an MCP client that supports Streamable HTTP with the service endpoint:
+For built-in browser chat, configure `server.chat` and follow the
+[Built-in Web UI Agent Tutorial](../tutorials/builtin-webui-agent.md). For an
+external agent, connect its MCP client to the Streamable HTTP endpoint:
 
 ```json
 {
@@ -294,49 +223,8 @@ Configure an MCP client that supports Streamable HTTP with the service endpoint:
 }
 ```
 
-The same service also exposes the SDK legacy SSE transport at `/sse` for older
-clients that have not moved to Streamable HTTP. Use stdio only when the agent
-runtime does not support remote MCP:
-
-```bash
-./kube-insight serve mcp --db kubeinsight.db
-
-# ClickHouse-backed stdio MCP
-KUBE_INSIGHT_CLICKHOUSE_DSN=http://127.0.0.1:8123/?user=kube_insight \
-  ./kube-insight --config config/kube-insight.clickhouse.example.yaml serve mcp
-```
-
-MCP follows the configured `storage.driver`: SQLite by default, ClickHouse when
-started with `storage.driver: clickhouse`, and chDB in the chDB-enabled build.
-Agents should call `kube_insight_schema` first because SQLite and
-ClickHouse-compatible backends expose different SQL table names.
-
-If you want to use kube-insight from Codex, Claude, or another external agent
-instead of the built-in Web UI agent, follow the
-[External Agent Skill Tutorial](../tutorials/external-agent-skill.md).
-
-When the built-in Web UI/API chat agent runs against a SQLite DB, kube-insight
-adds a small runtime orientation message before each run. It includes collector
-coverage, compact object counts, a few high-signal Service hints, and routing
-rules such as using `kube_insight_service_investigation` for exact Service
-questions. This context is not evidence; answers still need tool-backed
-artifacts and citations.
-
-MCP currently exposes:
-
-- `kube_insight_schema`
-- `kube_insight_sql`
-- `kube_insight_health`
-- `kube_insight_search`
-- `kube_insight_history`
-- `kube_insight_topology`
-- `kube_insight_service_investigation`
-
-It also exposes prompts for common agent workflows:
-
-- `kube_insight_coverage_first`
-- `kube_insight_event_history`
-- `kube_insight_object_history`
+The [External Agent Skill Tutorial](../tutorials/external-agent-skill.md)
+covers MCP tool expectations, stdio fallback, and agent workflow rules.
 
 ## Validate A Checkout
 

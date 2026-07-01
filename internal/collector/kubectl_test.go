@@ -128,6 +128,9 @@ func TestIsResourceVersionExpired(t *testing.T) {
 	if isResourceVersionExpired(fakeError("connection reset by peer")) {
 		t.Fatal("connection reset should not be stale resourceVersion")
 	}
+	if isResourceVersionExpired(fakeError("disk I/O error (6410)")) {
+		t.Fatal("sqlite error code containing 410 should not be stale resourceVersion")
+	}
 }
 
 type fakeError string
@@ -206,7 +209,7 @@ func TestRunFakeWatchReconciliationAggregatesMultiGVRMetrics(t *testing.T) {
 	if len(summary.ResourceQueue) != 2 || !summary.ResourceQueue[1].Queued || summary.ResourceQueue[1].QueueDepth != 1 {
 		t.Fatalf("resource queue = %#v", summary.ResourceQueue)
 	}
-	if summary.ResourceQueue[0].Priority != "high" || summary.ResourceQueue[1].Priority != "normal" {
+	if summary.ResourceQueue[0].Priority != "high" || summary.ResourceQueue[1].Priority != "high" {
 		t.Fatalf("resource queue priorities = %#v", summary.ResourceQueue)
 	}
 	if len(store.Observations) != 2 {

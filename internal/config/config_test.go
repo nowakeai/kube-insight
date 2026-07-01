@@ -38,7 +38,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if !cfg.Collection.Resources.All {
 		t.Fatalf("resources = %#v", cfg.Collection.Resources)
 	}
-	if cfg.Collection.Watch.DisableHTTP2 || cfg.Collection.Watch.MaxConcurrentStreams <= 0 || cfg.Collection.Watch.MinBackoffMillis <= 0 || cfg.Collection.Watch.StreamStartStaggerMS <= 0 {
+	if cfg.Collection.Watch.DisableHTTP2 || cfg.Collection.Watch.MaxConcurrentStreams <= 0 || cfg.Collection.Watch.MinBackoffMillis <= 0 || cfg.Collection.Watch.StreamStartStaggerMS <= 0 || cfg.Collection.Watch.QueuedRelistIntervalSeconds <= 0 || cfg.Collection.Watch.StreamRotationSeconds <= 0 {
 		t.Fatalf("watch tuning = %#v", cfg.Collection.Watch)
 	}
 	for _, want := range []string{"events", "leases.coordination.k8s.io", "*policyreports.wgpolicyk8s.io", "*ephemeralreports.reports.kyverno.io"} {

@@ -1,4 +1,4 @@
-.PHONY: test check-lines web-deps web-build web-lint web-embedded-smoke build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-logs-web dev-compose-logs-watcher dev-compose-logs-clickhouse dev-compose-rebuild-web dev-compose-rebuild-watcher dev-compose-ps open-source-check demo fmt tidy clean
+.PHONY: test check-lines helm-lint helm-package helm-release-check web-deps web-build web-lint web-embedded-smoke build build-default build-chdb build-local-variants build-chdb-image prepare-chdb-runtime release-chdb-check validate chdb-build-check chdb-smoke clickhouse-up clickhouse-down clickhouse-smoke clickhouse-benchmark clickhouse-live-profile clickhouse-api-smoke storage-mode-benchmark mcp-sql-first-smoke release-artifact-smoke live-service-vs-kubectl clickhouse-status clickhouse-repair-plan clickhouse-cleanup-repair-artifacts clickhouse-clean-system-logs clickhouse-serve-dev dev-compose-up dev-compose-up-detached dev-compose-down dev-compose-logs dev-compose-logs-web dev-compose-logs-watcher dev-compose-logs-clickhouse dev-compose-rebuild-web dev-compose-rebuild-watcher dev-compose-ps open-source-check demo fmt tidy clean
 
 -include .env
 
@@ -27,6 +27,9 @@ CLICKHOUSE_DEV_RESOURCES ?= pods services endpointslices.discovery.k8s.io
 CLICKHOUSE_DEV_SERVE_FLAGS ?= --api --metrics
 COMPOSE_DEV_LOCAL := $(wildcard compose.dev.local.yaml)
 COMPOSE_DEV_FILES := -f compose.dev.yaml $(if $(COMPOSE_DEV_LOCAL),-f $(COMPOSE_DEV_LOCAL))
+HELM_CHART ?= charts/kube-insight
+HELM_DIST ?= dist/helm
+HELM_CHART_VERSION ?= $(shell awk '/^version:/ {print $$2; exit}' $(HELM_CHART)/Chart.yaml | tr -d '"')
 
 test: web-build check-lines
 	go test $(GO_TEST_PACKAGES)
@@ -38,6 +41,22 @@ check-lines:
 		echo "$$overs"; \
 		exit 1; \
 	fi
+
+helm-lint:
+	helm lint charts/kube-insight
+	helm template kube-insight charts/kube-insight --namespace kube-insight >/tmp/kube-insight-chart.yaml
+	helm template kube-insight charts/kube-insight --namespace kube-insight --set mode=writer >/tmp/kube-insight-chart-writer.yaml
+	helm template kube-insight charts/kube-insight --namespace kube-insight -f charts/kube-insight/values-clickhouse.yaml >/tmp/kube-insight-chart-clickhouse-recommended.yaml
+	helm template kube-insight charts/kube-insight --namespace kube-insight --set storage.driver=clickhouse --set storage.clickhouse.dsn=http://clickhouse:8123 >/tmp/kube-insight-chart-clickhouse.yaml
+	helm template kube-insight charts/kube-insight --namespace kube-insight --set kagent.enabled=true >/tmp/kube-insight-chart-kagent.yaml
+	helm template kube-insight charts/kube-insight --namespace kube-insight --set kagent.enabled=true --set kagent.agent.create=true >/tmp/kube-insight-chart-kagent-agent.yaml
+
+helm-package: helm-lint
+	mkdir -p $(HELM_DIST)
+	helm package $(HELM_CHART) --destination $(HELM_DIST)
+
+helm-release-check: helm-package
+	helm show chart $(HELM_DIST)/kube-insight-$(HELM_CHART_VERSION).tgz
 
 $(WEB_NODE_MODULES_STAMP): $(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 	npm --prefix $(WEB_DIR) ci

@@ -13,7 +13,6 @@ required_files=(
   MAINTAINERS.md
   CODE_OF_CONDUCT.md
   RELEASE.md
-  Dockerfile
   docker/chdb.Dockerfile
   .dockerignore
   .goreleaser.yaml
@@ -23,6 +22,7 @@ required_files=(
   .github/ISSUE_TEMPLATE/config.yml
   .github/ISSUE_TEMPLATE/feature_request.yml
   .github/workflows/ci.yml
+  .github/workflows/chart-release.yml
   .github/workflows/release.yml
   assets/brand/kube-insight-logo.svg
 )

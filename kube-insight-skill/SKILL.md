@@ -91,8 +91,9 @@ Supported access paths:
    Service name, and ports, then use `kubectl port-forward` to expose the API
    and/or MCP port locally. After port-forwarding, use the same MCP or HTTP
    paths above.
-4. Local SQLite service: if the user has a local `kubeinsight.db`, ask them to
-   run `kube-insight serve --app --db kubeinsight.db`, or
+4. Local SQLite service: only for tests, demos, or temporary local evidence
+   files. If the user has a local `kubeinsight.db`, ask them to run
+   `kube-insight serve --app --db kubeinsight.db`, or
    `kube-insight serve --watch --app --db kubeinsight.db` when they also
    want to collect from the current kubeconfig context.
 5. Local chDB service: if the user uses the chDB-enabled binary and config, ask
@@ -118,6 +119,10 @@ Then connect MCP clients to `http://127.0.0.1:8090/mcp`, or use the HTTP API at
 `GET /api/v1/server/info` says MCP is disabled, continue through the HTTP API
 instead of probing MCP paths. Legacy SSE may exist at `/sse` for older clients,
 but new remote-agent setups should use Streamable HTTP `/mcp`.
+
+Make clear that this SQLite quickstart is not the long-running retained-history
+deployment path. For continuous agent use, prefer the Helm chart's default chDB
+storage or external ClickHouse.
 
 ## Scenario Index
 
@@ -148,6 +153,8 @@ For copyable plans and SQL/export shapes, read:
 - `references/external-agent-recipes.md` for task-level workflows.
 - `references/query-patterns.md` for ClickHouse-compatible SQL, export, and
   downstream aggregation patterns.
+- `references/kagent.md` for kagent-specific RemoteMCPServer, Agent, and
+  tool-use guidance.
 
 ## Tool Guidance
 

@@ -1,0 +1,115 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: kube-insight-aiops-fullstack
+  namespace: kagent
+spec:
+  type: Declarative
+  description: Full-stack AIOps agent combining kube-insight retained evidence with live Kubernetes, Prometheus, Helm, shell, and optional Loki tools.
+  declarative:
+    modelConfig: default-model-config
+    runtime: go
+    stream: true
+    a2aConfig: {}
+    promptTemplate:
+      dataSources:
+        - kind: ConfigMap
+          name: kube-insight-prompts
+          alias: kubeinsight
+        - kind: ConfigMap
+          name: kagent-builtin-prompts
+          alias: kagent
+    systemMessage: |
+      {{ include "kagent/kubernetes-context" }}
+
+      {{ include "kagent/tool-usage-best-practices" }}
+
+      {{ include "kagent/safety-guardrails" }}
+
+      {{ include "kubeinsight/retained-evidence.md" }}
+
+      {{ include "kubeinsight/sql-and-js.md" }}
+
+      {{ include "kubeinsight/tool-routing.md" }}
+
+      {{ include "kubeinsight/answer-contract.md" }}
+
+      Investigation workflow:
+      1. Triage scope, time window, cluster/context, and user intent.
+      2. Check kube-insight collector health and retained evidence coverage.
+      3. Pull live Kubernetes state only where current validation matters.
+      4. Query Prometheus for metrics and time series with explicit windows.
+      5. Use Loki tools for time-bounded log evidence when they are installed;
+         pass explicit RFC3339 start/end timestamps, not relative strings such
+         as "15m".
+      6. Use Helm, Argo, Cilium, Istio, and Kubescape only when relevant.
+      7. Use shell only for bounded glue work or checks that no direct tool
+         covers. Never expose secrets from logs, manifests, env, or shell.
+      8. Answer with evidence, confidence, gaps, and the next safe action.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kube-insight
+          toolNames:
+            - kube_insight_health
+            - kube_insight_schema
+            - kube_insight_sql
+            - kube_insight_js
+            - kube_insight_search
+            - kube_insight_history
+            - kube_insight_topology
+            - kube_insight_service_investigation
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+          toolNames:
+            - datetime_get_current_time
+            - shell
+            - k8s_get_available_api_resources
+            - k8s_get_cluster_configuration
+            - k8s_get_resources
+            - k8s_get_resource_yaml
+            - k8s_describe_resource
+            - k8s_get_events
+            - k8s_get_pod_logs
+            - k8s_execute_command
+            - k8s_check_service_connectivity
+            - k8s_apply_manifest
+            - k8s_patch_resource
+            - k8s_rollout
+            - k8s_scale
+            - helm_list_releases
+            - helm_get_release
+            - helm_repo_update
+            - helm_upgrade
+            - helm_uninstall
+            - prometheus_targets_tool
+            - prometheus_label_names_tool
+            - prometheus_query_tool
+            - prometheus_query_range_tool
+            - prometheus_promql_tool
+          requireApproval:
+            - shell
+            - k8s_execute_command
+            - k8s_apply_manifest
+            - k8s_patch_resource
+            - k8s_rollout
+            - k8s_scale
+            - helm_upgrade
+            - helm_uninstall
+      # Optional: install a Loki or Grafana MCP server named `loki-mcp` before
+      # enabling this block. The tested Loki MCP exposes loki_query,
+      # loki_label_names, and loki_label_values.
+      # - type: McpServer
+      #   mcpServer:
+      #     apiGroup: kagent.dev
+      #     kind: RemoteMCPServer
+      #     name: loki-mcp
+      #     toolNames:
+      #       - loki_query
+      #       - loki_label_names
+      #       - loki_label_values

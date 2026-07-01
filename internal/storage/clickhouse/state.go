@@ -286,7 +286,7 @@ func (s *Store) ResourceHealth(ctx context.Context, opts storage.ResourceHealthO
 			if record.AgeSeconds < 0 {
 				record.AgeSeconds = 0
 			}
-			record.Stale = opts.StaleAfter > 0 && now.Sub(*record.UpdatedAt) > opts.StaleAfter
+			record.Stale = resourceHealthCanBecomeStale(record) && opts.StaleAfter > 0 && now.Sub(*record.UpdatedAt) > opts.StaleAfter
 		}
 		if resourceHealthExcluded(record, opts.ExcludeResources) {
 			report.Summary.Skipped++
@@ -547,6 +547,15 @@ func isResourceHealthError(record storage.ResourceHealthRecord) bool {
 
 func isResourceHealthUnstable(record storage.ResourceHealthRecord) bool {
 	return record.Status == "retrying"
+}
+
+func resourceHealthCanBecomeStale(record storage.ResourceHealthRecord) bool {
+	switch record.Status {
+	case "not_started", "queued", "listed", "skipped":
+		return false
+	default:
+		return true
+	}
 }
 
 func healthKey(clusterID, group, version, resource, namespace string) string {

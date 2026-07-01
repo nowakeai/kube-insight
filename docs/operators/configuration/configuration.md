@@ -67,6 +67,12 @@ current compose-backed dev watcher. Use `storage.driver: sqlite` for the default
 local single-file path and compatibility tests. Use `storage.driver: chdb` only
 with the chDB-enabled binary or image.
 
+The Helm chart is optimized for continuous in-cluster collection and defaults
+to `storage.driver: chdb`. Release container images are chDB-capable by
+default. Select `storage.driver: sqlite` explicitly only for Helm smoke tests,
+short demos, or temporary runs; do not use SQLite for long-running retained
+history.
+
 YAML overlay rules:
 
 - Mapping/object fields are deep-merged.
@@ -429,6 +435,8 @@ collection:
     minBackoffMillis: 500
     maxBackoffMillis: 30000
     streamStartStaggerMillis: 200
+    queuedRelistIntervalSeconds: 300
+    streamRotationSeconds: 900
   resources:
     all: true
     include: []
@@ -451,6 +459,13 @@ or CRDs:
   wait instead of overloading the API front door.
 - `streamStartStaggerMillis` spreads initial watch stream creation so reconnects
   and bookmarks do not arrive as one burst.
+- `queuedRelistIntervalSeconds` periodically refreshes resources that completed
+  their initial LIST but are still waiting for a long-running WATCH slot. Set it
+  to `0` to disable queued relists.
+- `streamRotationSeconds` bounds each active WATCH slot before the worker
+  releases it and re-enters the queue. This gives lower-priority or quiet
+  resources periodic WATCH windows without permanently increasing
+  `maxConcurrentStreams`; set it to `0` to disable rotation.
 - `minBackoffMillis` and `maxBackoffMillis` control exponential reconnect
   backoff with jitter.
 
@@ -522,7 +537,9 @@ resourceProfiles:
 
 Built-in profile rules include high-value defaults for Pods, Nodes, Events,
 EndpointSlices, Services, workload controllers, admission webhooks, RBAC,
-cert-manager, CRDs, and GitOps controllers. The GitOps rules cover Flux toolkit
+cert-manager, CRDs, GitOps controllers, kagent ecosystem resources, and common
+observability CRDs from Prometheus Operator, VictoriaMetrics Operator, and
+Grafana Agent/Alloy-style monitoring APIs. The GitOps rules cover Flux toolkit
 resources (`source.toolkit.fluxcd.io`, `kustomize.toolkit.fluxcd.io`,
 `helm.toolkit.fluxcd.io`, `image.toolkit.fluxcd.io`, and
 `notification.toolkit.fluxcd.io`) plus Argo CD `Application`, `AppProject`, and
@@ -680,7 +697,7 @@ edges, changes, and optional summaries. Versions remain proof.
 
 ## Storage
 
-SQLite is the default local single-file backend in the default artifact:
+SQLite is the default local single-file backend in the default pure-Go artifact:
 
 ```yaml
 storage:
@@ -688,6 +705,10 @@ storage:
   sqlite:
     path: kubeinsight.db
 ```
+
+Use SQLite only for tests, short demos, CI fixtures, or temporary local runs.
+Do not use it for long-running retained-history deployments; use chDB or
+ClickHouse for continuous collection.
 
 ClickHouse can be selected as the primary append-only evidence backend:
 

@@ -209,6 +209,9 @@ func (s *Server) callTool(ctx context.Context, request *sdkmcp.CallToolRequest) 
 		}
 		value, err := s.querySQL(ctx, args)
 		return toolResult(value, err)
+	case jsToolName:
+		value, err := s.queryJS(ctx, request.Params.Arguments)
+		return toolResult(value, err)
 	case "kube_insight_health":
 		var args healthArguments
 		if err := unmarshalToolArguments(request.Params.Arguments, &args); err != nil {
@@ -441,6 +444,11 @@ func tools() []sdkmcp.Tool {
 				},
 				"required": []string{"sql"},
 			},
+		},
+		{
+			Name:        jsToolName,
+			Description: jsToolDescription(),
+			InputSchema: jsToolSchema(),
 		},
 		{
 			Name:        "kube_insight_health",

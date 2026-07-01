@@ -1,0 +1,25 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "transparent",
+    "primaryColor": "#f8fafc",
+    "primaryBorderColor": "#64748b",
+    "primaryTextColor": "#0f172a",
+    "lineColor": "#334155",
+    "textColor": "#0f172a",
+    "tertiaryColor": "#f8fafc",
+    "edgeLabelBackground": "#ffffff",
+    "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+  }
+}}%%
+erDiagram
+  direction LR
+  clusters ||--o{ objects : owns
+  api_resources ||--o{ object_kinds : maps
+  object_kinds ||--o{ objects : classifies
+  objects ||--o{ versions : retains
+  objects ||--o{ object_observations : observes
+  versions ||--o{ object_facts : extracts
+  versions ||--o{ object_changes : summarizes
+  objects ||--o{ object_edges : source
+  objects ||--o{ object_edges : target

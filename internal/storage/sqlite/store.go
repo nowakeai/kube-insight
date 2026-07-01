@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +42,9 @@ func OpenWithOptions(path string, opts Options) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("sqlite path is required")
 	}
-	db, err := sql.Open("sqlite", path)
+	values := url.Values{}
+	values.Add("_pragma", "busy_timeout=5000")
+	db, err := sql.Open("sqlite", sqliteFileURI(path, values))
 	if err != nil {
 		return nil, err
 	}

@@ -35,3 +35,23 @@ func TestFormatResourceHealthDSLCompactsProblemRowsAndErrors(t *testing.T) {
 		t.Fatalf("error was not compacted enough:\n%s", text)
 	}
 }
+
+func TestFormatResourceHealthDSLExplainsQueuedStreams(t *testing.T) {
+	report := storage.ResourceHealthReport{
+		Summary:  storage.ResourceHealthSummary{Resources: 3, Healthy: 1, Queued: 2, Complete: true},
+		ByStatus: map[string]int{"watching": 1, "queued": 2},
+		Resources: []storage.ResourceHealthRecord{
+			{ClusterID: "k8s-abc", Resource: "pods", Version: "v1", Kind: "Pod", Status: "watching"},
+			{ClusterID: "k8s-abc", Resource: "configmaps", Version: "v1", Kind: "ConfigMap", Status: "queued"},
+			{ClusterID: "k8s-abc", Resource: "services", Version: "v1", Kind: "Service", Status: "queued"},
+		},
+	}
+
+	text := formatResourceHealthDSL(report, 10)
+	if !strings.Contains(text, "note: queued streams have completed the initial LIST snapshot") {
+		t.Fatalf("missing queued semantics note:\n%s", text)
+	}
+	if !strings.Contains(text, "problem_resources: none") {
+		t.Fatalf("queued streams should not be problem resources:\n%s", text)
+	}
+}

@@ -29,6 +29,10 @@ type ClusterIdentity struct {
 	Server  string
 }
 
+const InClusterContextName = "in-cluster"
+
+var inClusterConfig = rest.InClusterConfig
+
 func ConfiguredContextsClientGo() ([]string, error) {
 	config, err := loadClientConfig()
 	if err != nil {
@@ -39,6 +43,9 @@ func ConfiguredContextsClientGo() ([]string, error) {
 		contexts = append(contexts, name)
 	}
 	sort.Strings(contexts)
+	if len(contexts) == 0 && hasInClusterConfig() {
+		return []string{InClusterContextName}, nil
+	}
 	return contexts, nil
 }
 
@@ -48,6 +55,9 @@ func CurrentContextClientGo() (string, error) {
 		return "", err
 	}
 	if config.CurrentContext == "" {
+		if hasInClusterConfig() {
+			return InClusterContextName, nil
+		}
 		return "", fmt.Errorf("current kubeconfig context is empty")
 	}
 	return config.CurrentContext, nil
@@ -59,7 +69,11 @@ func ResolveClusterIdentityClientGo(ctx context.Context, kubeContext string) (Cl
 		return ClusterIdentity{}, err
 	}
 	if kubeContext == "" {
-		kubeContext = config.CurrentContext
+		if config.CurrentContext != "" {
+			kubeContext = config.CurrentContext
+		} else if hasInClusterConfig() {
+			kubeContext = InClusterContextName
+		}
 	}
 	if kubeContext == "" {
 		return ClusterIdentity{}, fmt.Errorf("current kubeconfig context is empty")
@@ -74,6 +88,9 @@ func ResolveClusterIdentityClientGo(ctx context.Context, kubeContext string) (Cl
 	rest, err := restConfig(kubeContext)
 	if err != nil {
 		return ClusterIdentity{}, err
+	}
+	if identity.Server == "" {
+		identity.Server = rest.Host
 	}
 	client, err := kubernetes.NewForConfig(rest)
 	if err != nil {
@@ -257,6 +274,13 @@ func watchRestConfig(kubeContext string, disableHTTP2 bool) (*rest.Config, error
 }
 
 func restConfigWithTimeout(kubeContext string, timeout time.Duration) (*rest.Config, error) {
+	if kubeContext == InClusterContextName {
+		config, err := inClusterConfig()
+		if err != nil {
+			return nil, err
+		}
+		return prepareRestConfig(config, timeout), nil
+	}
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubeContext}
 	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(),
@@ -265,11 +289,15 @@ func restConfigWithTimeout(kubeContext string, timeout time.Duration) (*rest.Con
 	if err != nil {
 		return nil, err
 	}
+	return prepareRestConfig(config, timeout), nil
+}
+
+func prepareRestConfig(config *rest.Config, timeout time.Duration) *rest.Config {
 	config.UserAgent = "kube-insight"
 	config.QPS = 20
 	config.Burst = 40
 	config.Timeout = timeout
-	return config, nil
+	return config
 }
 
 func disableHTTP2Transport(rt http.RoundTripper) http.RoundTripper {
@@ -297,6 +325,10 @@ func loadClientConfig() (*clientcmdapi.Config, error) {
 	return config, nil
 }
 
+func hasInClusterConfig() bool {
+	_, err := inClusterConfig()
+	return err == nil
+}
 
 func isStaleDiscoveryError(err error) bool {
 	if err == nil {

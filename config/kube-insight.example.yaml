@@ -118,6 +118,14 @@ collection:
     minBackoffMillis: 500
     maxBackoffMillis: 30000
     streamStartStaggerMillis: 200
+    # Queued resources have completed their initial LIST but are waiting for a
+    # long-lived WATCH slot. Refresh them periodically so lower-priority GVRs
+    # do not remain indefinitely stale on CRD-heavy clusters.
+    queuedRelistIntervalSeconds: 300
+    # Rotate long-lived WATCH streams so queued resources periodically get a
+    # real watch window. Set to 0 to keep active WATCH streams until they
+    # disconnect or the process stops.
+    streamRotationSeconds: 900
   resources:
     all: true
     include: []

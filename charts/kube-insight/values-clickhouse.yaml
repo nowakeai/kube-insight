@@ -1,0 +1,23 @@
+# Recommended values for team, kagent, and long-running installs.
+#
+# Create the referenced Secret before installing:
+#
+# kubectl -n kube-insight create secret generic kube-insight-clickhouse \
+#   --from-literal=dsn='http://clickhouse.example:8123/?user=kube_insight&password=...'
+
+storage:
+  driver: clickhouse
+  clickhouse:
+    existingSecret: kube-insight-clickhouse
+    existingSecretKey: dsn
+    database: kube_insight
+    initOnStart: true
+    useJsonType: false
+    asyncInsert: true
+    batchSize: 1000
+    flushIntervalMillis: 1000
+  retention:
+    enabled: true
+    maxAgeSeconds: 7776000
+    minVersionsPerObject: 1
+    filterDecisionMaxAgeSeconds: 7776000

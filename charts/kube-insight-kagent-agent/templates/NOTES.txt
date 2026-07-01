@@ -1,14 +1,33 @@
 kube-insight kagent Agent chart installed.
 
 Namespace: {{ .Values.kagent.namespace }}
+
+{{- if .Values.promptLibrary.create }}
 Prompt library: {{ .Values.promptLibrary.name }}
+{{- end }}
+{{- if .Values.remoteMCPServer.create }}
 RemoteMCPServer: {{ .Values.remoteMCPServer.name }}
+{{- end }}
+{{- if .Values.lokiRemoteMCPServer.create }}
+Loki RemoteMCPServer: {{ .Values.lokiRemoteMCPServer.name }}
+{{- end }}
+{{- if .Values.agent.create }}
 Agent: {{ .Values.agent.name }}
+{{- end }}
 
 Check resources:
+{{- if .Values.promptLibrary.create }}
   kubectl -n {{ .Values.kagent.namespace }} get configmap {{ .Values.promptLibrary.name }}
+{{- end }}
+{{- if .Values.remoteMCPServer.create }}
   kubectl -n {{ .Values.kagent.namespace }} get remotemcpserver {{ .Values.remoteMCPServer.name }} -o yaml
+{{- end }}
+{{- if .Values.lokiRemoteMCPServer.create }}
+  kubectl -n {{ .Values.kagent.namespace }} get remotemcpserver {{ .Values.lokiRemoteMCPServer.name }} -o yaml
+{{- end }}
+{{- if .Values.agent.create }}
   kubectl -n {{ .Values.kagent.namespace }} get agent {{ .Values.agent.name }} -o yaml
 
 Before chatting, confirm the referenced ModelConfig exists:
   kubectl -n {{ .Values.kagent.namespace }} get modelconfig {{ .Values.agent.modelConfig }} -o yaml
+{{- end }}

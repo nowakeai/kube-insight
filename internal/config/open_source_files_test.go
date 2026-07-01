@@ -131,8 +131,12 @@ func TestChartReleaseWorkflowPublishesHelmChart(t *testing.T) {
 		"expected_chart_version:",
 		"expected_app_version:",
 		"azure/setup-helm",
-		"helm show chart charts/kube-insight",
+		"chart_path=\"charts/kube-insight\"",
+		"chart_path=\"charts/kube-insight-kagent-agent\"",
+		"chart-kube-insight-kagent-agent-v*",
+		"helm show chart \"${chart_path}\"",
 		"make helm-package",
+		"HELM_CHART=${{ steps.versions.outputs.chart_path }}",
 		"helm push",
 		"oci://ghcr.io/",
 	} {

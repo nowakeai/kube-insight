@@ -38,7 +38,7 @@ chDB mode serves Web UI, API, MCP, and collection from the same Service. Chart
 metrics are disabled for chDB in this version because the Prometheus metrics
 collector currently supports SQLite and ClickHouse HTTP metrics.
 
-The default retention window is 90 days.
+The default retention window is 180 days, about 6 months.
 
 ## Shared Team Storage: ClickHouse-backed Install
 

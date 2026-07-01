@@ -49,7 +49,7 @@ curl -X PUT 'https://artifacthub.io/api/v1/repositories/user/kube-insight' \
 Validate the published chart:
 
 ```bash
-helm show chart oci://ghcr.io/nowakeai/charts/kube-insight --version 0.1.1
+helm show chart oci://ghcr.io/nowakeai/charts/kube-insight --version 0.1.2
 ```
 
 ## Verified Publisher

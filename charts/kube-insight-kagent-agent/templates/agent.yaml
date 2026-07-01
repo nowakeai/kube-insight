@@ -1,0 +1,70 @@
+{{- if .Values.agent.create }}
+{{- if not (or (eq .Values.agent.profile "troubleshooter") (eq .Values.agent.profile "aiops-fullstack")) }}
+{{- fail "agent.profile must be troubleshooter or aiops-fullstack" }}
+{{- end }}
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: {{ .Values.agent.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight-kagent-agent.labels" . | nindent 4 }}
+spec:
+  type: Declarative
+  description: {{ .Values.agent.description | quote }}
+  declarative:
+    modelConfig: {{ .Values.agent.modelConfig }}
+    runtime: {{ .Values.agent.runtime }}
+    stream: {{ .Values.agent.stream }}
+    {{- if .Values.agent.a2aConfig }}
+    a2aConfig: {}
+    {{- end }}
+    promptTemplate:
+      dataSources:
+        - kind: ConfigMap
+          name: {{ .Values.promptLibrary.name }}
+          alias: kubeinsight
+        - kind: ConfigMap
+          name: {{ .Values.agent.builtinPromptLibraryName }}
+          alias: kagent
+    systemMessage: |
+{{ if eq .Values.agent.profile "aiops-fullstack" }}{{ include "kube-insight-kagent-agent.systemMessageFullstack" . | indent 6 }}{{ else }}{{ include "kube-insight-kagent-agent.systemMessageBase" . | indent 6 }}{{ end }}
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: {{ .Values.remoteMCPServer.name }}
+          toolNames:
+            {{- range .Values.agent.kubeInsightToolNames }}
+            - {{ . }}
+            {{- end }}
+      {{- if or (eq .Values.agent.profile "aiops-fullstack") .Values.agent.kagentToolServer.enabled }}
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: {{ .Values.agent.kagentToolServer.name }}
+          toolNames:
+            {{- range .Values.agent.kagentToolServer.toolNames }}
+            - {{ . }}
+            {{- end }}
+          {{- if .Values.agent.kagentToolServer.requireApproval }}
+          requireApproval:
+            {{- range .Values.agent.kagentToolServer.requireApproval }}
+            - {{ . }}
+            {{- end }}
+          {{- end }}
+      {{- end }}
+      {{- if .Values.agent.loki.enabled }}
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: {{ .Values.agent.loki.remoteMCPServerName }}
+          toolNames:
+            {{- range .Values.agent.loki.toolNames }}
+            - {{ . }}
+            {{- end }}
+      {{- end }}
+{{- end }}

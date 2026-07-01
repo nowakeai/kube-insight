@@ -697,11 +697,13 @@ by default and include the matching Linux `libchdb.so` runtime.
 `libchdb.so` into `dist/chdb-image/`, then builds a local single-arch
 `kube-insight-chdb:local` image with `docker/chdb.Dockerfile`.
 `make helm-release-check` lints and packages `charts/kube-insight` locally using
-the `version` and `appVersion` in `Chart.yaml`. The separate `chart-release`
-workflow publishes chart-only releases from `chart-v*` tags or manual dispatch
-and pushes the chart to `oci://ghcr.io/nowakeai/charts/kube-insight`; it validates
-the tag or optional manual guards against `Chart.yaml` instead of overriding the
-packaged chart metadata.
+the `version` and `appVersion` in `Chart.yaml`. Set `HELM_CHART` to validate a
+different chart, for example `charts/kube-insight-kagent-agent`. The separate
+`chart-release` workflow publishes chart-only releases from `chart-v*` tags for
+the application chart, from `chart-kube-insight-kagent-agent-v*` tags for the
+dedicated kagent Agent chart, or from manual dispatch. It validates the tag or
+optional manual guards against `Chart.yaml` instead of overriding the packaged
+chart metadata.
 
 `make build-default` is an alias for the normal `make build` path and writes
 `bin/kube-insight` without a storage-backend suffix. The default binary keeps

@@ -7,6 +7,7 @@
 <p align="center">
   <a href="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/nowakeai/kube-insight/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+  <a href="https://artifacthub.io/packages/search?repo=kube-insight"><img alt="Artifact Hub" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/kube-insight"></a>
 </p>
 
 <p align="center">
@@ -290,6 +291,7 @@ and joins to the caller.
 - [Product brief](docs/users/getting-started/product-brief.md)
 - [Quickstart](docs/users/getting-started/quickstart.md)
 - [Helm chart](charts/kube-insight/README.md)
+- [kagent Agent chart](charts/kube-insight-kagent-agent/README.md)
 - [Built-in Web UI agent tutorial](docs/users/tutorials/builtin-webui-agent.md)
 - [External agent skill tutorial](docs/users/tutorials/external-agent-skill.md)
 - [kagent integration tutorial](docs/users/tutorials/kagent-integration.md)

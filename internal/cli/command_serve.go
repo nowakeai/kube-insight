@@ -385,6 +385,7 @@ func serveApp(ctx context.Context, listen string, opts appServerOptions) error {
 	defer mcpServer.Close()
 	mux := http.NewServeMux()
 	apiServer.MountHTTP(mux)
+	apiServer.MountA2AHTTP(mux)
 	mcpServer.MountHTTP(mux)
 	if opts.EnableMetrics {
 		metricsServer, err := metrics.NewServer(opts.Metrics)

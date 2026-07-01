@@ -9,6 +9,7 @@ import (
 	"kube-insight/internal/core"
 	"kube-insight/internal/extractor"
 	"kube-insight/internal/ingest"
+	"kube-insight/internal/resourceprofile"
 	"kube-insight/internal/storage"
 )
 
@@ -101,6 +102,18 @@ func TestWatchTimeoutSecondsUsesRemainingDeadline(t *testing.T) {
 	}
 }
 
+func TestWatchStreamRunTimeoutUsesRotationAndDeadline(t *testing.T) {
+	if got := watchStreamRunTimeout(time.Time{}, 5*time.Second); got != 5*time.Second {
+		t.Fatalf("rotation timeout = %v", got)
+	}
+	if got := watchStreamRunTimeout(time.Now().Add(50*time.Millisecond), time.Second); got <= 0 || got > time.Second {
+		t.Fatalf("deadline-bounded timeout = %v", got)
+	}
+	if got := watchStreamRunTimeout(time.Time{}, 0); got != 0 {
+		t.Fatalf("unbounded timeout = %v", got)
+	}
+}
+
 func TestGracefulWatchStop(t *testing.T) {
 	if !isGracefulWatchStop(errWatchClosed, time.Now().Add(time.Second)) {
 		t.Fatal("bounded watch close should be graceful")
@@ -143,6 +156,214 @@ func TestTransientWatchStreamErrorClassification(t *testing.T) {
 	}
 	if isTransientWatchStreamError(errors.New("resource version too old")) {
 		t.Fatal("expired resource versions are handled by relist logic")
+	}
+}
+
+func TestAcquireWatchStreamSlotRefreshesQueuedWorker(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{}
+	queued := 0
+	refreshed := 0
+
+	release, ok := acquireWatchStreamSlot(ctx, sem, func() {
+		queued++
+	}, func() {
+		refreshed++
+		if refreshed == 2 {
+			<-sem
+		}
+	}, time.Millisecond)
+	if !ok {
+		t.Fatal("expected slot")
+	}
+	defer release()
+	if queued != 1 {
+		t.Fatalf("queued callbacks = %d", queued)
+	}
+	if refreshed < 2 {
+		t.Fatalf("refresh callbacks = %d", refreshed)
+	}
+}
+
+func TestWatchStreamSchedulerSelectsHighestScore(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	scores := map[string]int{"low": 10, "high": 100}
+	scheduler := newWatchStreamScheduler(1, func(key string, _ time.Duration) int {
+		return scores[key]
+	})
+	firstRelease, ok := scheduler.acquire(ctx, "first", nil, nil, 0)
+	if !ok {
+		t.Fatal("expected first slot")
+	}
+	defer firstRelease()
+
+	acquired := make(chan string, 2)
+	go func() {
+		release, ok := scheduler.acquire(ctx, "low", nil, nil, 0)
+		if ok {
+			defer release()
+			acquired <- "low"
+		}
+	}()
+	go func() {
+		release, ok := scheduler.acquire(ctx, "high", nil, nil, 0)
+		if ok {
+			defer release()
+			acquired <- "high"
+		}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	firstRelease()
+	firstRelease = func() {}
+
+	select {
+	case got := <-acquired:
+		if got != "high" {
+			t.Fatalf("first acquired = %q", got)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func TestWatchScheduleScoreCases(t *testing.T) {
+	rules := []resourceprofile.Rule{
+		{Resources: []string{"pods"}, Profile: resourceprofile.Profile{Priority: "high"}},
+		{Resources: []string{"jobs"}, Profile: resourceprofile.Profile{Priority: "low"}},
+		{Resources: []string{"events"}, Disabled: true},
+	}
+	pods := Resource{Name: "pods", Version: "v1", Resource: "pods", Kind: "Pod", Namespaced: true}
+	services := Resource{Name: "services", Version: "v1", Resource: "services", Kind: "Service", Namespaced: true}
+	jobs := Resource{Name: "jobs", Version: "v1", Resource: "jobs", Kind: "Job", Namespaced: true}
+	events := Resource{Name: "events", Version: "v1", Resource: "events", Kind: "Event", Namespaced: true}
+
+	cases := []struct {
+		name      string
+		resource  Resource
+		summary   *WatchSummary
+		queuedFor time.Duration
+		want      int
+	}{
+		{
+			name:     "high priority base",
+			resource: pods,
+			want:     100,
+		},
+		{
+			name:     "normal priority base",
+			resource: services,
+			want:     50,
+		},
+		{
+			name:     "low priority base",
+			resource: jobs,
+			want:     10,
+		},
+		{
+			name:      "queued low priority catches normal after waiting",
+			resource:  jobs,
+			queuedFor: 3 * time.Minute,
+			want:      70,
+		},
+		{
+			name:     "recent events and bookmarks boost active resource",
+			resource: services,
+			summary:  &WatchSummary{Events: 8, Bookmarks: 5},
+			want:     100,
+		},
+		{
+			name:     "large object count applies bounded cost penalty",
+			resource: pods,
+			summary:  &WatchSummary{LatestObjects: 10000},
+			want:     60,
+		},
+		{
+			name:     "watch errors and retries apply bounded error penalty",
+			resource: pods,
+			summary:  &WatchSummary{WatchErrors: 3, Retries: 4},
+			want:     20,
+		},
+		{
+			name:     "disabled resource is not schedulable",
+			resource: events,
+			want:     -100000,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := watchScheduleScore(tc.resource, tc.summary, rules, tc.queuedFor)
+			if got != tc.want {
+				t.Fatalf("score = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWatchStreamSchedulerQueuedWaitCanOvertakeLowerBasePriority(t *testing.T) {
+	now := time.Now()
+	scheduler := newWatchStreamScheduler(1, func(key string, queuedFor time.Duration) int {
+		switch key {
+		case "old-low":
+			return 10 + min(80, int(queuedFor/time.Minute)*20)
+		case "new-normal":
+			return 50
+		default:
+			return 0
+		}
+	})
+	oldLow := scheduler.register("old-low")
+	newNormal := scheduler.register("new-normal")
+
+	scheduler.mu.Lock()
+	oldLow.queuedAt = now.Add(-3 * time.Minute)
+	newNormal.queuedAt = now
+	best := scheduler.bestLocked(now)
+	scheduler.mu.Unlock()
+
+	if best == nil || best.key != "old-low" {
+		t.Fatalf("best request = %#v, want old-low", best)
+	}
+}
+
+func TestWatchStreamSchedulerReleaseSelectsNextHighestScore(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	scores := map[string]int{"first": 90, "normal": 50, "active": 100, "errored": 20}
+	scheduler := newWatchStreamScheduler(1, func(key string, _ time.Duration) int {
+		return scores[key]
+	})
+	firstRelease, ok := scheduler.acquire(ctx, "first", nil, nil, 0)
+	if !ok {
+		t.Fatal("expected first slot")
+	}
+	defer firstRelease()
+
+	acquired := make(chan string, 3)
+	for _, key := range []string{"normal", "active", "errored"} {
+		key := key
+		go func() {
+			release, ok := scheduler.acquire(ctx, key, nil, nil, 0)
+			if ok {
+				defer release()
+				acquired <- key
+			}
+		}()
+	}
+	time.Sleep(20 * time.Millisecond)
+	firstRelease()
+	firstRelease = func() {}
+
+	select {
+	case got := <-acquired:
+		if got != "active" {
+			t.Fatalf("first acquired after release = %q", got)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }
 

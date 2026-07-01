@@ -2,11 +2,16 @@ version: 2
 
 project_name: kube-insight
 
+# Keep the release workflow and local `make release-chdb-check` aligned with
+# this file. The workflow prepares chDB runtime files before GoReleaser runs.
 before:
   hooks:
     - go mod download
 
 builds:
+  # Default standalone binaries stay small and pure-Go. They include the embedded
+  # Web UI but do not link chDB; SQLite remains the local/test fallback and
+  # ClickHouse can still be used through its HTTP driver.
   - id: kube-insight
     main: ./cmd/kube-insight
     binary: kube-insight
@@ -24,6 +29,9 @@ builds:
     ignore:
       - goos: windows
         goarch: arm64
+  # chDB-enabled standalone binaries are separate artifacts because they need
+  # the matching libchdb runtime file in the release archive. Split per
+  # OS/arch so each archive can include the correct runtime asset.
   - id: kube-insight-chdb-linux-amd64
     main: ./cmd/kube-insight
     binary: kube-insight
@@ -74,6 +82,9 @@ builds:
       - arm64
 
 archives:
+  # Default archives contain only the kube-insight binary. Windows uses zip so
+  # the artifact matches platform convention; the other platforms use the
+  # GoReleaser default archive format.
   - id: kube-insight
     ids:
       - kube-insight
@@ -82,6 +93,9 @@ archives:
       - goos: windows
         formats:
           - zip
+  # chDB archives include both the binary and the per-platform libchdb runtime.
+  # The example config documents how to run the artifact with the embedded
+  # ClickHouse-compatible storage engine.
   - id: kube-insight-chdb-linux-amd64
     ids:
       - kube-insight-chdb-linux-amd64
@@ -118,12 +132,19 @@ archives:
         dst: libchdb.so
       - src: config/kube-insight.chdb.example.yaml
         dst: config/kube-insight.chdb.example.yaml
+
+# Publish one checksum file covering all GitHub Release archives.
 checksum:
   name_template: checksums.txt
 
+# Local snapshot builds get a clear non-release version. Tag releases keep the
+# tag-derived semantic version.
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
+# GitHub Release notes come from the release workflow. This changelog filter is
+# still useful for local/snapshot GoReleaser runs and keeps docs/test-only
+# commits out of generated changelog sections.
 changelog:
   sort: asc
   filters:
@@ -132,22 +153,10 @@ changelog:
       - "^test:"
 
 dockers_v2:
+  # The container image is chDB-capable by default. It uses the Linux chDB builds
+  # as inputs, then docker/chdb.Dockerfile copies the correct libchdb runtime
+  # for each target platform into the image.
   - id: kube-insight
-    ids:
-      - kube-insight
-    dockerfile: Dockerfile
-    images:
-      - ghcr.io/nowakeai/kube-insight
-    tags:
-      - "{{ .Tag }}"
-      - latest
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    labels:
-      org.opencontainers.image.source: https://github.com/nowakeai/kube-insight
-      org.opencontainers.image.description: Kubernetes investigation data collector and API
-  - id: kube-insight-chdb
     ids:
       - kube-insight-chdb-linux-amd64
       - kube-insight-chdb-linux-arm64
@@ -155,8 +164,8 @@ dockers_v2:
     images:
       - ghcr.io/nowakeai/kube-insight
     tags:
-      - "{{ .Tag }}-chdb"
-      - latest-chdb
+      - "{{ .Tag }}"
+      - latest
     platforms:
       - linux/amd64
       - linux/arm64

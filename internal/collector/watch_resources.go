@@ -77,7 +77,23 @@ func runInitialListPhase(ctx context.Context, opts WatchResourcesOptions, resour
 
 func runWatchStreamPhase(ctx context.Context, opts WatchResourcesOptions, deadline time.Time, summary *WatchResourcesSummary) {
 	var wg sync.WaitGroup
-	streamSem := newWatchStreamSemaphore(opts.MaxConcurrentStreams)
+	scheduleResources := map[string]Resource{}
+	scheduleSummaries := map[string]*WatchSummary{}
+	for i := range summary.Workers {
+		worker := summary.Workers[i]
+		if worker.Error != "" || worker.Summary == nil {
+			continue
+		}
+		key := watchScheduleKey(worker.Resource)
+		scheduleResources[key] = worker.Resource
+		scheduleSummaries[key] = worker.Summary
+	}
+	var scoreMu sync.Mutex
+	streamScheduler := newWatchStreamScheduler(opts.MaxConcurrentStreams, func(key string, queuedFor time.Duration) int {
+		scoreMu.Lock()
+		defer scoreMu.Unlock()
+		return watchScheduleScore(scheduleResources[key], scheduleSummaries[key], opts.ProfileRules, queuedFor)
+	})
 	started := 0
 	for i := range summary.Workers {
 		i := i
@@ -100,44 +116,87 @@ func runWatchStreamPhase(ctx context.Context, opts WatchResourcesOptions, deadli
 				case <-timer.C:
 				}
 			}
-			release, ok := acquireWatchStreamSlot(ctx, streamSem, func() {
-				info := resourceInfo(worker.Resource)
-				_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, worker.Summary.ResourceVersion, storage.OffsetEventList, "queued", "")
-				watchLog(opts.Logf, "watch stream worker queued", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(worker.Summary.ResourceVersion), "maxConcurrentStreams", opts.MaxConcurrentStreams)
-			})
-			if !ok {
-				summary.Workers[i].Error = ctx.Err().Error()
-				return
+			for {
+				scheduleKey := watchScheduleKey(worker.Resource)
+				release, ok := streamScheduler.acquire(ctx, scheduleKey, func() {
+					info := resourceInfo(worker.Resource)
+					_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, worker.Summary.ResourceVersion, storage.OffsetEventList, "queued", "")
+					watchLog(opts.Logf, "watch stream worker queued", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(worker.Summary.ResourceVersion), "maxConcurrentStreams", opts.MaxConcurrentStreams)
+				}, func() {
+					refreshed, err := WatchResourceInitialListClientGo(ctx, WatchOptions{
+						Context:         opts.Context,
+						ClusterID:       opts.ClusterID,
+						Resource:        worker.Resource,
+						Namespace:       opts.Namespace,
+						Store:           opts.Store,
+						Logf:            opts.Logf,
+						Timeout:         remainingTimeout(deadline),
+						MaxRetries:      opts.MaxRetries,
+						Filters:         opts.Filters,
+						FilterChains:    opts.FilterChains,
+						Extractors:      opts.Extractors,
+						DisableHTTP2:    opts.DisableHTTP2,
+						RetryMinBackoff: opts.RetryMinBackoff,
+						RetryMaxBackoff: opts.RetryMaxBackoff,
+						ProfileRules:    opts.ProfileRules,
+					})
+					if err != nil {
+						info := resourceInfo(worker.Resource)
+						_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, worker.Summary.ResourceVersion, storage.OffsetEventList, "queued", err.Error())
+						watchLog(opts.Logf, "queued watch stream relist error", "resource", resourceLabel(worker.Resource), "error", err)
+						return
+					}
+					scoreMu.Lock()
+					mergeWatchSummary(worker.Summary, refreshed)
+					scoreMu.Unlock()
+					info := resourceInfo(worker.Resource)
+					_ = upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, worker.Summary.ResourceVersion, storage.OffsetEventList, "queued", "")
+					watchLog(opts.Logf, "queued watch stream relisted", "resource", resourceLabel(worker.Resource), "listed", refreshed.Listed, "stored", refreshed.Stored, "resourceVersion", emptyLabel(worker.Summary.ResourceVersion))
+				}, opts.QueuedRelistInterval)
+				if !ok {
+					summary.Workers[i].Error = ctx.Err().Error()
+					return
+				}
+				scoreMu.Lock()
+				resourceVersion := worker.Summary.ResourceVersion
+				score := watchScheduleScore(worker.Resource, worker.Summary, opts.ProfileRules, 0)
+				scoreMu.Unlock()
+				watchLog(opts.Logf, "watch stream worker acquired", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(resourceVersion), "scheduleScore", score)
+				watchLog(opts.Logf, "watch stream worker start", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(resourceVersion), "scheduleScore", score)
+				streamSummary, err := WatchResourceStreamClientGo(ctx, WatchOptions{
+					Context:              opts.Context,
+					ClusterID:            opts.ClusterID,
+					Resource:             worker.Resource,
+					Namespace:            opts.Namespace,
+					Store:                opts.Store,
+					Logf:                 opts.Logf,
+					MaxEvents:            opts.MaxEvents,
+					Timeout:              watchStreamRunTimeout(deadline, opts.StreamRotation),
+					StartResourceVersion: resourceVersion,
+					MaxRetries:           opts.MaxRetries,
+					Filters:              opts.Filters,
+					FilterChains:         opts.FilterChains,
+					Extractors:           opts.Extractors,
+					DisableHTTP2:         opts.DisableHTTP2,
+					RetryMinBackoff:      opts.RetryMinBackoff,
+					RetryMaxBackoff:      opts.RetryMaxBackoff,
+					ProfileRules:         opts.ProfileRules,
+				})
+				release()
+				scoreMu.Lock()
+				mergeWatchSummary(worker.Summary, streamSummary)
+				scoreMu.Unlock()
+				if err != nil {
+					summary.Workers[i].Error = err.Error()
+					watchLog(opts.Logf, "watch stream worker error", "resource", resourceLabel(worker.Resource), "error", err)
+					return
+				}
+				watchLog(opts.Logf, "watch stream worker done", "resource", resourceLabel(worker.Resource), "events", streamSummary.Events, "bookmarks", streamSummary.Bookmarks, "stored", streamSummary.Stored)
+				if opts.StreamRotation <= 0 || ctx.Err() != nil || (!deadline.IsZero() && time.Now().After(deadline)) {
+					return
+				}
+				watchLog(opts.Logf, "watch stream worker rotating", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(worker.Summary.ResourceVersion), "streamRotation", opts.StreamRotation)
 			}
-			defer release()
-			resourceVersion := worker.Summary.ResourceVersion
-			watchLog(opts.Logf, "watch stream worker start", "resource", resourceLabel(worker.Resource), "resourceVersion", emptyLabel(resourceVersion))
-			streamSummary, err := WatchResourceStreamClientGo(ctx, WatchOptions{
-				Context:              opts.Context,
-				ClusterID:            opts.ClusterID,
-				Resource:             worker.Resource,
-				Namespace:            opts.Namespace,
-				Store:                opts.Store,
-				Logf:                 opts.Logf,
-				MaxEvents:            opts.MaxEvents,
-				Timeout:              remainingTimeout(deadline),
-				StartResourceVersion: resourceVersion,
-				MaxRetries:           opts.MaxRetries,
-				Filters:              opts.Filters,
-				FilterChains:         opts.FilterChains,
-				Extractors:           opts.Extractors,
-				DisableHTTP2:         opts.DisableHTTP2,
-				RetryMinBackoff:      opts.RetryMinBackoff,
-				RetryMaxBackoff:      opts.RetryMaxBackoff,
-				ProfileRules:         opts.ProfileRules,
-			})
-			mergeWatchSummary(worker.Summary, streamSummary)
-			if err != nil {
-				summary.Workers[i].Error = err.Error()
-				watchLog(opts.Logf, "watch stream worker error", "resource", resourceLabel(worker.Resource), "error", err)
-				return
-			}
-			watchLog(opts.Logf, "watch stream worker done", "resource", resourceLabel(worker.Resource), "events", streamSummary.Events, "bookmarks", streamSummary.Bookmarks, "stored", streamSummary.Stored)
 		}()
 	}
 	wg.Wait()
@@ -393,6 +452,9 @@ func mergeWatchSummary(base *WatchSummary, extra WatchSummary) {
 	base.Relists += extra.Relists
 	base.Retries += extra.Retries
 	base.WatchErrors += extra.WatchErrors
+	if extra.Listed > 0 || extra.LatestObjects > 0 {
+		base.LatestObjects = extra.LatestObjects
+	}
 	if extra.ResourceVersion != "" {
 		base.ResourceVersion = extra.ResourceVersion
 	}
@@ -408,6 +470,17 @@ func remainingTimeout(deadline time.Time) time.Duration {
 		return time.Nanosecond
 	}
 	return remaining
+}
+
+func watchStreamRunTimeout(deadline time.Time, rotation time.Duration) time.Duration {
+	remaining := remainingTimeout(deadline)
+	if rotation <= 0 {
+		return remaining
+	}
+	if remaining > 0 && remaining < rotation {
+		return remaining
+	}
+	return rotation
 }
 
 func watchTimeoutSeconds(deadline time.Time, timeout time.Duration) *int64 {

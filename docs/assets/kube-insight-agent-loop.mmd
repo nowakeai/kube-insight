@@ -1,0 +1,47 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "background": "transparent",
+    "primaryColor": "#ffffff",
+    "primaryBorderColor": "#64748b",
+    "primaryTextColor": "#0f172a",
+    "lineColor": "#334155",
+    "textColor": "#0f172a",
+    "actorBkg": "#ffffff",
+    "actorBorder": "#64748b",
+    "actorTextColor": "#0f172a",
+    "actorLineColor": "#cbd5e1",
+    "signalColor": "#334155",
+    "signalTextColor": "#0f172a",
+    "labelBoxBkgColor": "#ffffff",
+    "labelBoxBorderColor": "#e2e8f0",
+    "noteBkgColor": "#f8fafc",
+    "noteBorderColor": "#cbd5e1",
+    "noteTextColor": "#0f172a",
+    "activationBkgColor": "#f8fafc",
+    "activationBorderColor": "#94a3b8",
+    "fontFamily": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+  }
+}}%%
+sequenceDiagram
+  autonumber
+  participant Agent
+  participant MCP as kube-insight MCP
+  participant DB as Evidence store
+  participant Kube as Kubernetes API
+
+  Agent->>MCP: kube_insight_schema
+  MCP->>DB: backend notes, tables, recipes
+  DB-->>MCP: SQLite or ClickHouse-compatible SQL shape
+  MCP-->>Agent: schema and SQL recipes
+  Agent->>MCP: kube_insight_sql<br/>coverage and cluster scope
+  MCP->>DB: read-only SQL over offsets/facts
+  DB-->>MCP: coverage gaps and cluster id
+  MCP-->>Agent: scoped evidence context
+  Agent->>MCP: kube_insight_sql<br/>facts, changes, edges
+  DB-->>MCP: candidate objects and topology
+  MCP-->>Agent: ranked candidates
+  Agent->>MCP: kube_insight_history
+  DB-->>MCP: retained versions and observations
+  MCP-->>Agent: proof bundle
+  Agent->>Kube: optional kubectl comparison

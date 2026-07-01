@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +23,7 @@ const (
 	defaultFlushIntervalMS = 1000
 )
 
-var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var identifierPattern = databaseIdentifierPattern
 
 type Store struct {
 	*clickhouse.Store
@@ -32,15 +31,11 @@ type Store struct {
 }
 
 func NewStore(opts Options) (storage.Store, error) {
-	opts.Path = strings.TrimSpace(opts.Path)
-	opts.Database = strings.TrimSpace(opts.Database)
-	if opts.Path == "" {
-		return nil, fmt.Errorf("chdb path is required")
+	opts, err := validateOptions(opts)
+	if err != nil {
+		return nil, err
 	}
-	if opts.Database == "" {
-		return nil, fmt.Errorf("chdb database is required")
-	}
-	client, err := newClient(opts.Path)
+	client, err := newClient(opts.Path, opts.Database)
 	if err != nil {
 		return nil, err
 	}
@@ -68,19 +63,28 @@ func (s *Store) Close() error {
 }
 
 type client struct {
-	path    string
-	session *chdbgo.Session
-	mu      sync.Mutex
+	path     string
+	database string
+	session  *chdbgo.Session
+	mu       sync.Mutex
 }
 
 var _ clickhouse.Client = (*client)(nil)
 
-func newClient(path string) (*client, error) {
+func newClient(path, database string) (*client, error) {
 	session, err := chdbgo.NewSession(path)
 	if err != nil {
 		return nil, fmt.Errorf("open chdb session: %w", err)
 	}
-	return &client{path: path, session: session}, nil
+	c := &client{path: path, database: database, session: session}
+	if err := c.useDatabase(context.Background()); err != nil {
+		// The database may not exist before initOnStart applies schema.
+		// ApplySchema switches to it after CREATE DATABASE succeeds.
+		if chdbTraceQueries() {
+			fmt.Fprintf(os.Stderr, "chdb_query\tformat=CSV\tstatus=deferred_use_database\telapsed_ms=0.000\tstatement=use:%s\n", database)
+		}
+	}
+	return c, nil
 }
 
 func (c *client) Close() {
@@ -113,7 +117,27 @@ func (c *client) ApplySchema(ctx context.Context, statements []string) (clickhou
 		}
 		out.Applied++
 	}
+	if err := c.useDatabase(ctx); err != nil {
+		wrapped := fmt.Errorf("chdb use database failed: %w", err)
+		out.Errors = append(out.Errors, wrapped.Error())
+		return out, wrapped
+	}
 	return out, nil
+}
+
+func (c *client) useDatabase(ctx context.Context) error {
+	if c == nil {
+		return fmt.Errorf("chdb session is closed")
+	}
+	database := strings.TrimSpace(c.database)
+	if database == "" {
+		return nil
+	}
+	if !identifierPattern.MatchString(database) {
+		return fmt.Errorf("invalid chdb database %q", database)
+	}
+	_, err := c.exec(ctx, "USE "+quoteIdentifier(database))
+	return err
 }
 
 func (c *client) QueryJSON(ctx context.Context, query string) (clickhouse.QueryResult, error) {

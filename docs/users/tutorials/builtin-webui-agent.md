@@ -5,6 +5,11 @@ built-in Web UI agent. Use this path when you want kube-insight itself to run
 the agent loop and show answers, tool progress, artifacts, and citations in the
 browser.
 
+The release-binary path below uses SQLite and is intended for local testing,
+short demos, and temporary evidence files. For long-running retained history,
+deploy kube-insight with the Helm chart's default chDB storage or with external
+ClickHouse.
+
 ## Prerequisites
 
 - A Kubernetes kubeconfig context that can list the resources you want to
@@ -57,7 +62,7 @@ never returns secret values.
 ## 3. Start The Local App
 
 Run the watcher, HTTP API, MCP service, metrics endpoint, and embedded Web UI on
-one local listener:
+one local listener for a temporary local test:
 
 ```bash
 ./kube-insight --config kube-insight.local.yaml serve \
@@ -93,7 +98,8 @@ Use a question that requires retained history, not just current live state. Good
 first prompts:
 
 ```text
-Did a managed Kubernetes node pool change recently? Use evidence and cite the exact time window.
+Did the target cluster's node pool change in the last 3 days? Use evidence and
+cite the exact time window.
 ```
 
 ```text

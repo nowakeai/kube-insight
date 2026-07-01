@@ -533,6 +533,8 @@ func applyWatchResourcesTuning(cfg appconfig.WatchConfig, opts *collector.WatchR
 	opts.RetryMinBackoff = millisDuration(cfg.MinBackoffMillis)
 	opts.RetryMaxBackoff = millisDuration(cfg.MaxBackoffMillis)
 	opts.StreamStartStagger = millisDuration(cfg.StreamStartStaggerMS)
+	opts.QueuedRelistInterval = secondsDuration(cfg.QueuedRelistIntervalSeconds)
+	opts.StreamRotation = secondsDuration(cfg.StreamRotationSeconds)
 }
 
 func applyWatchTuning(cfg appconfig.WatchConfig, opts *collector.WatchOptions) {
@@ -546,6 +548,13 @@ func millisDuration(value int) time.Duration {
 		return 0
 	}
 	return time.Duration(value) * time.Millisecond
+}
+
+func secondsDuration(value int) time.Duration {
+	if value <= 0 {
+		return 0
+	}
+	return time.Duration(value) * time.Second
 }
 
 func watchResourceExcludes(excludes []string, explicitArgs []string) []string {

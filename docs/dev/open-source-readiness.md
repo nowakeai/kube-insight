@@ -53,10 +53,20 @@ Run the history scan after final docs and fixtures are committed, not before.
 - [ ] CI is green.
 - [ ] GoReleaser config passes a local check or release workflow dry-run.
 - [ ] The merged `.goreleaser.yaml` stages each chDB `libchdb.so` runtime before
-  publishing chDB-enabled archives and Docker images.
+  publishing chDB-enabled archives and the default Docker image.
 - [ ] Do not add Windows chDB artifacts until upstream chDB and `chdb-go` provide
   a working Windows runtime.
-- [ ] GHCR package `ghcr.io/nowakeai/kube-insight` is public and includes default
-  `<tag>` plus chDB `<tag>-chdb` multi-architecture tags.
+- [ ] GHCR package `ghcr.io/nowakeai/kube-insight` is public and includes
+  multi-architecture `<tag>` and `latest` images with bundled chDB runtime.
+- [ ] The binary/image tag follows semantic versioning, for example `v0.1.0`.
+
+## Chart Release
+
+- [ ] `make helm-release-check` passes.
+- [ ] Chart-only changes use the `chart-release` workflow, not the GoReleaser
+  `release` workflow.
+- [ ] GHCR chart package `oci://ghcr.io/nowakeai/charts/kube-insight` is public
+  and installable for the release version.
 - [ ] Release notes mention breaking schema, storage, or CLI changes.
-- [ ] The tag follows semantic versioning, for example `v0.1.0`.
+- [ ] The chart tag uses `chart-v<version>`, for example `chart-v0.1.1`, or the
+  manual workflow uses `expected_chart_version` as a guard when needed.

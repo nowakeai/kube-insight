@@ -1,0 +1,25 @@
+{{- if or (and (eq .Values.storage.driver "sqlite") .Values.storage.sqlite.persistence.enabled) (and (eq .Values.storage.driver "chdb") .Values.storage.chdb.persistence.enabled) }}
+{{- $persistence := .Values.storage.sqlite.persistence -}}
+{{- if eq .Values.storage.driver "chdb" -}}
+{{- $persistence = .Values.storage.chdb.persistence -}}
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kube-insight.fullname" . }}
+  labels:
+    {{- include "kube-insight.labels" . | nindent 4 }}
+  {{- with $persistence.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml $persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ $persistence.size }}
+  {{- with $persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,122 @@
+{{- if .Values.kagent.enabled }}
+{{- if eq .Values.mode "writer" }}
+{{- fail "kagent.enabled requires mode=all or mode=api because writer mode does not expose the MCP service" }}
+{{- end }}
+{{- if .Values.kagent.promptLibrary.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.kagent.promptLibrary.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight.labels" . | nindent 4 }}
+    kagent.dev/prompt-library: "true"
+data:
+  retained-evidence.md: |
+    Use kube-insight as retained Kubernetes evidence and historical memory.
+    Start incident, current-state, absence, ranking, and historical questions
+    with kube_insight_health to verify collector coverage and resolve stable
+    cluster IDs. Treat live Kubernetes and monitoring tools as validation for
+    current state, not as a replacement for retained-history proof.
+    Interpret queued resource streams carefully: queued means the initial LIST
+    completed and the resource is waiting for an available watch stream slot, so
+    it still provides retained snapshot evidence. Do not call the whole
+    kube-insight service unhealthy only because queued is high. Treat retrying,
+    list_error, watch_error, stale, skipped, or not_started as coverage gaps for
+    the affected resource types.
+  sql-and-js.md: |
+    Call kube_insight_schema before kube_insight_sql or kube_insight_js. Keep
+    SQL bounded and use absolute UTC timestamps. Use the table and column names
+    exactly as returned by the active schema; SQLite and ClickHouse-compatible
+    backends differ. Do not invent generic table names such as facts, edges,
+    changes, observations, or versions unless the schema lists them. If a table
+    name is unclear, run a bounded SHOW TABLES / schema query or use typed
+    tools instead of guessing. Use kube_insight_js for code-shaped analysis such
+    as dependent SQL queries, latest-per-object selection, JSON field
+    extraction, Kubernetes unit normalization, time bucketing, top-N ranking,
+    start/end snapshot comparison, and compact answer-ready summaries.
+  tool-routing.md: |
+    Prefer typed kube-insight tools when they are exact:
+    kube_insight_service_investigation for a known Service,
+    kube_insight_history for a known object, kube_insight_topology for a chosen
+    root object, and kube_insight_search for broad candidate discovery. Do not
+    call SQL just to re-confirm an answer already returned by an exact typed
+    tool.
+  answer-contract.md: |
+    Cite concrete evidence in final answers: cluster display/context when
+    available, stable cluster ID when needed, kind, namespace/name, UID when
+    available, timestamps, tool names, and row or artifact labels. If coverage
+    is stale, queued, retrying, incomplete, or missing for relevant resources,
+    state how that affects confidence.
+{{- end }}
+{{- if and .Values.kagent.promptLibrary.create .Values.kagent.remoteMCPServer.create }}
+---
+{{- end }}
+{{- if .Values.kagent.remoteMCPServer.create }}
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: {{ .Values.kagent.remoteMCPServer.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight.labels" . | nindent 4 }}
+spec:
+  description: {{ .Values.kagent.remoteMCPServer.description | quote }}
+  protocol: {{ .Values.kagent.remoteMCPServer.protocol }}
+  url: {{ include "kube-insight.mcpURL" . | quote }}
+  timeout: {{ .Values.kagent.remoteMCPServer.timeout }}
+  sseReadTimeout: {{ .Values.kagent.remoteMCPServer.sseReadTimeout }}
+  terminateOnClose: {{ .Values.kagent.remoteMCPServer.terminateOnClose }}
+{{- end }}
+{{- if and (or .Values.kagent.promptLibrary.create .Values.kagent.remoteMCPServer.create) .Values.kagent.agent.create }}
+---
+{{- end }}
+{{- if .Values.kagent.agent.create }}
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: {{ .Values.kagent.agent.name }}
+  namespace: {{ .Values.kagent.namespace }}
+  labels:
+    {{- include "kube-insight.labels" . | nindent 4 }}
+spec:
+  type: Declarative
+  description: {{ .Values.kagent.agent.description | quote }}
+  declarative:
+    modelConfig: {{ .Values.kagent.agent.modelConfig }}
+    runtime: {{ .Values.kagent.agent.runtime }}
+    stream: {{ .Values.kagent.agent.stream }}
+    promptTemplate:
+      dataSources:
+        - kind: ConfigMap
+          name: {{ .Values.kagent.promptLibrary.name }}
+          alias: kubeinsight
+        - kind: ConfigMap
+          name: {{ .Values.kagent.agent.builtinPromptLibraryName }}
+          alias: kagent
+    systemMessage: |
+      {{`{{ include "kagent/kubernetes-context" }}`}}
+
+      {{`{{ include "kagent/tool-usage-best-practices" }}`}}
+
+      {{`{{ include "kagent/safety-guardrails" }}`}}
+
+      {{`{{ include "kubeinsight/retained-evidence.md" }}`}}
+
+      {{`{{ include "kubeinsight/sql-and-js.md" }}`}}
+
+      {{`{{ include "kubeinsight/tool-routing.md" }}`}}
+
+      {{`{{ include "kubeinsight/answer-contract.md" }}`}}
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: {{ .Values.kagent.remoteMCPServer.name }}
+          toolNames:
+            {{- range .Values.kagent.agent.toolNames }}
+            - {{ . }}
+            {{- end }}
+{{- end }}
+{{- end }}

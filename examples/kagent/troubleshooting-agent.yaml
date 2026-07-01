@@ -1,0 +1,49 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: kube-insight-troubleshooter
+  namespace: kagent
+spec:
+  type: Declarative
+  description: Troubleshoot Kubernetes incidents with kube-insight retained evidence.
+  declarative:
+    modelConfig: default-model-config
+    runtime: go
+    stream: true
+    promptTemplate:
+      dataSources:
+        - kind: ConfigMap
+          name: kube-insight-prompts
+          alias: kubeinsight
+        - kind: ConfigMap
+          name: kagent-builtin-prompts
+          alias: kagent
+    systemMessage: |
+      {{ include "kagent/kubernetes-context" }}
+
+      {{ include "kagent/tool-usage-best-practices" }}
+
+      {{ include "kagent/safety-guardrails" }}
+
+      {{ include "kubeinsight/retained-evidence.md" }}
+
+      {{ include "kubeinsight/sql-and-js.md" }}
+
+      {{ include "kubeinsight/tool-routing.md" }}
+
+      {{ include "kubeinsight/answer-contract.md" }}
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: RemoteMCPServer
+          name: kube-insight
+          toolNames:
+            - kube_insight_health
+            - kube_insight_schema
+            - kube_insight_sql
+            - kube_insight_js
+            - kube_insight_search
+            - kube_insight_history
+            - kube_insight_topology
+            - kube_insight_service_investigation

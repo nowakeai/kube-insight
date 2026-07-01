@@ -73,6 +73,7 @@ rules:
     retentionPolicy: sensitive_metadata
     filterChain: secret_metadata_only
     extractorSet: secret_metadata
+    priority: high
 
   - name: workload_rollout
     groups: [apps]
@@ -95,12 +96,14 @@ rules:
     resources: [services, endpoints, persistentvolumeclaims, persistentvolumes]
     retentionPolicy: topology
     extractorSet: service_topology
+    priority: high
 
   - name: service_topology
     groups: [networking.k8s.io]
     resources: [ingresses, networkpolicies]
     retentionPolicy: topology
     extractorSet: service_topology
+    priority: high
 
   - name: service_topology
     groups: [gateway.networking.k8s.io]
@@ -115,6 +118,7 @@ rules:
       - referencegrants
     retentionPolicy: topology
     extractorSet: service_topology
+    priority: high
 
   - name: admission_webhook
     groups: [admissionregistration.k8s.io]
@@ -125,6 +129,7 @@ rules:
       - validatingadmissionpolicybindings
     retentionPolicy: control_plane
     extractorSet: webhook
+    priority: high
 
   - name: flux_gitops
     groups:
@@ -151,14 +156,42 @@ rules:
     resources: [roles, rolebindings, clusterroles, clusterrolebindings]
     retentionPolicy: security
     extractorSet: rbac
+    priority: high
 
   - name: certmanager
     groups: [cert-manager.io, acme.cert-manager.io]
     retentionPolicy: certificate_lifecycle
     extractorSet: certmanager
+    priority: high
 
   - name: crd_definition
     groups: [apiextensions.k8s.io]
     resources: [customresourcedefinitions]
     retentionPolicy: crd_long_window
     extractorSet: crd
+    priority: high
+
+  - name: prometheus_operator
+    groups: [monitoring.coreos.com]
+    retentionPolicy: topology
+    extractorSet: generic
+    priority: high
+
+  - name: victoriametrics_operator
+    groups: [operator.victoriametrics.com]
+    retentionPolicy: topology
+    extractorSet: generic
+    priority: high
+
+  - name: grafana_observability
+    groups: [monitoring.grafana.com]
+    retentionPolicy: topology
+    extractorSet: generic
+    priority: high
+
+  - name: kagent_ecosystem
+    groups: [kagent.dev]
+    retentionPolicy: gitops_state
+    extractorSet: generic
+    compactionStrategy: spec_status_delta
+    priority: high

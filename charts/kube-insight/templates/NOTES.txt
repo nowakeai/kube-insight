@@ -1,0 +1,51 @@
+kube-insight has been installed in namespace {{ .Release.Namespace }}.
+
+Mode: {{ .Values.mode }}
+Storage driver: {{ .Values.storage.driver }}
+Retention enabled: {{ .Values.storage.retention.enabled }}
+Retention max age seconds: {{ int .Values.storage.retention.maxAgeSeconds }}
+
+{{- if eq .Values.storage.driver "sqlite" }}
+SQLite mode is intended only for tests, demos, and temporary runs.
+Use chDB or ClickHouse for kagent, team, or long-running retained history.
+{{- else if eq .Values.storage.driver "clickhouse" }}
+ClickHouse mode is recommended for team, kagent, and long-running installs.
+Review storage.retention.* values before relying on long history.
+{{- else if eq .Values.storage.driver "chdb" }}
+chDB mode uses an embedded ClickHouse-compatible local store on the release PVC.
+Release container images are chDB-capable by default.
+{{- end }}
+
+{{- if ne .Values.mode "writer" }}
+Service:
+  {{ include "kube-insight.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+Useful endpoints:
+  Web UI:  /
+  API:     /api/v1
+  MCP:     /mcp
+{{- if ne .Values.storage.driver "chdb" }}
+  Metrics: /metrics
+{{- else }}
+  Metrics: disabled for chDB mode in this chart version
+{{- end }}
+
+Port-forward:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kube-insight.fullname" . }} 8090:{{ .Values.service.port }}
+{{- if .Values.kagent.enabled }}
+
+kagent integration:
+  Namespace: {{ .Values.kagent.namespace }}
+  Prompt library: {{ .Values.kagent.promptLibrary.name }}
+  RemoteMCPServer: {{ .Values.kagent.remoteMCPServer.name }}
+  MCP URL: {{ include "kube-insight.mcpURL" . }}
+  Check:
+    kubectl -n {{ .Values.kagent.namespace }} get configmap {{ .Values.kagent.promptLibrary.name }}
+    kubectl -n {{ .Values.kagent.namespace }} get remotemcpserver {{ .Values.kagent.remoteMCPServer.name }} -o yaml
+{{- if .Values.kagent.agent.create }}
+    kubectl -n {{ .Values.kagent.namespace }} get agent {{ .Values.kagent.agent.name }} -o yaml
+{{- end }}
+{{- end }}
+{{- else }}
+This release is running in writer mode and does not expose API, MCP, Web UI, or metrics.
+{{- end }}

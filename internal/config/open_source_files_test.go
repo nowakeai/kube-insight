@@ -20,7 +20,6 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 		"SUPPORT.md",
 		"SECURITY.md",
 		"RELEASE.md",
-		"Dockerfile",
 		"docker/chdb.Dockerfile",
 		".dockerignore",
 		".github/dependabot.yml",
@@ -28,6 +27,7 @@ func TestOpenSourceReleaseFiles(t *testing.T) {
 		".github/ISSUE_TEMPLATE/bug_report.yml",
 		".github/ISSUE_TEMPLATE/config.yml",
 		".github/ISSUE_TEMPLATE/feature_request.yml",
+		".github/workflows/chart-release.yml",
 		".github/workflows/ci.yml",
 		".github/workflows/release.yml",
 		".goreleaser.yaml",
@@ -71,13 +71,14 @@ func TestGoReleaserPublishesExpectedArtifactsAndImages(t *testing.T) {
 		"config/kube-insight.chdb.example.yaml",
 		"dockers_v2:",
 		"ghcr.io/nowakeai/kube-insight",
-		"{{ .Tag }}-chdb",
-		"latest-chdb",
+		"{{ .Tag }}",
+		"latest",
 		"linux/amd64",
 		"linux/arm64",
 		"build/chdb-runtime/libchdb-linux-amd64.so",
 		"build/chdb-runtime/libchdb-linux-arm64.so",
 		"docker/chdb.Dockerfile",
+		"Kubernetes investigation data collector and API with bundled chDB runtime",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf(".goreleaser.yaml missing %q", want)
@@ -96,20 +97,80 @@ func TestReleaseWorkflowUsesGoReleaserAndGHCR(t *testing.T) {
 		"mikepenz/release-changelog-builder-action",
 		"--release-notes=RELEASE_NOTES.md",
 		"## Artifacts",
+		"run: make prepare-chdb-runtime",
 		"docker/setup-buildx-action",
 		"docker/login-action",
 		"registry: ghcr.io",
 		"packages: write",
 		"CHDB_VERSION",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("release workflow missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		"helm package charts/kube-insight",
+		"helm push",
+		"chart-v*",
+	} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("release workflow should not contain %q", notWant)
+		}
+	}
+}
+
+func TestChartReleaseWorkflowPublishesHelmChart(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "chart-release.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"chart-v*",
+		"workflow_dispatch:",
+		"expected_chart_version:",
+		"expected_app_version:",
+		"azure/setup-helm",
+		"helm show chart charts/kube-insight",
+		"make helm-package",
+		"helm push",
+		"oci://ghcr.io/",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("chart release workflow missing %q", want)
+		}
+	}
+	for _, notWant := range []string{
+		"HELM_APP_VERSION",
+		"--app-version",
+		"--version",
+	} {
+		if strings.Contains(text, notWant) {
+			t.Fatalf("chart release workflow should not contain %q", notWant)
+		}
+	}
+}
+
+func TestMakefileReleaseTargets(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		"prepare-chdb-runtime:",
 		"linux-x86_64-libchdb",
 		"linux-aarch64-libchdb",
 		"macos-x86_64-libchdb",
 		"macos-arm64-libchdb",
-		"build/chdb-runtime/libchdb-linux-amd64.so",
-		"build/chdb-runtime/libchdb-linux-arm64.so",
+		"build/chdb-runtime",
+		"libchdb-linux-amd64.so",
+		"libchdb-linux-arm64.so",
+		"release-chdb-check: prepare-chdb-runtime",
+		"helm-release-check: helm-package",
 	} {
 		if !strings.Contains(text, want) {
-			t.Fatalf("release workflow missing %q", want)
+			t.Fatalf("Makefile missing %q", want)
 		}
 	}
 }

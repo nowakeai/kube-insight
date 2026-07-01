@@ -59,6 +59,7 @@ type WatchSummary struct {
 	Relists           int            `json:"relists"`
 	Retries           int            `json:"retries"`
 	WatchErrors       int            `json:"watchErrors"`
+	LatestObjects     int            `json:"latestObjects"`
 	ResourceVersion   string         `json:"resourceVersion,omitempty"`
 	Ingest            ingest.Summary `json:"ingest"`
 }
@@ -83,6 +84,8 @@ type WatchResourcesOptions struct {
 	RetryMinBackoff      time.Duration
 	RetryMaxBackoff      time.Duration
 	StreamStartStagger   time.Duration
+	QueuedRelistInterval time.Duration
+	StreamRotation       time.Duration
 	ProfileRules         []resourceprofile.Rule
 }
 
@@ -176,6 +179,12 @@ func WatchResourcesClientGo(ctx context.Context, opts WatchResourcesOptions) (Wa
 	opts.RetryMinBackoff, opts.RetryMaxBackoff = normalizedBackoff(opts.RetryMinBackoff, opts.RetryMaxBackoff)
 	if opts.StreamStartStagger < 0 {
 		opts.StreamStartStagger = 0
+	}
+	if opts.QueuedRelistInterval < 0 {
+		opts.QueuedRelistInterval = 0
+	}
+	if opts.StreamRotation < 0 {
+		opts.StreamRotation = 0
 	}
 	resources := opts.Resources
 	if opts.DiscoverResources || len(resources) == 0 || needsResourceDiscovery(resources) {
@@ -343,6 +352,7 @@ func listResourceOnce(ctx context.Context, resourceClient dynamic.ResourceInterf
 		return err
 	}
 	summary.Listed += len(list.Items)
+	summary.LatestObjects = len(list.Items)
 	summary.ResourceVersion = list.GetResourceVersion()
 	watchLog(opts.Logf, "listed resource", "resource", info.Resource, "namespace", watchNamespaceLabel(opts.Namespace), "items", len(list.Items), "resourceVersion", emptyLabel(summary.ResourceVersion))
 	if listData, err := json.Marshal(list); err != nil {
@@ -384,6 +394,9 @@ func watchResourceStream(ctx context.Context, resourceClient dynamic.ResourceInt
 		return err
 	}
 	defer watcher.Stop()
+	if err := upsertOffset(ctx, opts.Store, opts.ClusterID, info, opts.Namespace, summary.ResourceVersion, storage.OffsetEventWatch, "watching", ""); err != nil {
+		return err
+	}
 
 	for {
 		if opts.MaxEvents > 0 && summary.Events >= opts.MaxEvents {
@@ -645,7 +658,11 @@ func isResourceVersionExpired(err error) bool {
 		return true
 	}
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "too old") || strings.Contains(text, "expired") || strings.Contains(text, "410")
+	return strings.Contains(text, "too old") ||
+		strings.Contains(text, "expired") ||
+		strings.Contains(text, "410 gone") ||
+		strings.Contains(text, "status 410") ||
+		strings.Contains(text, "status code 410")
 }
 
 func isTransientWatchStreamError(err error) bool {

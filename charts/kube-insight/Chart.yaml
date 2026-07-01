@@ -1,0 +1,17 @@
+apiVersion: v2
+name: kube-insight
+description: Kubernetes retained evidence collector, API, Web UI, MCP, and metrics service.
+type: application
+version: 0.1.0
+appVersion: "0.1.3"
+keywords:
+  - kubernetes
+  - aiops
+  - mcp
+  - observability
+home: https://github.com/nowakeai/kube-insight
+sources:
+  - https://github.com/nowakeai/kube-insight
+maintainers:
+  - name: nowake.ai
+    url: https://github.com/nowakeai

@@ -187,21 +187,31 @@ limit 20`)
 
 func buildClickHouseStorageStats(ctx context.Context, store storage.SQLQueryStore) (storageStatsResponse, error) {
 	out := storageStatsResponse{CheckedAt: time.Now().UTC(), Backend: "clickhouse"}
+	database, err := clickHouseStatsDatabase(ctx, store)
+	if err != nil {
+		return out, err
+	}
+	table := func(name string) string {
+		if database == "" {
+			return clickHouseQuoteIdent(name)
+		}
+		return clickHouseQuoteIdent(database) + "." + clickHouseQuoteIdent(name)
+	}
 	items := []struct {
 		dst   *int64
 		query string
 	}{
-		{&out.Summary.Clusters, `select uniqExact(cluster_id) as value from observations`},
-		{&out.Summary.APIResources, `select uniqExact(concat(api_group, '\0', api_version, '\0', resource)) as value from api_resources`},
-		{&out.Summary.Observations, `select count() as value from observations`},
-		{&out.Summary.Versions, `select count() as value from versions`},
-		{&out.Summary.Facts, `select count() as value from facts`},
-		{&out.Summary.Edges, `select count() as value from edges`},
-		{&out.Summary.Changes, `select count() as value from changes`},
-		{&out.Summary.FilterDecisions, `select count() as value from filter_decisions`},
-		{&out.Summary.IngestionOffsets, `select count() as value from ingestion_offsets`},
-		{&out.Summary.RawBytes, `select coalesce(sum(raw_size), 0) as value from versions`},
-		{&out.Summary.StoredBytes, `select coalesce(sum(stored_size), 0) as value from versions`},
+		{&out.Summary.Clusters, fmt.Sprintf(`select uniqExact(cluster_id) as value from %s`, table("observations"))},
+		{&out.Summary.APIResources, fmt.Sprintf(`select uniqExact(concat(api_group, '\0', api_version, '\0', resource)) as value from %s`, table("api_resources"))},
+		{&out.Summary.Observations, fmt.Sprintf(`select count() as value from %s`, table("observations"))},
+		{&out.Summary.Versions, fmt.Sprintf(`select count() as value from %s`, table("versions"))},
+		{&out.Summary.Facts, fmt.Sprintf(`select count() as value from %s`, table("facts"))},
+		{&out.Summary.Edges, fmt.Sprintf(`select count() as value from %s`, table("edges"))},
+		{&out.Summary.Changes, fmt.Sprintf(`select count() as value from %s`, table("changes"))},
+		{&out.Summary.FilterDecisions, fmt.Sprintf(`select count() as value from %s`, table("filter_decisions"))},
+		{&out.Summary.IngestionOffsets, fmt.Sprintf(`select count() as value from %s`, table("ingestion_offsets"))},
+		{&out.Summary.RawBytes, fmt.Sprintf(`select coalesce(sum(raw_size), 0) as value from %s`, table("versions"))},
+		{&out.Summary.StoredBytes, fmt.Sprintf(`select coalesce(sum(stored_size), 0) as value from %s`, table("versions"))},
 	}
 	for _, item := range items {
 		value, err := queryInt64(ctx, store, item.query)
@@ -210,7 +220,7 @@ func buildClickHouseStorageStats(ctx context.Context, store storage.SQLQueryStor
 		}
 		*item.dst = value
 	}
-	state, err := queryOne(ctx, store, `
+	state, err := queryOne(ctx, store, fmt.Sprintf(`
 select
   countIf(latest_type != 'DELETED') as objects,
   countIf(latest_type = 'DELETED') as deleted_objects
@@ -224,24 +234,24 @@ from
     namespace,
     if(uid != '', concat('uid:', uid), concat('name:', namespace, '/', name)) as identity,
     argMax(observation_type, observed_at) as latest_type
-  from observations
+  from %s
   group by cluster_id, api_group, api_version, resource, namespace, identity
-)`)
+)`, table("observations")))
 	if err != nil {
 		return out, err
 	}
 	out.Summary.Objects = int64Value(state["objects"])
 	out.Summary.DeletedObjects = int64Value(state["deleted_objects"])
 	out.Summary.LatestObjects = out.Summary.Objects
-	physical, err := queryOne(ctx, store, `
+	physical, err := queryOne(ctx, store, fmt.Sprintf(`
 select
   coalesce(sum(bytes_on_disk), 0) as bytes_on_disk,
   coalesce(sum(data_compressed_bytes), 0) as compressed_bytes,
   coalesce(sum(data_uncompressed_bytes), 0) as uncompressed_bytes
 from system.parts
 where active
-  and database = currentDatabase()
-  and table in ('api_resources', 'observations', 'object_aliases', 'versions', 'facts', 'edges', 'changes', 'filter_decisions', 'ingestion_offsets')`)
+  and database = %s
+  and table in ('api_resources', 'observations', 'object_aliases', 'versions', 'facts', 'edges', 'changes', 'filter_decisions', 'ingestion_offsets')`, clickHouseQuoteString(database)))
 	if err == nil {
 		out.Summary.BytesOnDisk = int64Value(physical["bytes_on_disk"])
 		out.Summary.CompressedBytes = int64Value(physical["compressed_bytes"])
@@ -254,7 +264,7 @@ where active
 	} else {
 		out.Summary.CompressionRatio = ratio(out.Summary.RawBytes, out.Summary.StoredBytes)
 	}
-	tableRows, err := queryRows(ctx, store, `
+	tableRows, err := queryRows(ctx, store, fmt.Sprintf(`
 select
   table as name,
   sum(rows) as rows,
@@ -263,16 +273,16 @@ select
   sum(data_uncompressed_bytes) as uncompressed_bytes
 from system.parts
 where active
-  and database = currentDatabase()
+  and database = %s
   and table in ('api_resources', 'observations', 'object_aliases', 'versions', 'facts', 'edges', 'changes', 'filter_decisions', 'ingestion_offsets')
 group by table
-order by bytes_on_disk desc`)
+order by bytes_on_disk desc`, clickHouseQuoteString(database)))
 	if err == nil {
 		out.Tables = tableStatsFromRows(tableRows)
 	} else {
 		out.Warnings = append(out.Warnings, "ClickHouse table part stats are unavailable.")
 	}
-	objectKinds, err := queryRows(ctx, store, `
+	objectKinds, err := queryRows(ctx, store, fmt.Sprintf(`
 select
   api_group,
   api_version,
@@ -283,15 +293,47 @@ select
   count() as versions,
   coalesce(sum(raw_size), 0) as raw_bytes,
   coalesce(sum(stored_size), 0) as stored_bytes
-from versions
+from %s
 group by api_group, api_version, resource, kind
 order by raw_bytes desc, versions desc, objects desc
-limit 20`)
+limit 20`, table("versions")))
 	if err != nil {
 		return out, err
 	}
 	out.ObjectKinds = objectKindStatsFromRows(objectKinds)
 	return out, nil
+}
+
+func clickHouseStatsDatabase(ctx context.Context, store storage.SQLQueryStore) (string, error) {
+	if _, err := queryInt64(ctx, store, `select count() as value from observations`); err == nil {
+		row, currentErr := queryOne(ctx, store, `select currentDatabase() as database`)
+		if currentErr == nil {
+			return stringValue(row["database"]), nil
+		}
+		return "", nil
+	}
+	row, err := queryOne(ctx, store, `
+select database
+from system.tables
+where name = 'observations'
+order by if(database = currentDatabase(), 0, 1), database
+limit 1`)
+	if err != nil {
+		return "", err
+	}
+	database := stringValue(row["database"])
+	if database == "" {
+		return "", fmt.Errorf("clickhouse-compatible observations table was not found")
+	}
+	return database, nil
+}
+
+func clickHouseQuoteIdent(value string) string {
+	return "`" + strings.ReplaceAll(value, "`", "``") + "`"
+}
+
+func clickHouseQuoteString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func queryOne(ctx context.Context, store storage.SQLQueryStore, query string) (map[string]any, error) {

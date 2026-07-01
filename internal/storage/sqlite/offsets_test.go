@@ -208,12 +208,15 @@ func TestStoreResourceHealthTreatsQueuedAsHealthyProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	health, err := store.ResourceHealth(context.Background(), ResourceHealthOptions{ClusterID: "c1"})
+	health, err := store.ResourceHealth(context.Background(), ResourceHealthOptions{ClusterID: "c1", StaleAfter: time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if health.Summary.Resources != 1 || health.Summary.Queued != 1 || !health.Summary.Complete {
+	if health.Summary.Resources != 1 || health.Summary.Queued != 1 || health.Summary.Stale != 0 || !health.Summary.Complete {
 		t.Fatalf("summary = %#v", health.Summary)
+	}
+	if len(health.Resources) != 1 || health.Resources[0].Stale {
+		t.Fatalf("queued resource should not be marked stale: %#v", health.Resources)
 	}
 	if health.ByStatus["queued"] != 1 {
 		t.Fatalf("by status = %#v", health.ByStatus)

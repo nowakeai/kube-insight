@@ -1,0 +1,115 @@
+{{- $readSurfacesEnabled := eq (include "kube-insight.readSurfacesEnabled" .) "true" -}}
+{{- $collectionEnabled := eq (include "kube-insight.collectionEnabled" .) "true" -}}
+{{- $config := dict
+  "version" "v1alpha1"
+  "instance" (dict
+    "role" (include "kube-insight.role" .)
+  )
+  "logging" (dict
+    "level" .Values.log.level
+    "format" .Values.log.format
+  )
+  "storage" (dict
+    "driver" .Values.storage.driver
+    "sqlite" (dict
+      "path" .Values.storage.sqlite.path
+    )
+    "chdb" (dict
+      "path" .Values.storage.chdb.path
+      "database" .Values.storage.chdb.database
+    )
+    "maintenance" (dict
+      "enabled" true
+      "intervalSeconds" 300
+      "minWalBytes" 16777216
+      "incrementalVacuumPages" 256
+      "journalSizeLimitBytes" 67108864
+      "runOnStart" false
+      "skipWhenDatabaseBusy" true
+      "logUnchangedMaintenanceRuns" false
+    )
+    "retention" (dict
+      "enabled" .Values.storage.retention.enabled
+      "maxAgeSeconds" (int .Values.storage.retention.maxAgeSeconds)
+      "minVersionsPerObject" (int .Values.storage.retention.minVersionsPerObject)
+      "filterDecisionMaxAgeSeconds" (int .Values.storage.retention.filterDecisionMaxAgeSeconds)
+      "policies" (dict
+        "standard" (dict
+          "minVersionsPerObject" (int .Values.storage.retention.minVersionsPerObject)
+        )
+      )
+    )
+    "clickhouse" (dict
+      "initOnStart" .Values.storage.clickhouse.initOnStart
+      "dsnEnv" "KUBE_INSIGHT_CLICKHOUSE_DSN"
+      "database" .Values.storage.clickhouse.database
+      "useJsonType" .Values.storage.clickhouse.useJsonType
+      "asyncInsert" .Values.storage.clickhouse.asyncInsert
+      "batchSize" .Values.storage.clickhouse.batchSize
+      "flushIntervalMillis" .Values.storage.clickhouse.flushIntervalMillis
+    )
+  )
+  "collection" (dict
+    "enabled" $collectionEnabled
+    "useClientGo" true
+    "namespace" .Values.collection.namespace
+    "concurrency" .Values.collection.concurrency
+    "watch" (dict
+      "disableHttp2" .Values.collection.watch.disableHttp2
+      "maxConcurrentStreams" .Values.collection.watch.maxConcurrentStreams
+      "minBackoffMillis" .Values.collection.watch.minBackoffMillis
+      "maxBackoffMillis" .Values.collection.watch.maxBackoffMillis
+      "streamStartStaggerMillis" .Values.collection.watch.streamStartStaggerMillis
+      "queuedRelistIntervalSeconds" .Values.collection.watch.queuedRelistIntervalSeconds
+      "streamRotationSeconds" .Values.collection.watch.streamRotationSeconds
+    )
+    "resources" (dict
+      "all" .Values.collection.allResources
+      "include" .Values.collection.include
+      "exclude" .Values.collection.exclude
+    )
+  )
+  "server" (dict
+    "api" (dict
+      "enabled" $readSurfacesEnabled
+      "listen" .Values.server.listen
+    )
+    "metrics" (dict
+      "enabled" (and $readSurfacesEnabled (ne .Values.storage.driver "chdb"))
+      "listen" .Values.server.listen
+    )
+    "web" (dict
+      "enabled" $readSurfacesEnabled
+      "listen" .Values.server.listen
+    )
+    "chat" (dict
+      "enabled" .Values.server.chat.enabled
+      "provider" .Values.server.chat.provider
+      "apiKeyEnv" .Values.server.chat.apiKeyEnv
+      "baseUrlEnv" .Values.server.chat.baseUrlEnv
+      "model" .Values.server.chat.model
+      "maxIterations" .Values.server.chat.maxIterations
+    )
+    "agentRetention" (dict
+      "enabled" .Values.server.agentRetention.enabled
+      "intervalSeconds" .Values.server.agentRetention.intervalSeconds
+      "runOnStart" .Values.server.agentRetention.runOnStart
+    )
+  )
+  "mcp" (dict
+    "enabled" $readSurfacesEnabled
+    "listen" .Values.server.listen
+  )
+}}
+{{- with .Values.config.extraYaml }}
+{{- $config = mustMergeOverwrite $config . }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kube-insight.fullname" . }}
+  labels:
+    {{- include "kube-insight.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml $config | nindent 4 }}

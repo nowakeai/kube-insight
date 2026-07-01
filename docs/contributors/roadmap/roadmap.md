@@ -91,6 +91,11 @@ Kubernetes RBAC support remains the next major security milestone.
   web/chat, and agent skill direction.
 - [Agent-First Web UI Design](../product/agent-first-web-ui.md): first Web UI
   milestone scope, agent runtime, frontend stack, artifacts, and packaging.
+- [Agent Ecosystem Research](../product/agent-ecosystem-research.md): kagent,
+  A2A, MCP, and adjacent agent ecosystem fit for kube-insight.
+- [kagent Ecosystem Integration Plan](kagent-ecosystem-integration-plan.md):
+  next small-release plan for kagent MCP integration, skill packaging, demos,
+  and later A2A support.
 - [Kubernetes RBAC Inheritance](../security/kubernetes-rbac-inheritance.md):
   Kubernetes authorization model and historical RBAC inheritance notes.
 - [Agent SQL RBAC Filtering](../security/agent-rbac-sql-filtering.md): SQL and

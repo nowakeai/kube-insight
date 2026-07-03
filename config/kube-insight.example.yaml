@@ -98,6 +98,7 @@ storage:
     # chdb and libchdb.so to run it.
     path: kubeinsight.chdb
     database: kube_insight
+    maxSessions: 4
 
 collection:
   enabled: true

@@ -148,6 +148,9 @@ func validateStorage(storage StorageConfig) error {
 	if storage.ClickHouse.FlushIntervalMS < 0 {
 		return errors.New("storage.clickhouse.flushIntervalMillis must be non-negative")
 	}
+	if storage.ChDB.MaxSessions < 0 {
+		return errors.New("storage.chdb.maxSessions must be non-negative")
+	}
 	if storage.Retention.MaxAgeSeconds < 0 {
 		return errors.New("storage.retention.maxAgeSeconds must be non-negative")
 	}

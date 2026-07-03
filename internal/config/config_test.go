@@ -26,7 +26,7 @@ func TestLoadExampleConfig(t *testing.T) {
 	if !cfg.Storage.ClickHouse.InitOnStart || cfg.Storage.ClickHouse.DSNEnv == "" || cfg.Storage.ClickHouse.Database == "" {
 		t.Fatalf("clickhouse = %#v", cfg.Storage.ClickHouse)
 	}
-	if cfg.Storage.ChDB.Path == "" || cfg.Storage.ChDB.Database == "" {
+	if cfg.Storage.ChDB.Path == "" || cfg.Storage.ChDB.Database == "" || cfg.Storage.ChDB.MaxSessions <= 0 {
 		t.Fatalf("chdb = %#v", cfg.Storage.ChDB)
 	}
 	if cfg.Instance.Role != "all" || !cfg.Collection.Enabled {
@@ -95,7 +95,7 @@ func TestLoadChDBExampleConfig(t *testing.T) {
 	if cfg.Storage.Driver != "chdb" {
 		t.Fatalf("driver = %q", cfg.Storage.Driver)
 	}
-	if cfg.Storage.ChDB.Path != "kubeinsight.chdb" || cfg.Storage.ChDB.Database != "kube_insight" {
+	if cfg.Storage.ChDB.Path != "kubeinsight.chdb" || cfg.Storage.ChDB.Database != "kube_insight" || cfg.Storage.ChDB.MaxSessions != 4 {
 		t.Fatalf("chdb = %#v", cfg.Storage.ChDB)
 	}
 	if !cfg.Collection.Enabled || !cfg.Collection.Resources.All {
@@ -350,8 +350,9 @@ func TestValidateAcceptsChDBLocalConfig(t *testing.T) {
 		Storage: StorageConfig{
 			Driver: "chdb",
 			ChDB: ChDBConfig{
-				Path:     "kubeinsight.chdb",
-				Database: "kube_insight",
+				Path:        "kubeinsight.chdb",
+				Database:    "kube_insight",
+				MaxSessions: 4,
 			},
 		},
 	}

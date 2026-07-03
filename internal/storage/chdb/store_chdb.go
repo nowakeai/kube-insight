@@ -8,11 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	chdbgo "github.com/chdb-io/chdb-go/chdb"
+	chdbgo "github.com/chdb-io/chdb-go/v2/chdb"
 
 	"kube-insight/internal/storage"
 	"kube-insight/internal/storage/clickhouse"
@@ -21,6 +22,7 @@ import (
 const (
 	defaultBatchSize       = 1000
 	defaultFlushIntervalMS = 1000
+	defaultMaxSessions     = 4
 )
 
 var identifierPattern = databaseIdentifierPattern
@@ -35,7 +37,7 @@ func NewStore(opts Options) (storage.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := newClient(opts.Path, opts.Database)
+	client, err := newClient(opts.Path, opts.Database, opts.MaxSessions)
 	if err != nil {
 		return nil, err
 	}
@@ -63,20 +65,36 @@ func (s *Store) Close() error {
 }
 
 type client struct {
-	path     string
-	database string
-	session  *chdbgo.Session
-	mu       sync.Mutex
+	path       string
+	database   string
+	sessions   chan *chdbgo.Session
+	sessionSet []*chdbgo.Session
+	mu         sync.Mutex
+	ops        sync.RWMutex
+	closed     bool
 }
 
 var _ clickhouse.Client = (*client)(nil)
 
-func newClient(path, database string) (*client, error) {
-	session, err := chdbgo.NewSession(path)
-	if err != nil {
-		return nil, fmt.Errorf("open chdb session: %w", err)
+func newClient(path, database string, maxSessions int) (*client, error) {
+	if maxSessions <= 0 {
+		maxSessions = defaultChDBMaxSessions()
 	}
-	c := &client{path: path, database: database, session: session}
+	c := &client{
+		path:       path,
+		database:   database,
+		sessions:   make(chan *chdbgo.Session, maxSessions),
+		sessionSet: make([]*chdbgo.Session, 0, maxSessions),
+	}
+	for i := 0; i < maxSessions; i++ {
+		session, err := chdbgo.NewSession(path)
+		if err != nil {
+			c.Close()
+			return nil, fmt.Errorf("open chdb session: %w", err)
+		}
+		c.sessionSet = append(c.sessionSet, session)
+		c.sessions <- session
+	}
 	if err := c.useDatabase(context.Background()); err != nil {
 		// The database may not exist before initOnStart applies schema.
 		// ApplySchema switches to it after CREATE DATABASE succeeds.
@@ -87,17 +105,44 @@ func newClient(path, database string) (*client, error) {
 	return c, nil
 }
 
+func defaultChDBMaxSessions() int {
+	cpus := runtime.NumCPU()
+	switch {
+	case cpus <= 0:
+		return defaultMaxSessions
+	case cpus < defaultMaxSessions:
+		return cpus
+	default:
+		return defaultMaxSessions
+	}
+}
+
 func (c *client) Close() {
 	if c == nil {
 		return
 	}
+	c.ops.Lock()
+	defer c.ops.Unlock()
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.session == nil {
+	if c.sessions == nil {
+		c.mu.Unlock()
 		return
 	}
-	c.session.Close()
-	c.session = nil
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	sessionCount := len(c.sessionSet)
+	c.mu.Unlock()
+	for i := 0; i < sessionCount; i++ {
+		session := <-c.sessions
+		session.Close()
+	}
+	c.mu.Lock()
+	c.sessions = nil
+	c.sessionSet = nil
+	c.mu.Unlock()
 }
 
 func (c *client) ApplySchema(ctx context.Context, statements []string) (clickhouse.ApplyResult, error) {
@@ -136,8 +181,7 @@ func (c *client) useDatabase(ctx context.Context) error {
 	if !identifierPattern.MatchString(database) {
 		return fmt.Errorf("invalid chdb database %q", database)
 	}
-	_, err := c.exec(ctx, "USE "+quoteIdentifier(database))
-	return err
+	return c.execAll(ctx, "USE "+quoteIdentifier(database), "CSV")
 }
 
 func (c *client) QueryJSON(ctx context.Context, query string) (clickhouse.QueryResult, error) {
@@ -308,14 +352,13 @@ func (c *client) execFormat(ctx context.Context, query, format string) (chdbResu
 		status = "canceled"
 		return nil, err
 	}
-	c.mu.Lock()
-	if c.session == nil {
-		c.mu.Unlock()
+	session, release, err := c.acquireSession(ctx)
+	if err != nil {
 		status = "error"
-		return nil, fmt.Errorf("chdb session is closed")
+		return nil, err
 	}
-	result, err := c.session.Query(query, format)
-	c.mu.Unlock()
+	result, err := session.Query(query, format)
+	release()
 	if err != nil {
 		status = "error"
 		return nil, err
@@ -328,6 +371,91 @@ func (c *client) execFormat(ctx context.Context, query, format string) (chdbResu
 		return nil, err
 	}
 	return result, nil
+}
+
+func (c *client) execAll(ctx context.Context, query, format string) error {
+	sessions, release, err := c.acquireAllSessions(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	for _, session := range sessions {
+		result, err := session.Query(query, format)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			result.Free()
+		}
+	}
+	return ctx.Err()
+}
+
+func (c *client) acquireSession(ctx context.Context) (*chdbgo.Session, func(), error) {
+	if c == nil {
+		return nil, nil, fmt.Errorf("chdb session is closed")
+	}
+	c.ops.RLock()
+	c.mu.Lock()
+	sessions := c.sessions
+	closed := c.closed
+	c.mu.Unlock()
+	if closed || sessions == nil {
+		c.ops.RUnlock()
+		return nil, nil, fmt.Errorf("chdb session is closed")
+	}
+	select {
+	case <-ctx.Done():
+		c.ops.RUnlock()
+		return nil, nil, ctx.Err()
+	case session := <-sessions:
+		if session == nil {
+			c.ops.RUnlock()
+			return nil, nil, fmt.Errorf("chdb session is closed")
+		}
+		release := func() {
+			sessions <- session
+			c.ops.RUnlock()
+		}
+		return session, release, nil
+	}
+}
+
+func (c *client) acquireAllSessions(ctx context.Context) ([]*chdbgo.Session, func(), error) {
+	if c == nil {
+		return nil, nil, fmt.Errorf("chdb session is closed")
+	}
+	c.ops.RLock()
+	c.mu.Lock()
+	sessions := c.sessions
+	closed := c.closed
+	sessionCount := len(c.sessionSet)
+	c.mu.Unlock()
+	if closed || sessions == nil {
+		c.ops.RUnlock()
+		return nil, nil, fmt.Errorf("chdb session is closed")
+	}
+	acquired := make([]*chdbgo.Session, 0, sessionCount)
+	release := func() {
+		for _, session := range acquired {
+			sessions <- session
+		}
+		c.ops.RUnlock()
+	}
+	for len(acquired) < sessionCount {
+		select {
+		case <-ctx.Done():
+			release()
+			return nil, nil, ctx.Err()
+		case session := <-sessions:
+			if session == nil {
+				release()
+				return nil, nil, fmt.Errorf("chdb session is closed")
+			}
+			acquired = append(acquired, session)
+		}
+	}
+	return acquired, release, nil
 }
 
 func chdbTraceQueries() bool {

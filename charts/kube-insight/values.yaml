@@ -88,6 +88,7 @@ storage:
   chdb:
     path: /data/kubeinsight.chdb
     database: kube_insight
+    maxSessions: 4
     persistence:
       enabled: true
       accessModes:

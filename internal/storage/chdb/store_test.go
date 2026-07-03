@@ -28,4 +28,7 @@ func TestNewStoreValidatesOptions(t *testing.T) {
 	if _, err := NewStore(Options{Path: "kubeinsight.chdb", Database: "bad-name"}); err == nil {
 		t.Fatal("expected database identifier error")
 	}
+	if _, err := NewStore(Options{Path: "kubeinsight.chdb", Database: "kube_insight", MaxSessions: -1}); err == nil {
+		t.Fatal("expected maxSessions error")
+	}
 }

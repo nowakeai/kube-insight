@@ -747,6 +747,7 @@ storage:
   chdb:
     path: kubeinsight.chdb
     database: kube_insight
+    maxSessions: 4
 ```
 
 Use `config/kube-insight.chdb.example.yaml` with `bin/kube-insight-chdb`, the
@@ -754,5 +755,8 @@ chDB-enabled release artifact, or the chDB-enabled image. The chDB-enabled
 binary needs `libchdb.so` discoverable through the system dynamic linker,
 `LD_LIBRARY_PATH`, or `CHDB_LIB_PATH`. The default binary intentionally keeps the
 unavailable placeholder so normal installs do not carry the large dynamic chDB
-runtime. PostgreSQL and CockroachDB remain possible metadata/control-plane
-candidates, but they are not the MVP evidence-storage path.
+runtime. `maxSessions` controls how many embedded chDB sessions kube-insight
+opens against the same local data path so concurrent API, Web UI, MCP, and agent
+queries can run in parallel. PostgreSQL and CockroachDB remain possible
+metadata/control-plane candidates, but they are not the MVP evidence-storage
+path.

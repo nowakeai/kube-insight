@@ -15,14 +15,15 @@ var ErrUnavailable = errors.New(
 )
 
 type Options struct {
-	Path     string
-	Database string
+	Path        string
+	Database    string
+	MaxSessions int
 }
 
 var databaseIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func OptionsFromConfig(cfg appconfig.ChDBConfig) Options {
-	return Options{Path: cfg.Path, Database: cfg.Database}
+	return Options{Path: cfg.Path, Database: cfg.Database, MaxSessions: cfg.MaxSessions}
 }
 
 func validateOptions(opts Options) (Options, error) {
@@ -36,6 +37,9 @@ func validateOptions(opts Options) (Options, error) {
 	}
 	if !databaseIdentifierPattern.MatchString(opts.Database) {
 		return opts, fmt.Errorf("invalid chdb database %q", opts.Database)
+	}
+	if opts.MaxSessions < 0 {
+		return opts, fmt.Errorf("chdb maxSessions must be non-negative")
 	}
 	return opts, nil
 }

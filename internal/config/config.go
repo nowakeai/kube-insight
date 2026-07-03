@@ -78,8 +78,9 @@ type SQLDatabaseConfig struct {
 }
 
 type ChDBConfig struct {
-	Path     string `yaml:"path" json:"path"`
-	Database string `yaml:"database" json:"database"`
+	Path        string `yaml:"path" json:"path"`
+	Database    string `yaml:"database" json:"database"`
+	MaxSessions int    `yaml:"maxSessions" json:"maxSessions"`
 }
 
 type ClickHouseConfig struct {

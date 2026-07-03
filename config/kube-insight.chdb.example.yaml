@@ -6,3 +6,4 @@ storage:
     # Requires a binary built with -tags chdb and a discoverable libchdb.so.
     path: kubeinsight.chdb
     database: kube_insight
+    maxSessions: 4

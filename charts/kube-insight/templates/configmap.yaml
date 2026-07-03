@@ -17,6 +17,7 @@
     "chdb" (dict
       "path" .Values.storage.chdb.path
       "database" .Values.storage.chdb.database
+      "maxSessions" .Values.storage.chdb.maxSessions
     )
     "maintenance" (dict
       "enabled" true

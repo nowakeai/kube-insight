@@ -1,0 +1,109 @@
+name: chart-release
+
+on:
+  push:
+    tags:
+      - "chart-v*"
+      - "chart-kube-insight-kagent-agent-v*"
+  workflow_dispatch:
+    inputs:
+      chart:
+        description: Chart to publish.
+        required: false
+        default: kube-insight
+        type: choice
+        options:
+          - kube-insight
+          - kube-insight-kagent-agent
+      expected_chart_version:
+        description: Optional chart version guard. Must match Chart.yaml version when set.
+        required: false
+        type: string
+      expected_app_version:
+        description: Optional appVersion guard. Must match Chart.yaml appVersion when set.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v5
+
+      - name: Set chart release versions
+        id: versions
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            case "${GITHUB_REF_NAME}" in
+              chart-v*)
+                chart="kube-insight"
+                chart_path="charts/kube-insight"
+                expected_chart_version="${GITHUB_REF_NAME#chart-v}"
+                ;;
+              chart-kube-insight-kagent-agent-v*)
+                chart="kube-insight-kagent-agent"
+                chart_path="charts/kube-insight-kagent-agent"
+                expected_chart_version="${GITHUB_REF_NAME#chart-kube-insight-kagent-agent-v}"
+                ;;
+              *)
+                echo "Unsupported chart tag ${GITHUB_REF_NAME}" >&2
+                exit 1
+                ;;
+            esac
+            expected_app_version=""
+          else
+            chart="${{ inputs.chart }}"
+            case "${chart}" in
+              kube-insight)
+                chart_path="charts/kube-insight"
+                ;;
+              kube-insight-kagent-agent)
+                chart_path="charts/kube-insight-kagent-agent"
+                ;;
+              *)
+                echo "Unsupported chart ${chart}" >&2
+                exit 1
+                ;;
+            esac
+            expected_chart_version="${{ inputs.expected_chart_version }}"
+            expected_app_version="${{ inputs.expected_app_version }}"
+          fi
+
+          chart_version="$(helm show chart "${chart_path}" | awk '/^version:/ {print $2}' | tr -d '"')"
+          app_version="$(helm show chart "${chart_path}" | awk '/^appVersion:/ {print $2}' | tr -d '"')"
+
+          if [ -n "${expected_chart_version}" ] && [ "${chart_version}" != "${expected_chart_version}" ]; then
+            echo "Chart.yaml version ${chart_version} does not match expected ${expected_chart_version}" >&2
+            exit 1
+          fi
+          if [ -n "${expected_app_version}" ] && [ "${app_version}" != "${expected_app_version}" ]; then
+            echo "Chart.yaml appVersion ${app_version} does not match expected ${expected_app_version}" >&2
+            exit 1
+          fi
+
+          test -n "${chart_version}"
+          test -n "${app_version}"
+          echo "chart=${chart}" >> "$GITHUB_OUTPUT"
+          echo "chart_path=${chart_path}" >> "$GITHUB_OUTPUT"
+          echo "chart_version=${chart_version}" >> "$GITHUB_OUTPUT"
+          echo "app_version=${app_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Package Helm chart
+        run: make helm-package HELM_CHART=${{ steps.versions.outputs.chart_path }} HELM_DIST=dist
+
+      - name: Log in to GHCR for Helm
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Publish Helm chart
+        run: helm push "dist/${{ steps.versions.outputs.chart }}-${{ steps.versions.outputs.chart_version }}.tgz" oci://ghcr.io/${{ github.repository_owner }}/charts

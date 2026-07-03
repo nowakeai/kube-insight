@@ -49,6 +49,27 @@ func TestForResourceSelectsKnownProfiles(t *testing.T) {
 			enabled:  true,
 			priority: "normal",
 		},
+		{
+			name:     "service",
+			info:     kubeapi.ResourceInfo{Version: "v1", Resource: "services", Kind: "Service", Namespaced: true},
+			profile:  "service_topology",
+			enabled:  true,
+			priority: "high",
+		},
+		{
+			name:     "victoriametrics",
+			info:     kubeapi.ResourceInfo{Group: "operator.victoriametrics.com", Version: "v1beta1", Resource: "vmservicescrapes", Kind: "VMServiceScrape", Namespaced: true},
+			profile:  "victoriametrics_operator",
+			enabled:  true,
+			priority: "high",
+		},
+		{
+			name:     "kagent",
+			info:     kubeapi.ResourceInfo{Group: "kagent.dev", Version: "v1alpha2", Resource: "remotemcpservers", Kind: "RemoteMCPServer", Namespaced: true},
+			profile:  "kagent_ecosystem",
+			enabled:  true,
+			priority: "high",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

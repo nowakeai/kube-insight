@@ -97,7 +97,7 @@ func TestSDKMCPTools(t *testing.T) {
 	for _, tool := range tools.Tools {
 		toolNames += tool.Name + "\n"
 	}
-	for _, want := range []string{"kube_insight_schema", "kube_insight_sql", "kube_insight_search", "kube_insight_history", "kube_insight_topology", "kube_insight_service_investigation"} {
+	for _, want := range []string{"kube_insight_schema", "kube_insight_sql", "kube_insight_js", "kube_insight_search", "kube_insight_history", "kube_insight_topology", "kube_insight_service_investigation"} {
 		if !strings.Contains(toolNames, want) {
 			t.Fatalf("tools missing %q: %s", want, toolNames)
 		}
@@ -127,6 +127,12 @@ func TestSDKMCPTools(t *testing.T) {
 	})
 	if sqlError || !strings.Contains(sqlText, `"name": "api-1"`) {
 		t.Fatalf("sql result isError=%v text=%s", sqlError, sqlText)
+	}
+	jsText, jsError := callToolText(t, session, "kube_insight_js", map[string]any{
+		"script": "const podRows = sql('select name from latest_index', 5); return {names: podRows.map(row => row.name), row_count: podRows.length};",
+	})
+	if jsError || !strings.Contains(jsText, `"api-1"`) || !strings.Contains(jsText, `"row_count":1`) {
+		t.Fatalf("js result isError=%v text=%s", jsError, jsText)
 	}
 
 	historyText, historyError := callToolText(t, session, "kube_insight_history", map[string]any{
@@ -509,6 +515,7 @@ func TestServerUsesInjectedReadStore(t *testing.T) {
 		{name: "kube_insight_history", args: map[string]any{"kind": "Pod", "namespace": "default", "name": "api-1"}},
 		{name: "kube_insight_topology", args: map[string]any{"kind": "Pod", "namespace": "default", "name": "api-1"}},
 		{name: "kube_insight_service_investigation", args: map[string]any{"namespace": "default", "name": "api", "maxEvidenceObjects": 999}},
+		{name: "kube_insight_js", args: map[string]any{"script": "return {total: input.values.reduce((sum, value) => sum + value, 0)};", "input": map[string]any{"values": []int{1, 2, 3}}}},
 	}
 	var output string
 	for _, call := range calls {
@@ -518,10 +525,10 @@ func TestServerUsesInjectedReadStore(t *testing.T) {
 		}
 		output += text
 	}
-	if opened != len(calls) {
+	if opened != len(calls)-1 {
 		t.Fatalf("open count = %d, want %d", opened, len(calls))
 	}
-	for _, want := range []string{`clickhouse`, `fake injected backend`, `"kind": "Pod"`, `healthy=1`, `"matches": 1`, `"observations": 1`, `"nodes": 1`, `"pods": 1`} {
+	for _, want := range []string{`clickhouse`, `fake injected backend`, `"kind": "Pod"`, `healthy=1`, `"matches": 1`, `"observations": 1`, `"nodes": 1`, `"pods": 1`, `"total":6`} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q: %s", want, output)
 		}

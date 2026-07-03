@@ -189,6 +189,13 @@ func formatResourceHealthDSL(report storage.ResourceHealthReport, problemLimit i
 	b.WriteString("summary: ")
 	b.WriteString(compactHealthSummary(report.Summary))
 	b.WriteByte('\n')
+	if notes := compactHealthNotes(report.Summary); len(notes) > 0 {
+		for _, note := range notes {
+			b.WriteString("note: ")
+			b.WriteString(note)
+			b.WriteByte('\n')
+		}
+	}
 	if len(report.ByStatus) > 0 {
 		b.WriteString("by_status:")
 		for status, count := range report.ByStatus {
@@ -286,6 +293,17 @@ func compactHealthSummary(summary storage.ResourceHealthSummary) string {
 		"complete=" + boolString(summary.Complete),
 	}
 	return strings.Join(parts, " ")
+}
+
+func compactHealthNotes(summary storage.ResourceHealthSummary) []string {
+	notes := []string{}
+	if summary.Queued > 0 {
+		notes = append(notes, "queued streams have completed the initial LIST snapshot and are waiting for a watch stream slot; do not treat queued alone as unhealthy")
+	}
+	if summary.Errors > 0 || summary.Unstable > 0 || summary.Stale > 0 || summary.NotStarted > 0 || summary.Skipped > 0 {
+		notes = append(notes, "treat retrying, errors, stale, not_started, and skipped streams as coverage gaps for affected resources")
+	}
+	return notes
 }
 
 func healthProblemRecords(records []storage.ResourceHealthRecord, limit int) ([]storage.ResourceHealthRecord, int) {

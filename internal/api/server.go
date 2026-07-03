@@ -138,6 +138,13 @@ func (s *Server) closeReadStore(store ReadStore) {
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /.well-known/agent-card.json", s.handleA2AAgentCard)
+	s.mux.HandleFunc("GET /extendedAgentCard", s.handleA2AAgentCard)
+	s.mux.HandleFunc("POST /message:send", s.handleA2ASendMessage)
+	s.mux.HandleFunc("POST /message:stream", s.handleA2AStreamMessage)
+	s.mux.HandleFunc("GET /tasks/{task_id}", s.handleA2AGetTask)
+	s.mux.HandleFunc("GET /tasks", s.handleA2AListTasks)
+	s.mux.HandleFunc("POST /tasks/", s.handleA2ACancelTask)
 	s.mux.HandleFunc("GET /api/v1/schema", s.handleSchema)
 	s.mux.HandleFunc("GET /api/v1/storage/stats", s.handleStorageStats)
 	s.mux.HandleFunc("GET /api/v1/server/info", s.handleServerInfo)

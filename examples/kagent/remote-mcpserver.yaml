@@ -1,0 +1,12 @@
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: kube-insight
+  namespace: kagent
+spec:
+  description: kube-insight retained Kubernetes evidence MCP server
+  protocol: STREAMABLE_HTTP
+  url: http://kube-insight.kube-insight.svc.cluster.local:8090/mcp
+  timeout: 30s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true

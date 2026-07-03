@@ -3,6 +3,9 @@
 Audience: contributors working on discovery, watches, and collection internals.
 Start with [Quickstart](../../users/getting-started/quickstart.md) for normal collection commands.
 
+Related design:
+[Dynamic Watch Scheduling](dynamic-watch-scheduling-design.md).
+
 ## Goal
 
 `kube-insight` should automatically watch and persist all Kubernetes resources
@@ -191,9 +194,19 @@ Current PoC implementation:
   every selected GVR first, then long-running WATCH streams from each list
   resourceVersion. This prevents early long-lived watch streams from blocking
   coverage of later resources.
-- Watch streams are started in profile-priority order and staggered by default.
+- Watch streams are submitted in profile-priority order and staggered by
+  default, but slot acquisition is score-based rather than simple FIFO. The
+  scheduler uses static profile priority, queue wait time, recent watch
+  events/bookmarks, latest object count, and retry/error pressure to choose the
+  next resource that receives a long-lived WATCH slot. Query/incident hints are
+  planned separately in the dynamic scheduling design.
   `collection.watch.maxConcurrentStreams` caps active long-lived WATCH streams;
   resources beyond the cap wait after their initial LIST has recorded coverage.
+  Queued resources can be periodically refreshed with
+  `collection.watch.queuedRelistIntervalSeconds` so CRD-heavy clusters do not
+  leave lower-priority resources on a startup-only snapshot. Active watch
+  streams can also rotate after `collection.watch.streamRotationSeconds`, which
+  releases the slot and lets queued resources receive real watch windows.
   The watch client keeps Kubernetes' normal HTTP/2 behavior unless
   `collection.watch.disableHttp2` is explicitly enabled for a problematic
   proxy. Reconnects use exponential backoff with jitter to avoid amplifying

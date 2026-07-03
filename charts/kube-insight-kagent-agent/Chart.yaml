@@ -1,0 +1,31 @@
+apiVersion: v2
+name: kube-insight-kagent-agent
+description: kagent Agent package for kube-insight retained Kubernetes evidence.
+type: application
+version: 0.1.0
+appVersion: "0.1.3"
+keywords:
+  - kubernetes
+  - aiops
+  - kagent
+  - mcp
+  - observability
+annotations:
+  artifacthub.io/category: ai-machine-learning
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: support
+      url: https://github.com/nowakeai/kube-insight/issues
+    - name: kube-insight chart
+      url: https://artifacthub.io/packages/search?repo=kube-insight
+    - name: kagent integration
+      url: https://github.com/nowakeai/kube-insight/blob/main/docs/users/tutorials/kagent-integration.md
+  artifacthub.io/changes: |
+    - kind: added
+      description: Add a dedicated kagent Agent chart for kube-insight retained evidence.
+home: https://github.com/nowakeai/kube-insight
+sources:
+  - https://github.com/nowakeai/kube-insight
+maintainers:
+  - name: nowake.ai
+    url: https://github.com/nowakeai

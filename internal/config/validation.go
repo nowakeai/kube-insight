@@ -115,6 +115,12 @@ func validateCollection(collection CollectionConfig) error {
 	if collection.Watch.StreamStartStaggerMS < 0 {
 		return errors.New("collection.watch.streamStartStaggerMillis must be non-negative")
 	}
+	if collection.Watch.QueuedRelistIntervalSeconds < 0 {
+		return errors.New("collection.watch.queuedRelistIntervalSeconds must be non-negative")
+	}
+	if collection.Watch.StreamRotationSeconds < 0 {
+		return errors.New("collection.watch.streamRotationSeconds must be non-negative")
+	}
 	return nil
 }
 

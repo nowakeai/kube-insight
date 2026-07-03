@@ -15,8 +15,8 @@ Within those classes, the current project exposes four practical choices:
 | Class | Option | Best fit |
 | --- | --- | --- |
 | Live API baseline | Raw `kubectl` | Current-state spot checks and manual confirmation. |
-| kube-insight local | SQLite default artifact | Smallest install, local investigations, CI fixtures, and first-time users. |
-| kube-insight local ClickHouse-compatible | chDB-enabled artifact | Local ClickHouse-style schema/query behavior without running a ClickHouse server. |
+| kube-insight local test mode | SQLite default artifact | Tests, demos, CI fixtures, and temporary local runs. |
+| kube-insight embedded ClickHouse-compatible | chDB-enabled binary artifact or default Helm chart image | Local or in-cluster ClickHouse-style schema/query behavior without running a ClickHouse server. |
 | kube-insight central service | ClickHouse backend | Continuous multi-resource history, larger datasets, storage efficiency, and team/API/MCP service deployments. |
 
 The intended product path is: use kube-insight for retained, sanitized,
@@ -28,18 +28,21 @@ operational needs; keep `kubectl` as the live-state confirmation tool.
 | Option | Strengths | Tradeoffs | Current evidence |
 | --- | --- | --- | --- |
 | Raw `kubectl` | No database, no watcher, exact live current state, familiar to every Kubernetes user. | Current-state only, repeated broad API calls for agents, no retained Event history after expiry, no pre-storage redaction layer, joins happen in prompt/tool code. | In the recorded agent workflow benchmark, broad `kubectl` operations took `3,104-5,745 ms`; the latest live service workflow measured `3,462.546 ms` for raw `kubectl`. |
-| kube-insight + SQLite | Default pure-Go artifact, no external service, simplest local database, good for laptops and small evidence sets, works with CLI/API/MCP. | Row-store local backend; not the target for very large retained history or low-cost cold storage. | Same benchmark used the default SQLite evidence DB: `24-215 ms` for five agent investigation queries, `14.9x-221x` faster than broad raw `kubectl` operations. |
-| kube-insight + chDB | Local ClickHouse-compatible tables and SQL shape, useful for users who want ClickHouse semantics without a server, still supports SQLite and remote ClickHouse in the chDB-enabled binary. | Requires `libchdb.so`; release artifact is larger; `serve --metrics` is deferred for this backend; runtime packaging is more complex than the default artifact. | chDB smoke covers schema, SQL, search, history, topology, object investigation, service investigation, and API. Embedded real-data validation showed about `5.8x` compression and service investigation around `607 ms` after store reuse. |
+| kube-insight + SQLite | Default pure-Go artifact, no external service, simplest local database, useful for tests, demos, CI fixtures, and temporary local evidence sets. | Row-store local backend; not for long-running retained-history deployments or continuous kagent/A2A use. | Same benchmark used the default SQLite evidence DB: `24-215 ms` for five agent investigation queries, `14.9x-221x` faster than broad raw `kubectl` operations. |
+| kube-insight + chDB | Embedded ClickHouse-compatible tables and SQL shape, useful for the Helm chart default and for users who want ClickHouse semantics without a server. | Requires `libchdb.so`; standalone binary archives are larger when chDB-enabled; `serve --metrics` is deferred for this backend. | chDB smoke covers schema, SQL, search, history, topology, object investigation, service investigation, and API. Embedded real-data validation showed about `5.8x` compression and service investigation around `607 ms` after store reuse. |
 | kube-insight + ClickHouse | Best MVP path for long-running central evidence history, high compression, append-heavy writes, API/MCP service reads, and future cold-tiering. | Requires operating ClickHouse; object-storage tiering is configured but not end-to-end validated in this MVP; local MergeTree inactive parts must be understood when reading disk usage. | Live profiles showed `28.4x-30.53x` active business-table compression, `31.13-33.96` compressed bytes per active row, API health/search/history/topology under `500 ms`, and representative service investigation `224-801 ms`; the latest ClickHouse live profile measured service investigation at `262.618 ms` after per-object evidence caps. |
 
 ## How To Choose
 
-Start with the default SQLite artifact when:
+Use the default SQLite artifact only when:
 
-- you want the smallest install,
-- you are trying kube-insight for the first time,
-- you need local evidence files for a single cluster or a short-lived run,
-- you want the lowest operational burden.
+- you are testing kube-insight behavior,
+- you are running a short demo or CI fixture,
+- you need a temporary local evidence file,
+- you will discard or migrate the data before long-running operation.
+
+Do not use SQLite for long-running retained-history deployments. Use chDB for
+embedded in-cluster retention or ClickHouse for shared team storage.
 
 Use the chDB-enabled artifact when:
 

@@ -20,12 +20,16 @@ Read these in order when evaluating or using kube-insight:
 
 1. [Product Brief](users/getting-started/product-brief.md)
 2. [Quickstart](users/getting-started/quickstart.md)
-3. [Built-in Web UI Agent Tutorial](users/tutorials/builtin-webui-agent.md)
-4. [External Agent Skill Tutorial](users/tutorials/external-agent-skill.md)
-5. [Configuration](operators/configuration/configuration.md)
-6. [Storage Modes And Performance](users/reference/storage-mode-comparison.md)
-7. [Troubleshooting Workflows](users/workflows/troubleshooting-workflows.md)
-8. [Security, Privacy, And Retention](operators/security/security-retention.md)
+3. [Helm Chart](../charts/kube-insight/README.md)
+4. [Built-in Web UI Agent Tutorial](users/tutorials/builtin-webui-agent.md)
+5. [External Agent Skill Tutorial](users/tutorials/external-agent-skill.md)
+6. [kagent Integration Tutorial](users/tutorials/kagent-integration.md)
+7. [kagent Agent Chart](../charts/kube-insight-kagent-agent/README.md)
+8. [A2A Integration Tutorial](users/tutorials/a2a-integration.md)
+9. [Configuration](operators/configuration/configuration.md)
+10. [Storage Modes And Performance](users/reference/storage-mode-comparison.md)
+11. [Troubleshooting Workflows](users/workflows/troubleshooting-workflows.md)
+12. [Security, Privacy, And Retention](operators/security/security-retention.md)
 
 ## User Guides And Tutorials
 
@@ -35,6 +39,22 @@ Read these in order when evaluating or using kube-insight:
 - [External Agent Skill Tutorial](users/tutorials/external-agent-skill.md): connect
   Codex, Claude, or another external agent to kube-insight through MCP or the
   read-only HTTP API.
+- [Helm Chart](../charts/kube-insight/README.md): install kube-insight in
+  Kubernetes with chDB by default, external ClickHouse for shared storage, and
+  optional kagent resources.
+- [kagent Agent Chart](../charts/kube-insight-kagent-agent/README.md): install
+  only the kagent prompt library, kube-insight `RemoteMCPServer`, and Agent
+  resources when kube-insight itself is managed separately.
+- [kagent Integration Tutorial](users/tutorials/kagent-integration.md): connect
+  kagent to kube-insight through a `RemoteMCPServer` and run retained-evidence
+  investigations from a kagent Agent.
+- [kagent AIOps Collaboration Cases](users/workflows/kagent-aiops-collaboration-cases.md):
+  scenario designs for combining kube-insight retained evidence with
+  Prometheus-compatible metrics, Loki logs, Helm, shell, and live Kubernetes
+  tools.
+- [A2A Integration Tutorial](users/tutorials/a2a-integration.md): expose
+  kube-insight as an A2A-compatible retained-evidence investigation agent for
+  orchestrators that delegate whole tasks.
 - [Agent SQL Cookbook](users/workflows/agent-sql-cookbook.md): schema-first SQL
   patterns for agents and operators.
 - [Real-World Troubleshooting Cases](users/workflows/real-world-cases.md): example
@@ -47,6 +67,7 @@ Read these in order when evaluating or using kube-insight:
 Use these when configuring or operating kube-insight:
 
 - [Configuration](operators/configuration/configuration.md)
+- [Helm Chart](../charts/kube-insight/README.md)
 - [Processing Configuration Model](operators/configuration/processing-model.md)
 - [Data Model](operators/data/data-model.md)
 - [Facts Catalog](operators/data/facts-catalog.md)
@@ -72,6 +93,8 @@ roadmap history, or unresolved design context:
 - [Validated Troubleshooting Scenarios](users/workflows/validated-troubleshooting-scenarios.md)
 - [Agent And UI Roadmap](contributors/product/agent-and-ui-roadmap.md)
 - [Agent-First Web UI Design](contributors/product/agent-first-web-ui.md)
+- [Agent Ecosystem Research](contributors/product/agent-ecosystem-research.md)
+- [kagent Ecosystem Integration Plan](contributors/roadmap/kagent-ecosystem-integration-plan.md)
 - [Kubernetes RBAC Inheritance](contributors/security/kubernetes-rbac-inheritance.md)
 - [Agent SQL RBAC Filtering](contributors/security/agent-rbac-sql-filtering.md)
 - [Backend Strategy](maintainers/research/backend-strategy.md)
@@ -144,7 +167,7 @@ Public docs are organized first by audience, then by category:
 | Directory | Audience | Contents |
 | --- | --- |
 | `users/getting-started/` | Users and evaluators | Product brief and quickstart. |
-| `users/tutorials/` | Users | Built-in Web UI agent and external agent skill tutorials. |
+| `users/tutorials/` | Users | Built-in Web UI agent, external agent skill, kagent integration, and A2A integration tutorials. |
 | `users/workflows/` | Users and agents | Troubleshooting workflows, SQL cookbook, and real-world cases. |
 | `users/reference/` | Users and evaluators | User-facing benchmark and storage-mode tradeoffs. |
 | `operators/configuration/` | Operators | Runtime configuration and processing model. |

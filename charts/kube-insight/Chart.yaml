@@ -1,0 +1,48 @@
+apiVersion: v2
+name: kube-insight
+description: Kubernetes retained evidence collector, API, Web UI, MCP, and metrics service.
+type: application
+version: 0.1.2
+appVersion: "v0.1.3"
+keywords:
+  - kubernetes
+  - aiops
+  - mcp
+  - observability
+  - kagent
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/containsSecurityUpdates: "true"
+  artifacthub.io/images: |
+    - name: kube-insight
+      image: ghcr.io/nowakeai/kube-insight:v0.1.3
+      platforms:
+        - linux/amd64
+        - linux/arm64
+  artifacthub.io/links: |
+    - name: support
+      url: https://github.com/nowakeai/kube-insight/issues
+    - name: documentation
+      url: https://github.com/nowakeai/kube-insight/tree/main/docs
+    - name: kagent integration
+      url: https://github.com/nowakeai/kube-insight/blob/main/docs/users/tutorials/kagent-integration.md
+    - name: A2A integration
+      url: https://github.com/nowakeai/kube-insight/blob/main/docs/users/tutorials/a2a-integration.md
+  artifacthub.io/changes: |
+    - kind: added
+      description: Add the first published kube-insight Helm chart with chDB-backed default storage.
+    - kind: added
+      description: Add optional kagent prompt library, RemoteMCPServer, and troubleshooting Agent resources.
+    - kind: added
+      description: Add A2A and Streamable HTTP MCP endpoints for agent integrations.
+    - kind: security
+      description: Build with Go 1.26.4 and updated vulnerable Go dependencies.
+    - kind: fixed
+      description: Use the published v0.1.3 container image tag as the default Helm image.
+home: https://github.com/nowakeai/kube-insight
+sources:
+  - https://github.com/nowakeai/kube-insight
+maintainers:
+  - name: nowake.ai
+    url: https://github.com/nowakeai

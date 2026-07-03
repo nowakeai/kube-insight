@@ -286,7 +286,7 @@ func scanResourceHealthRecord(rows resourceHealthScanner, now time.Time, staleAf
 		if record.AgeSeconds < 0 {
 			record.AgeSeconds = 0
 		}
-		record.Stale = staleAfter > 0 && now.Sub(*record.UpdatedAt) > staleAfter
+		record.Stale = resourceHealthCanBecomeStale(record) && staleAfter > 0 && now.Sub(*record.UpdatedAt) > staleAfter
 	}
 	return record, nil
 }
@@ -315,6 +315,15 @@ func isResourceHealthError(record ResourceHealthRecord) bool {
 
 func isResourceHealthUnstable(record ResourceHealthRecord) bool {
 	return record.Status == "retrying"
+}
+
+func resourceHealthCanBecomeStale(record ResourceHealthRecord) bool {
+	switch record.Status {
+	case "not_started", "queued", "listed", "skipped":
+		return false
+	default:
+		return true
+	}
 }
 
 func offsetTimes(event storage.OffsetEvent, now int64) (sql.NullInt64, sql.NullInt64, sql.NullInt64) {

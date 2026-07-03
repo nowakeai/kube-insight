@@ -683,17 +683,27 @@ make build-default
 make build-chdb
 make build-chdb-image
 make release-chdb-check
+make helm-release-check
 ```
 
 `make release-chdb-check` stages Linux and macOS amd64/arm64 chDB runtimes under
 `build/chdb-runtime/` and validates the merged GoReleaser config. The default tag
-workflow publishes the default pure-Go artifacts plus Linux/macOS amd64/arm64
-chDB-enabled archives. Docker publishing uses one multi-architecture GHCR
-package: `ghcr.io/nowakeai/kube-insight:<tag>` for the default image and
-`ghcr.io/nowakeai/kube-insight:<tag>-chdb` for the chDB image. `make
-build-chdb-image` stages `bin/kube-insight-chdb` and the local amd64
+workflow publishes the default pure-Go artifacts, Linux/macOS amd64/arm64
+chDB-enabled archives, and one chDB-capable multi-architecture GHCR image.
+Docker publishing uses one multi-architecture GHCR package:
+`ghcr.io/nowakeai/kube-insight:<tag>`; release container images are chDB-capable
+by default and include the matching Linux `libchdb.so` runtime.
+`make build-chdb-image` stages `bin/kube-insight-chdb` and the local amd64
 `libchdb.so` into `dist/chdb-image/`, then builds a local single-arch
 `kube-insight-chdb:local` image with `docker/chdb.Dockerfile`.
+`make helm-release-check` lints and packages `charts/kube-insight` locally using
+the `version` and `appVersion` in `Chart.yaml`. Set `HELM_CHART` to validate a
+different chart, for example `charts/kube-insight-kagent-agent`. The separate
+`chart-release` workflow publishes chart-only releases from `chart-v*` tags for
+the application chart, from `chart-kube-insight-kagent-agent-v*` tags for the
+dedicated kagent Agent chart, or from manual dispatch. It validates the tag or
+optional manual guards against `Chart.yaml` instead of overriding the packaged
+chart metadata.
 
 `make build-default` is an alias for the normal `make build` path and writes
 `bin/kube-insight` without a storage-backend suffix. The default binary keeps

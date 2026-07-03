@@ -109,11 +109,13 @@ type CollectionConfig struct {
 }
 
 type WatchConfig struct {
-	DisableHTTP2         bool `yaml:"disableHttp2" json:"disableHttp2"`
-	MaxConcurrentStreams int  `yaml:"maxConcurrentStreams" json:"maxConcurrentStreams"`
-	MinBackoffMillis     int  `yaml:"minBackoffMillis" json:"minBackoffMillis"`
-	MaxBackoffMillis     int  `yaml:"maxBackoffMillis" json:"maxBackoffMillis"`
-	StreamStartStaggerMS int  `yaml:"streamStartStaggerMillis" json:"streamStartStaggerMillis"`
+	DisableHTTP2                bool `yaml:"disableHttp2" json:"disableHttp2"`
+	MaxConcurrentStreams        int  `yaml:"maxConcurrentStreams" json:"maxConcurrentStreams"`
+	MinBackoffMillis            int  `yaml:"minBackoffMillis" json:"minBackoffMillis"`
+	MaxBackoffMillis            int  `yaml:"maxBackoffMillis" json:"maxBackoffMillis"`
+	StreamStartStaggerMS        int  `yaml:"streamStartStaggerMillis" json:"streamStartStaggerMillis"`
+	QueuedRelistIntervalSeconds int  `yaml:"queuedRelistIntervalSeconds" json:"queuedRelistIntervalSeconds"`
+	StreamRotationSeconds       int  `yaml:"streamRotationSeconds" json:"streamRotationSeconds"`
 }
 
 type ResourcePolicy struct {

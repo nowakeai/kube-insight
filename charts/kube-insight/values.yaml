@@ -1,0 +1,208 @@
+# Default values for kube-insight.
+
+replicaCount: 1
+
+updateStrategy: {}
+
+image:
+  repository: ghcr.io/nowakeai/kube-insight
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# all: collect/watch and serve Web UI, API, MCP, and metrics.
+# api: serve Web UI, API, MCP, and metrics without collection.
+# writer: collect/watch only.
+mode: all
+
+log:
+  level: info
+  format: text
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  runAsNonRoot: true
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 8090
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kube-insight.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceMonitor:
+  enabled: false
+  additionalLabels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+storage:
+  # chDB is the default embedded storage for Helm installs. Release container
+  # images are chDB-capable by default; pure binary archives keep chDB in a
+  # separate artifact to stay small. Use ClickHouse for shared team storage and
+  # SQLite only for tests, demos, and temporary runs. Do not use SQLite for
+  # long-running retained-history deployments.
+  driver: chdb
+  sqlite:
+    path: /data/kubeinsight.db
+    persistence:
+      enabled: true
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+      storageClassName: ""
+      annotations: {}
+  chdb:
+    path: /data/kubeinsight.chdb
+    database: kube_insight
+    persistence:
+      enabled: true
+      accessModes:
+        - ReadWriteOnce
+      size: 10Gi
+      storageClassName: ""
+      annotations: {}
+  clickhouse:
+    dsn: ""
+    existingSecret: ""
+    existingSecretKey: dsn
+    database: kube_insight
+    initOnStart: true
+    useJsonType: false
+    asyncInsert: true
+    batchSize: 1000
+    flushIntervalMillis: 1000
+  retention:
+    # chDB and ClickHouse compress retained evidence well enough for a long
+    # default window. Tune this down for small PVCs or strict data-retention
+    # policies.
+    enabled: true
+    # 15552000 seconds = 180 days, about 6 months.
+    maxAgeSeconds: 15552000
+    minVersionsPerObject: 1
+    # 15552000 seconds = 180 days, about 6 months.
+    filterDecisionMaxAgeSeconds: 15552000
+
+collection:
+  namespace: ""
+  concurrency: 4
+  allResources: true
+  include: []
+  exclude:
+    - events
+    - leases.coordination.k8s.io
+    - "*policyreports.wgpolicyk8s.io"
+    - "*ephemeralreports.reports.kyverno.io"
+  watch:
+    disableHttp2: false
+    maxConcurrentStreams: 64
+    minBackoffMillis: 500
+    maxBackoffMillis: 30000
+    streamStartStaggerMillis: 200
+    queuedRelistIntervalSeconds: 300
+    streamRotationSeconds: 900
+
+server:
+  listen: 0.0.0.0:8090
+  agentRetention:
+    enabled: true
+    intervalSeconds: 600
+    runOnStart: true
+  chat:
+    enabled: false
+    provider: openai-compatible
+    apiKeyEnv: OPENAI_API_KEY
+    baseUrlEnv: OPENAI_BASE_URL
+    model: gpt-5.2
+    maxIterations: 32
+    existingSecret: ""
+    apiKeySecretKey: apiKey
+    baseUrlSecretKey: baseUrl
+
+rbac:
+  create: true
+  clusterWide: true
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  rules:
+    - apiGroups: ["*"]
+      resources: ["*"]
+      verbs: ["get", "list", "watch"]
+
+config:
+  extraYaml: {}
+
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []
+
+kagent:
+  # Set true when kagent CRDs are installed. This creates kagent integration
+  # resources in kagent.namespace: prompt library ConfigMap and RemoteMCPServer.
+  enabled: false
+  namespace: kagent
+  promptLibrary:
+    create: true
+    name: kube-insight-prompts
+  remoteMCPServer:
+    create: true
+    name: kube-insight
+    description: kube-insight retained Kubernetes evidence MCP server
+    # Leave empty to use the in-cluster kube-insight Service URL.
+    url: ""
+    protocol: STREAMABLE_HTTP
+    timeout: 30s
+    sseReadTimeout: 5m0s
+    terminateOnClose: true
+  agent:
+    create: false
+    name: kube-insight-troubleshooter
+    description: Troubleshoot Kubernetes incidents with kube-insight retained evidence.
+    modelConfig: default-model-config
+    runtime: go
+    stream: true
+    builtinPromptLibraryName: kagent-builtin-prompts
+    toolNames:
+      - kube_insight_health
+      - kube_insight_schema
+      - kube_insight_sql
+      - kube_insight_js
+      - kube_insight_search
+      - kube_insight_history
+      - kube_insight_topology
+      - kube_insight_service_investigation

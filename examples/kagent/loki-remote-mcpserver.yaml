@@ -1,0 +1,16 @@
+# Optional: register a Loki MCP server with kagent after deploying one.
+#
+# The tested lightweight shape is grafana/loki-mcp, exposed through an in-cluster
+# Service at /sse. Adjust the Service DNS name to your Loki MCP deployment.
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: loki-mcp
+  namespace: kagent
+spec:
+  description: Loki logs MCP server for time-bounded Kubernetes log queries.
+  protocol: SSE
+  url: http://loki-mcp.kagent.svc.cluster.local:8080/sse
+  timeout: 30s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true

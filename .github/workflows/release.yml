@@ -10,7 +10,8 @@ permissions:
   packages: write
 
 env:
-  CHDB_VERSION: "3.7.2"
+  # chDB runtime assets come from chdb-core, which publishes libchdb tarballs.
+  CHDB_VERSION: "26.5.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -18,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -98,28 +99,12 @@ jobs:
             printf -- '- Default archives: Linux, macOS, and Windows amd64; Linux and macOS arm64.\n'
             printf -- '- chDB archives: Linux and macOS amd64/arm64, each bundled with the matching `libchdb.so` runtime.\n'
             printf -- '- Embedded Web UI: release binaries include the prebuilt React app; run `kube-insight serve --app` and open the app listener.\n'
-            printf -- '- Container images: `ghcr.io/%s:%s` and `ghcr.io/%s:%s-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}" "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
-            printf -- '- Convenience tags: `ghcr.io/%s:latest` and `ghcr.io/%s:latest-chdb`.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REPOSITORY}"
+            printf -- '- Container image: `ghcr.io/%s:%s`, bundled with the matching Linux `libchdb.so` runtime.\n' "${GITHUB_REPOSITORY}" "${GITHUB_REF_NAME}"
+            printf -- '- Convenience tag: `ghcr.io/%s:latest`.\n' "${GITHUB_REPOSITORY}"
           } >> RELEASE_NOTES.md
 
       - name: Prepare chDB runtime
-        run: |
-          download_chdb_runtime() {
-            asset="$1"
-            dest="$2"
-            tmp="/tmp/${asset}.tar.gz"
-            mkdir -p "${dest}"
-            curl -fsSL -o "${tmp}" "https://github.com/chdb-io/chdb/releases/download/v${CHDB_VERSION}/${asset}.tar.gz"
-            tar -xzf "${tmp}" -C "${dest}" libchdb.so
-            test -s "${dest}/libchdb.so"
-          }
-
-          download_chdb_runtime linux-x86_64-libchdb build/chdb-runtime/linux-amd64
-          download_chdb_runtime linux-aarch64-libchdb build/chdb-runtime/linux-arm64
-          download_chdb_runtime macos-x86_64-libchdb build/chdb-runtime/darwin-amd64
-          download_chdb_runtime macos-arm64-libchdb build/chdb-runtime/darwin-arm64
-          cp build/chdb-runtime/linux-amd64/libchdb.so build/chdb-runtime/libchdb-linux-amd64.so
-          cp build/chdb-runtime/linux-arm64/libchdb.so build/chdb-runtime/libchdb-linux-arm64.so
+        run: make prepare-chdb-runtime
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

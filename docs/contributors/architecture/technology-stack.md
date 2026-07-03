@@ -18,7 +18,7 @@ central service.
 | Collector and watcher | Go with `client-go` dynamic client | Best Kubernetes discovery, list/watch, resourceVersion, RESTMapper, and RBAC/SAR support. |
 | Core API | Go | Shares filters, extractors, storage adapters, and authorization logic with the collector. |
 | CLI | Go with Cobra | Single binary for local PoC, collection, ingestion, investigation, and benchmark commands. |
-| Local storage | SQLite | Simple local PoC, single-file archives, deterministic tests, and easy support bundle workflows. |
+| Local storage | SQLite | Simple local PoC, deterministic tests, short demos, temporary local evidence files, and support bundle workflows; not for long-running retained-history deployments. |
 | SQLite driver | `modernc.org/sqlite` | Pure Go driver keeps local PoC builds independent from CGO and system SQLite libraries. |
 | Logging | `charm.land/log/v2` behind `slog` | More readable terminal logs now, while preserving structured logging calls for future Bubble Tea agent UI integration. |
 | Compression and tiering | SQLite local storage plus ClickHouse columnar codecs/S3 tiering experiments | Keeps proof storage cheap while preserving portable version semantics. |
